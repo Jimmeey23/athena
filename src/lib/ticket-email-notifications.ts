@@ -1,10 +1,7 @@
 import { getEmployee, getEscalationTarget, isClosedTicket, Ticket } from '@/lib/ticketing-data';
 
 export type TicketEmailEventType =
-  | 'ticket_assigned'
-  | 'ticket_due_today'
-  | 'ticket_escalated'
-  | 'ticket_closed';
+  | 'ticket_assigned';
 
 const DEFAULT_TIME_ZONE = 'Asia/Kolkata';
 

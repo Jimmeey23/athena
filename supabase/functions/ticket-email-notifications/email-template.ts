@@ -1,8 +1,5 @@
 export type TicketEmailEventType =
-  | 'ticket_assigned'
-  | 'ticket_due_today'
-  | 'ticket_escalated'
-  | 'ticket_closed';
+  | 'ticket_assigned';
 
 export interface TicketEmailSummary {
   id: string;
@@ -48,24 +45,6 @@ const EVENT_COPY: Record<TicketEmailEventType, { label: string; headline: string
     headline: 'A new Athena ticket has been assigned',
     tone: '#0f766e',
     summary: 'Please review the ticket context and take ownership of the next action.',
-  },
-  ticket_due_today: {
-    label: 'Ticket due today',
-    headline: 'This ticket is due today',
-    tone: '#b45309',
-    summary: 'Please close the loop or update the ticket with the current resolution path before the SLA expires.',
-  },
-  ticket_escalated: {
-    label: 'Ticket escalated',
-    headline: 'This ticket has been escalated',
-    tone: '#be123c',
-    summary: 'The ticket has reached escalation criteria and needs priority attention from the assigned owner.',
-  },
-  ticket_closed: {
-    label: 'Ticket closed',
-    headline: 'This ticket has been closed',
-    tone: '#334155',
-    summary: 'The ticket is marked closed. Review the resolution history if any follow-up is needed.',
   },
 };
 

@@ -3,7 +3,10 @@ import { ASSOCIATES, getEmployee, getEscalationTarget, isTicketBreached, PRIORIT
 import { backendSupabase } from '@/lib/backend-supabase';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import { ResolvedAssignment, resolveConfiguredAssignment } from '@/lib/routing-settings';
-import { canUpdateTicketStatus as canUpdateTicketStatusForIdentity } from '@/lib/ticket-permissions';
+import {
+  canAccessTicket as canAccessTicketForIdentity,
+  canUpdateTicketStatus as canUpdateTicketStatusForIdentity,
+} from '@/lib/ticket-permissions';
 import {
   buildTicketResolutionDetail,
   mergeTicketResolutionMetadata,
@@ -18,7 +21,6 @@ import {
   saveDismissedNotificationIds,
 } from '@/lib/notification-dismissals';
 import {
-  isTicketDueToday,
   sendTicketLifecycleEmail,
   ticketEmailInFlightKey,
   TicketEmailEventType,
@@ -540,15 +542,11 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [profile?.email, profile?.full_name, user]);
 
   const canSeeTicket = useCallback((ticket: Ticket) => {
-    if (accessRole === 'admin') return true;
-    const candidates = [
-      ticket.createdBy,
-      ticket.assignedTo,
-      ticket.reportedBy,
-    ]
-      .filter(Boolean)
-      .map((value) => String(value).trim().toLowerCase());
-    return candidates.some((value) => visibleIdentityValues.has(value));
+    return canAccessTicketForIdentity({
+      accessRole,
+      identityValues: visibleIdentityValues,
+      ticket,
+    });
   }, [accessRole, visibleIdentityValues]);
 
   const ownsTicket = useCallback((ticket: Ticket) => {
@@ -840,23 +838,9 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           });
         }
 
-        const nextTicket: Ticket = { ...current, ...patch };
-        if (patch.status === 'Closed' && current.status !== 'Closed') {
-          void notifyTicketEmail('ticket_closed', nextTicket, actor);
-        }
-        if (
-          patch.assignedTo &&
-          patch.assignedTo !== current.assignedTo &&
-          (nextTicket.tags.includes('escalated') || nextTicket.tags.includes('sla-breached'))
-        ) {
-          void notifyTicketEmail('ticket_escalated', nextTicket, actor);
-        }
-        if (isTicketDueToday(nextTicket)) {
-          void notifyTicketEmail('ticket_due_today', nextTicket, actor);
-        }
       }
     },
-    [canUpdateTicketStatus, notifyTicketEmail, refresh, tickets, user]
+    [canUpdateTicketStatus, refresh, tickets, user]
   );
 
   const updateTicketStatus = useCallback(
@@ -941,7 +925,6 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setLiveTickets((prev) => dedupeAndSortTickets([ticket, ...prev]));
       setSelectedTicketState(ticket);
       await notifyTicketEmail('ticket_assigned', ticket, reporterName);
-      if (isTicketDueToday(ticket)) void notifyTicketEmail('ticket_due_today', ticket, reporterName);
       await refresh();
       return ticket;
     },
@@ -1114,18 +1097,11 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const ticket = normalizeCreatedTicket(created as DbTicketRow | Ticket);
       await notifyTicketEmail('ticket_assigned', ticket, signedInReporter);
-      if (isTicketDueToday(ticket)) void notifyTicketEmail('ticket_due_today', ticket, signedInReporter);
       await refresh();
       return ticket;
     },
     [notifyTicketEmail, refresh]
   );
-
-  useEffect(() => {
-    for (const ticket of tickets) {
-      if (isTicketDueToday(ticket)) void notifyTicketEmail('ticket_due_today', ticket, 'SLA Automation');
-    }
-  }, [notifyTicketEmail, tickets]);
 
   useEffect(() => {
     const breached = tickets.filter((ticket) => isTicketBreached(ticket));

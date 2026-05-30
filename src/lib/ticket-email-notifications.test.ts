@@ -31,7 +31,6 @@ describe('ticket email notifications', () => {
 
   it('builds stable in-flight keys per ticket lifecycle event', () => {
     expect(ticketEmailInFlightKey('ticket_assigned', baseTicket)).toBe('ticket_assigned:P57-ABC123');
-    expect(ticketEmailInFlightKey('ticket_closed', baseTicket)).toBe('ticket_closed:P57-ABC123');
   });
 
   it('builds recipient fallback hints from the local master employee directory', () => {

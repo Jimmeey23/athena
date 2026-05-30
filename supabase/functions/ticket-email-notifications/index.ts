@@ -55,9 +55,6 @@ type NotificationAuditRow = {
 
 const VALID_EVENTS = new Set<TicketEmailEventType>([
   'ticket_assigned',
-  'ticket_due_today',
-  'ticket_escalated',
-  'ticket_closed',
 ]);
 
 function json(body: unknown, status = 200) {
@@ -110,23 +107,8 @@ function routingMetadata(row: TicketRow): Record<string, unknown> {
   return routing && typeof routing === 'object' ? routing as Record<string, unknown> : {};
 }
 
-function zonedDateKey(value: string, timeZone = 'Asia/Kolkata'): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
-  return [part('year'), part('month'), part('day')].filter(Boolean).join('-');
-}
-
 function eventKey(eventType: TicketEmailEventType, row: TicketRow): string {
-  if (eventType === 'ticket_due_today') return `${eventType}:${row.id}:${zonedDateKey(row.sla_due_at)}`;
-  if (eventType === 'ticket_assigned') return `${eventType}:${row.id}:${row.assigned_to}:${row.created_at}`;
-  return `${eventType}:${row.id}:${row.assigned_to}:${row.status}:${row.updated_at || row.created_at}`;
+  return `${eventType}:${row.id}:${row.assigned_to}:${row.created_at}`;
 }
 
 function byName(employees: EmployeeRow[]): Map<string, EmployeeRow> {
@@ -255,9 +237,7 @@ Deno.serve(async (request) => {
 
     const employeeByName = byName((employees || []) as EmployeeRow[]);
     const ownerRecord = employeeByName.get(ticketRow.assigned_to.trim().toLowerCase());
-    const escalationName = body.eventType === 'ticket_escalated'
-      ? ownerRecord?.manager || configuredEscalation
-      : configuredEscalation || ownerRecord?.manager || '';
+    const escalationName = configuredEscalation || ownerRecord?.manager || '';
     const fallbackTo = optionalEnv('TICKET_EMAIL_FALLBACK_TO', 'MAILTRAP_FALLBACK_TO');
     const owner = person(ticketRow.assigned_to, employeeByName, emailHint(body.ownerEmail) || fallbackTo);
     const escalation = escalationName ? person(escalationName, employeeByName, emailHint(body.escalationEmail)) : null;

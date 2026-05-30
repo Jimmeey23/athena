@@ -40,6 +40,7 @@ import {
   type RoutingScopeSummary,
   type RoutingStateFilter,
 } from '@/lib/settings-routing-ops';
+import { canOpenAppTab, visibleAppTabValues } from '@/lib/app-access';
 
 const TicketDashboard = lazy(() =>
   import('./ticketing/TicketDashboard').then((module) => ({ default: module.TicketDashboard }))
@@ -58,7 +59,6 @@ const sideTabs = [
   { value: 'momence', label: 'Momence Ops', icon: Workflow },
   { value: 'settings', label: 'Settings', icon: Settings },
 ];
-const ADMIN_ONLY_TABS = new Set(['queue', 'notifications', 'tickets', 'reports', 'insights', 'momence', 'settings']);
 
 const AppLayout: React.FC = () => {
   return (
@@ -90,13 +90,15 @@ const SupportShell: React.FC = () => {
   ).trim();
 
   const visibleTabs = useMemo(
-    () => sideTabs.filter((tab) => accessRole === 'admin' || !ADMIN_ONLY_TABS.has(tab.value)),
+    () => {
+      const visibleValues = new Set<string>(visibleAppTabValues(accessRole));
+      return sideTabs.filter((tab) => visibleValues.has(tab.value));
+    },
     [accessRole]
   );
 
   useEffect(() => {
-    if (accessRole === 'admin') return;
-    if (ADMIN_ONLY_TABS.has(activeTab)) setActiveTab('chat');
+    if (!canOpenAppTab(accessRole, activeTab)) setActiveTab('chat');
   }, [accessRole, activeTab]);
 
   useEffect(() => {
@@ -116,7 +118,7 @@ const SupportShell: React.FC = () => {
   };
 
   const handleTabChange = (value: string) => {
-    if (accessRole !== 'admin' && ADMIN_ONLY_TABS.has(value)) {
+    if (!canOpenAppTab(accessRole, value)) {
       setActiveTab('chat');
       return;
     }
@@ -186,17 +188,17 @@ const SupportShell: React.FC = () => {
                 />
               </TabsContent>
               <TabsContent value="queue" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
-                <TriageQueuePanel />
+                {activeTab === 'queue' && <TriageQueuePanel />}
               </TabsContent>
               <TabsContent value="tickets" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
-                {(accessRole === 'admin' && (activeTab === 'tickets' || hasOpenedTickets)) && (
+                {(activeTab === 'tickets' || hasOpenedTickets) && (
                   <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading submitted tickets...</div>}>
                     <TicketDashboard />
                   </Suspense>
                 )}
               </TabsContent>
               <TabsContent value="notifications" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
-                {accessRole === 'admin' && <NotificationsPanel
+                {activeTab === 'notifications' && <NotificationsPanel
                   onOpen={(ticket) => {
                     setSelectedTicket(ticket);
                     setHasOpenedTickets(true);
@@ -204,14 +206,14 @@ const SupportShell: React.FC = () => {
                 />}
               </TabsContent>
               <TabsContent value="reports" className="reports-print-root m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
-                {accessRole === 'admin' && activeTab === 'reports' && (
+                {activeTab === 'reports' && (
                   <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading reports...</div>}>
                     <AiReportsPanel />
                   </Suspense>
                 )}
               </TabsContent>
               <TabsContent value="insights" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
-                {accessRole === 'admin' && <InsightsPanel />}
+                {activeTab === 'insights' && <InsightsPanel />}
               </TabsContent>
               <TabsContent value="momence" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
                 {accessRole === 'admin' && <MomenceOpsPanel />}
@@ -299,7 +301,7 @@ const SupportShell: React.FC = () => {
 
             <div className="fixed bottom-3 right-3 z-30 md:hidden">
               <TabsList className="h-11 rounded-2xl border border-slate-200 bg-white/92 p-1 shadow-[0_18px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl">
-                {sideTabs.slice(0, 5).map(({ value, label, icon: Icon }) => (
+                {visibleTabs.slice(0, 5).map(({ value, label, icon: Icon }) => (
                   <TabsTrigger key={value} value={value} aria-label={label} className="h-9 rounded-xl px-2.5 text-slate-500 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
                     <span className="relative">
                       <Icon className="h-4 w-4" />

@@ -1,6 +1,5 @@
 export type TicketEmailAutomationEventType =
-  | 'ticket_assigned'
-  | 'ticket_due_today';
+  | 'ticket_assigned';
 
 export type TicketEmailAutomationTicket = {
   id: string;
@@ -53,9 +52,7 @@ export function ticketEmailAutomationEventKey(
   ticket: TicketEmailAutomationTicket,
   timeZone = DEFAULT_TIME_ZONE,
 ): string {
-  if (eventType === 'ticket_due_today') {
-    return `${eventType}:${ticket.id}:${ticketEmailAutomationZonedDateKey(ticket.sla_due_at, timeZone)}`;
-  }
+  void timeZone;
   return `${eventType}:${ticket.id}:${ticket.assigned_to}:${ticket.created_at}`;
 }
 
@@ -94,16 +91,8 @@ export function buildTicketEmailAutomationJobs({
       });
     }
 
-    if (isTicketEmailAutomationDueToday(ticket, now, timeZone)) {
-      const dueTodayKey = ticketEmailAutomationEventKey('ticket_due_today', ticket, timeZone);
-      if (!existingEventKeys.has(dueTodayKey)) {
-        jobs.push({
-          eventType: 'ticket_due_today',
-          eventKey: dueTodayKey,
-          ticketId: ticket.id,
-        });
-      }
-    }
+    void now;
+    void timeZone;
   }
 
   return jobs;

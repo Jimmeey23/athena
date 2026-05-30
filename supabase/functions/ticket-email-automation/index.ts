@@ -70,29 +70,6 @@ function hoursAgoIso(hours: number, now = new Date()): string {
   return new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
 }
 
-function indiaBusinessDayUtcBounds(now = new Date()): { startIso: string; endIso: string } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: DEFAULT_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
-  const utcMidnight = Date.UTC(value('year'), value('month') - 1, value('day'));
-  const indiaOffsetMs = 5.5 * 60 * 60 * 1000;
-  const start = new Date(utcMidnight - indiaOffsetMs);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { startIso: start.toISOString(), endIso: end.toISOString() };
-}
-
-function uniqueTickets(...groups: TicketEmailAutomationTicket[][]): TicketEmailAutomationTicket[] {
-  const byId = new Map<string, TicketEmailAutomationTicket>();
-  for (const group of groups) {
-    for (const ticket of group) byId.set(ticket.id, ticket);
-  }
-  return Array.from(byId.values());
-}
-
 async function fetchExistingEventKeys(
   admin: ReturnType<typeof createClient>,
   jobs: TicketEmailAutomationJob[],
@@ -171,7 +148,6 @@ Deno.serve(async (request) => {
 
     const selectColumns = 'id,assigned_to,created_at,updated_at,sla_due_at,status';
     const openStatuses = ['Resolved', 'Closed'];
-    const dueTodayBounds = indiaBusinessDayUtcBounds(now);
     const { data: recentlyCreated, error: recentError } = await admin
       .from('tickets')
       .select(selectColumns)
@@ -181,20 +157,7 @@ Deno.serve(async (request) => {
       .limit(candidateLimit);
     if (recentError) throw recentError;
 
-    const { data: dueWindow, error: dueError } = await admin
-      .from('tickets')
-      .select(selectColumns)
-      .not('status', 'in', `(${openStatuses.map((status) => `"${status}"`).join(',')})`)
-      .gte('sla_due_at', dueTodayBounds.startIso)
-      .lt('sla_due_at', dueTodayBounds.endIso)
-      .order('sla_due_at', { ascending: true })
-      .limit(candidateLimit);
-    if (dueError) throw dueError;
-
-    const tickets = uniqueTickets(
-      (recentlyCreated || []) as TicketEmailAutomationTicket[],
-      (dueWindow || []) as TicketEmailAutomationTicket[],
-    );
+    const tickets = (recentlyCreated || []) as TicketEmailAutomationTicket[];
     const assignmentTicketIds = new Set(
       ((recentlyCreated || []) as TicketEmailAutomationTicket[]).map((ticket) => ticket.id),
     );
