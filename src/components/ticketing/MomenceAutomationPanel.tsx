@@ -5,25 +5,17 @@ import {
   assignMomenceTag,
   cancelMomenceBooking,
   checkInMomenceBooking,
-  getMomenceMember,
-  getMomenceMemberBookings,
-  getMomenceMemberMemberships,
-  getMomenceMemberNotes,
-  getMomenceSession,
-  getMomenceSessionBookings,
-  listMomenceTags,
-  MomenceMemberBooking,
-  MomenceMemberDetail,
-  MomenceMemberNote,
+  freezeMomenceMembership,
+  loadMomenceTicketContext,
   MomenceMemberOption,
-  MomenceMembership,
-  MomenceSessionBooking,
-  MomenceSessionDetail,
   MomenceSessionOption,
-  MomenceTag,
+  MomenceTicketContext,
+  removeScheduledMomenceMembershipUnfreeze,
   removeMomenceBookingCheckIn,
+  scheduleMomenceMembershipUnfreeze,
   searchMomenceMembers,
   searchMomenceSessions,
+  unfreezeMomenceMembership,
   unassignMomenceTag,
 } from '@/lib/momence-api';
 import { Ticket } from '@/lib/ticketing-data';
@@ -33,27 +25,25 @@ interface Props {
   ticket: Ticket;
 }
 
-interface MomenceState {
-  member?: MomenceMemberDetail;
-  memberships: MomenceMembership[];
-  memberBookings: MomenceMemberBooking[];
-  notes: MomenceMemberNote[];
-  session?: MomenceSessionDetail;
-  sessionBookings: MomenceSessionBooking[];
-  tags: MomenceTag[];
-}
-
-const emptyState: MomenceState = {
+const emptyState: MomenceTicketContext = {
   memberships: [],
   memberBookings: [],
   notes: [],
   sessionBookings: [],
   tags: [],
+  summary: {
+    membershipOverview: { activeCount: 0, frozenCount: 0, memberships: [] },
+    bookingOverview: {
+      totalLoaded: 0,
+      checkedInCount: 0,
+      cancelledCount: 0,
+      recentBookings: [],
+    },
+    noteOverview: { count: 0 },
+    availableTagCount: 0,
+    ticketContextLines: [],
+  },
 };
-
-function fullName(value?: { firstName?: string; lastName?: string }) {
-  return [value?.firstName, value?.lastName].filter(Boolean).join(' ') || 'Unknown';
-}
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not set';
@@ -62,8 +52,10 @@ function formatDate(value?: string | null) {
   return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function stripHtml(value?: string) {
-  return (value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+function toApiDateTime(value: string): string | null {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }
 
 async function confirmed(message: string, action: () => Promise<unknown>) {
@@ -79,8 +71,11 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
   const [sessionOptions, setSessionOptions] = useState<MomenceSessionOption[]>([]);
   const [selectedMember, setSelectedMember] = useState<MomenceMemberOption | null>(null);
   const [selectedSession, setSelectedSession] = useState<MomenceSessionOption | null>(null);
-  const [data, setData] = useState<MomenceState>(emptyState);
+  const [data, setData] = useState<MomenceTicketContext>(emptyState);
   const [selectedTagId, setSelectedTagId] = useState('');
+  const [freezeAt, setFreezeAt] = useState('');
+  const [unfreezeAt, setUnfreezeAt] = useState('');
+  const [freezeReason, setFreezeReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +87,9 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
     setSelectedMember(null);
     setSelectedSession(null);
     setData(emptyState);
+    setFreezeAt('');
+    setUnfreezeAt('');
+    setFreezeReason('');
     setError(null);
     setNotice(null);
   }, [ticket.id, ticket.memberName, ticket.classType]);
@@ -127,16 +125,11 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
     setError(null);
     setNotice(null);
     try {
-      const [member, memberships, memberBookings, notes, session, sessionBookings, tags] = await Promise.all([
-        selectedMember ? getMomenceMember(selectedMember.id) : Promise.resolve(undefined),
-        selectedMember ? getMomenceMemberMemberships(selectedMember.id) : Promise.resolve([]),
-        selectedMember ? getMomenceMemberBookings(selectedMember.id) : Promise.resolve([]),
-        selectedMember ? getMomenceMemberNotes(selectedMember.id) : Promise.resolve([]),
-        selectedSession ? getMomenceSession(selectedSession.id) : Promise.resolve(undefined),
-        selectedSession ? getMomenceSessionBookings(selectedSession.id) : Promise.resolve([]),
-        listMomenceTags(),
-      ]);
-      setData({ member, memberships, memberBookings, notes, session, sessionBookings, tags });
+      setData(await loadMomenceTicketContext({
+        memberId: selectedMember?.id,
+        sessionId: selectedSession?.id,
+        includeTags: true,
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load Momence context');
     } finally {
@@ -256,57 +249,194 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
 
       <div className="grid grid-cols-1 gap-3">
         <InfoBlock title="Member Context" icon={<User className="w-3.5 h-3.5" />}>
-          {loading ? <LoadingLine /> : data.member ? (
+          {loading ? <LoadingLine /> : data.summary.member ? (
             <div className="space-y-2">
-              <Metric label="Name" value={fullName(data.member)} />
-              <Metric label="Contact" value={[data.member.email, data.member.phoneNumber].filter(Boolean).join(' · ') || 'Not returned'} />
-              <Metric label="Last Seen" value={formatDate(data.member.lastSeen)} />
+              <Metric label="Name" value={data.summary.member.name} />
+              <Metric label="Contact" value={[data.summary.member.email, data.summary.member.phoneNumber].filter(Boolean).join(' · ') || 'Not returned'} />
+              <Metric label="First Seen" value={formatDate(data.summary.member.firstSeen)} />
+              <Metric label="Last Seen" value={formatDate(data.summary.member.lastSeen)} />
               <div className="flex flex-wrap gap-1">
-                {(data.member.customerTags || []).map((tag) => (
-                  <span key={tag.id} className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">{tag.name}</span>
+                {data.summary.member.tags.map((tag) => (
+                  <span key={tag} className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">{tag}</span>
                 ))}
+                {data.summary.member.tags.length === 0 && <span className="text-[11px] text-slate-400">No tags returned</span>}
               </div>
             </div>
           ) : <EmptyLine text="No Momence member selected." />}
         </InfoBlock>
 
         <InfoBlock title="Active Memberships" icon={<BadgeCheck className="w-3.5 h-3.5" />}>
-          {data.memberships.length ? data.memberships.slice(0, 3).map((membership) => (
-            <div key={membership.id} className="border-b border-slate-200 pb-1 last:border-0">
+          {data.summary.membershipOverview.memberships.length ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-white/70 p-2 dark:border-slate-800 dark:bg-slate-950/40 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-1 block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Freeze at</span>
+                  <input
+                    type="datetime-local"
+                    value={freezeAt}
+                    onChange={(event) => setFreezeAt(event.target.value)}
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Unfreeze at</span>
+                  <input
+                    type="datetime-local"
+                    value={unfreezeAt}
+                    onChange={(event) => setUnfreezeAt(event.target.value)}
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Reason</span>
+                  <input
+                    value={freezeReason}
+                    onChange={(event) => setFreezeReason(event.target.value)}
+                    placeholder="Medical, travel, billing exception..."
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+              </div>
+              {data.summary.membershipOverview.memberships.slice(0, 5).map((membership) => (
+            <div key={membership.id} className="rounded-md border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900">
               <div className="text-xs font-medium text-slate-800 dark:text-slate-100">
-                {membership.membership?.name || membership.type || `Membership #${membership.id}`}
+                {membership.name}
               </div>
               <div className="text-[11px] text-slate-500">
-                Ends {formatDate(membership.endDate)} · {membership.isFrozen ? 'Frozen' : 'Active'}
+                {membership.status} · {membership.type || 'membership'} · Ends {formatDate(membership.validUntil)}
               </div>
+              <div className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                {membership.creditsLabel && <div>{membership.creditsLabel}</div>}
+                {membership.moneyCreditsLabel && <div>{membership.moneyCreditsLabel}</div>}
+                {membership.usageLabel && <div>{membership.usageLabel}</div>}
+                {membership.usagePeriodLabel && <div>{membership.usagePeriodLabel}</div>}
+                {membership.freezeLabel && <div>{membership.freezeLabel}</div>}
+                {membership.scheduledUnfreezeAt && <div>Scheduled unfreeze {formatDate(membership.scheduledUnfreezeAt)}</div>}
+                {membership.declinedRenewalLabel && <div className="text-red-600">{membership.declinedRenewalLabel}</div>}
+              </div>
+              {selectedMember && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <ActionButton loading={actionLoading === `freeze-now-${membership.id}`} onClick={() => {
+                    runAction(
+                      `freeze-now-${membership.id}`,
+                      `Freeze ${membership.name} now in Momence${unfreezeAt ? ` and schedule unfreeze for ${unfreezeAt}` : ''}?`,
+                      () => freezeMomenceMembership(selectedMember.id, membership.id, {
+                        unfreezeAt: toApiDateTime(unfreezeAt),
+                        reason: freezeReason,
+                      })
+                    );
+                  }}>
+                    Freeze Now
+                  </ActionButton>
+                  <ActionButton disabled={!freezeAt} loading={actionLoading === `schedule-freeze-${membership.id}`} onClick={() => {
+                    runAction(
+                      `schedule-freeze-${membership.id}`,
+                      `Schedule freeze for ${membership.name} at ${freezeAt}?`,
+                      () => freezeMomenceMembership(selectedMember.id, membership.id, {
+                        freezeAt: toApiDateTime(freezeAt),
+                        unfreezeAt: toApiDateTime(unfreezeAt),
+                        reason: freezeReason,
+                      })
+                    );
+                  }}>
+                    Schedule Freeze
+                  </ActionButton>
+                  <ActionButton loading={actionLoading === `unfreeze-${membership.id}`} onClick={() => {
+                    runAction(
+                      `unfreeze-${membership.id}`,
+                      `Unfreeze or remove scheduled freeze for ${membership.name}?`,
+                      () => unfreezeMomenceMembership(selectedMember.id, membership.id)
+                    );
+                  }}>
+                    Unfreeze
+                  </ActionButton>
+                  <ActionButton disabled={!unfreezeAt} loading={actionLoading === `schedule-unfreeze-${membership.id}`} onClick={() => {
+                    runAction(
+                      `schedule-unfreeze-${membership.id}`,
+                      `Schedule unfreeze for ${membership.name} at ${unfreezeAt}?`,
+                      () => scheduleMomenceMembershipUnfreeze(selectedMember.id, membership.id, toApiDateTime(unfreezeAt) || unfreezeAt)
+                    );
+                  }}>
+                    Schedule Unfreeze
+                  </ActionButton>
+                  {membership.scheduledUnfreezeAt && (
+                    <ActionButton tone="danger" loading={actionLoading === `remove-unfreeze-${membership.id}`} onClick={() => {
+                      runAction(
+                        `remove-unfreeze-${membership.id}`,
+                        `Remove scheduled unfreeze for ${membership.name}?`,
+                        () => removeScheduledMomenceMembershipUnfreeze(selectedMember.id, membership.id)
+                      );
+                    }}>
+                      Remove Scheduled Unfreeze
+                    </ActionButton>
+                  )}
+                </div>
+              )}
             </div>
-          )) : <EmptyLine text="No active memberships loaded." />}
+              ))}
+            </div>
+          ) : <EmptyLine text="No active memberships loaded." />}
         </InfoBlock>
 
         <InfoBlock title="Session Context" icon={<Calendar className="w-3.5 h-3.5" />}>
-          {data.session ? (
+          {data.summary.session ? (
             <div className="space-y-1">
-              <Metric label="Session" value={data.session.name || `Session #${data.session.id}`} />
-              <Metric label="Starts" value={formatDate(data.session.startsAt)} />
-              <Metric label="Booked" value={`${data.session.bookingCount ?? 0}/${data.session.capacity ?? 'unlimited'}`} />
-              <Metric label="Waitlist" value={`${data.session.waitlistBookingCount ?? 0}/${data.session.waitlistCapacity ?? 'n/a'}`} />
+              <Metric label="Session" value={data.summary.session.classType} />
+              <Metric label="Starts" value={formatDate(data.summary.session.startsAt)} />
+              <Metric label="Instructor" value={data.summary.session.trainer || 'Not returned'} />
+              <Metric label="Studio" value={data.summary.session.studio || 'Not returned'} />
+              <Metric label="Booked" value={data.summary.session.fillRateLabel || 'Not returned'} />
+              <Metric label="Waitlist" value={data.summary.session.waitlistLabel || 'Not returned'} />
+              <Metric
+                label="Selected member"
+                value={data.summary.session.matchingMemberBookingId
+                  ? `Booked${data.summary.session.matchingMemberCheckedIn ? ' · checked in' : ''}`
+                  : 'No active booking match'}
+              />
             </div>
           ) : <EmptyLine text="No Momence session selected." />}
         </InfoBlock>
 
         <InfoBlock title="Member Sessions & Notes" icon={<CheckCircle2 className="w-3.5 h-3.5" />}>
-          {data.memberBookings.slice(0, 3).map((booking) => (
+          <div className="mb-2 grid grid-cols-3 gap-1 text-center">
+            <TinyStat label="Loaded" value={String(data.summary.bookingOverview.totalLoaded)} />
+            <TinyStat label="Checked in" value={String(data.summary.bookingOverview.checkedInCount)} />
+            <TinyStat label="Cancelled" value={String(data.summary.bookingOverview.cancelledCount)} />
+          </div>
+          {data.summary.bookingOverview.lastVisit && (
+            <div className="mb-1 rounded bg-slate-50 p-1.5 text-[11px] text-slate-600 dark:bg-slate-950 dark:text-slate-300">
+              Last visit: {data.summary.bookingOverview.lastVisit.classType} · {formatDate(data.summary.bookingOverview.lastVisit.startsAt)}
+            </div>
+          )}
+          {data.summary.bookingOverview.nextBooking && (
+            <div className="mb-1 rounded bg-emerald-50 p-1.5 text-[11px] text-emerald-700">
+              Next booking: {data.summary.bookingOverview.nextBooking.classType} · {formatDate(data.summary.bookingOverview.nextBooking.startsAt)}
+            </div>
+          )}
+          {data.summary.bookingOverview.recentBookings.slice(0, 3).map((booking) => (
             <div key={booking.id} className="text-[11px] text-slate-600 dark:text-slate-300">
-              {booking.session?.name || `Booking #${booking.id}`} · {formatDate(booking.session?.startsAt)}
+              {booking.classType} · {formatDate(booking.startsAt)}{booking.checkedIn ? ' · checked in' : ''}
             </div>
           ))}
-          {data.notes.slice(0, 2).map((note) => (
-            <div key={note.id} className="mt-1 rounded bg-white p-1.5 text-[11px] text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-              {stripHtml(note.note).slice(0, 160)}
+          {data.summary.noteOverview.latestNote && (
+            <div className="mt-1 rounded bg-white p-1.5 text-[11px] text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+              Latest note: {data.summary.noteOverview.latestNote}
             </div>
-          ))}
+          )}
           {!data.memberBookings.length && !data.notes.length && <EmptyLine text="No bookings or notes loaded." />}
         </InfoBlock>
+
+        {data.summary.ticketContextLines.length > 0 && (
+          <InfoBlock title="Athena Context Lines" icon={<CheckCircle2 className="w-3.5 h-3.5" />}>
+            <div className="space-y-1">
+              {data.summary.ticketContextLines.slice(0, 6).map((line) => (
+                <div key={line} className="rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:bg-slate-950 dark:text-slate-300">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </InfoBlock>
+        )}
       </div>
 
       {selectedMember && data.tags.length > 0 && (
@@ -400,6 +530,13 @@ const Metric: React.FC<{ label: string; value: string }> = ({ label, value }) =>
   <div className="flex justify-between gap-2 text-[11px]">
     <span className="text-slate-500">{label}</span>
     <span className="text-right font-medium text-slate-800 dark:text-slate-100">{value}</span>
+  </div>
+);
+
+const TinyStat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="rounded bg-slate-50 px-1.5 py-1 dark:bg-slate-950">
+    <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">{value}</div>
+    <div className="text-[9px] uppercase tracking-wider text-slate-400">{label}</div>
   </div>
 );
 

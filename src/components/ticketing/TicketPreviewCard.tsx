@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { CATEGORIES, PRIORITY_SLA, STUDIOS, Ticket } from '@/lib/ticketing-data';
-import { Sparkles, Check, Pencil, MapPin, User, Calendar, Tag, Clock, ShieldCheck } from 'lucide-react';
+import { Sparkles, Check, Pencil, MapPin, User, Calendar, Tag, Clock, ShieldCheck, AlertTriangle, Brain, Route, Layers3, Loader2 } from 'lucide-react';
 import { SlaCountdown } from './SlaCountdown';
+import { TicketReviewInsights } from '@/lib/ticket-review';
 
 interface DraftTicket {
   title: string;
@@ -33,11 +34,15 @@ interface Props {
   ticketId?: string;
   confirmedTicket?: Pick<Ticket, 'slaDueAt' | 'status'>;
   publishing?: boolean;
+  reviewInsights?: TicketReviewInsights;
+  momenceLoading?: boolean;
+  momenceError?: string | null;
 }
 
-export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing = false }) => {
+export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing = false, reviewInsights, momenceLoading = false, momenceError }) => {
   const priorityMeta = PRIORITY_SLA[draft.priority];
   const slaHours = PRIORITY_SLA[draft.priority]?.hours ?? PRIORITY_SLA.Medium.hours;
+  const tags = Array.isArray(draft.tags) ? draft.tags : [];
   const [editing, setEditing] = useState(false);
   const [editedDraft, setEditedDraft] = useState<DraftTicket>(draft);
 
@@ -152,14 +157,18 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
         <Row icon={<Clock className="h-3 w-3" />} label="SLA target" value={`${slaHours} hour${slaHours === 1 ? '' : 's'} from publish`} />
       </div>
 
-      {draft.tags.length > 0 && (
+      {tags.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1">
-          {draft.tags.map((t) => (
+          {tags.map((t) => (
             <span key={t} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">
               #{t}
             </span>
           ))}
         </div>
+      )}
+
+      {!confirmed && reviewInsights && !editing && (
+        <TicketReviewPanel insights={reviewInsights} momenceLoading={momenceLoading} momenceError={momenceError} />
       )}
 
       {confirmed ? (
@@ -289,6 +298,115 @@ const Row: React.FC<{ icon: React.ReactNode; label: string; value: string }> = (
     </div>
   </div>
 );
+
+const TicketReviewPanel: React.FC<{
+  insights: TicketReviewInsights;
+  momenceLoading: boolean;
+  momenceError?: string | null;
+}> = ({ insights, momenceLoading, momenceError }) => (
+  <div className="mb-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+    {insights.duplicateWarning && (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <div className="mb-1 flex items-center gap-2 font-semibold">
+          <AlertTriangle className="h-4 w-4" />
+          Possible duplicate: {insights.duplicateWarning.ticketId}
+        </div>
+        <div className="leading-relaxed">
+          {insights.duplicateWarning.title} · {insights.duplicateWarning.status}
+        </div>
+      </div>
+    )}
+
+    <div className="grid gap-2 sm:grid-cols-5">
+      {insights.confidence.map((item) => (
+        <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{item.label}</span>
+            <span className={`font-mono text-[11px] font-bold ${confidenceTone(item.score)}`}>{item.score}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-full rounded-full ${confidenceBar(item.score)}`} style={{ width: `${item.score}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="grid gap-2 lg:grid-cols-2">
+      <ReviewBlock icon={<Route className="h-3.5 w-3.5" />} title="Why Athena routed this">
+        {insights.routingRationale.map((line) => (
+          <div key={line} className="rounded-lg bg-white px-2 py-1.5 text-[11px] leading-relaxed text-slate-600">
+            {line}
+          </div>
+        ))}
+      </ReviewBlock>
+      <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title="Momence context">
+        {momenceLoading && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 text-[11px] font-medium text-slate-500">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading live Momence context...
+          </div>
+        )}
+        {momenceError && (
+          <div className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+            {momenceError}
+          </div>
+        )}
+        {insights.momenceChips.length ? (
+          <div className="flex flex-wrap gap-1">
+            {insights.momenceChips.map((chip) => (
+              <span key={chip} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                {chip}
+              </span>
+            ))}
+          </div>
+        ) : !momenceLoading && (
+          <div className="rounded-lg bg-white px-2 py-1.5 text-[11px] text-slate-500">
+            No live Momence member/session context selected yet.
+          </div>
+        )}
+      </ReviewBlock>
+    </div>
+
+    <ReviewBlock icon={<Layers3 className="h-3.5 w-3.5" />} title="Review before publish">
+      <div className="grid gap-2 md:grid-cols-2">
+        {insights.sections.map((section) => (
+          <div key={section.title} className="rounded-xl border border-slate-200 bg-white p-2">
+            <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</div>
+            <div className="space-y-1">
+              {section.items.slice(0, 4).map((item) => (
+                <div key={item} className="truncate text-[11px] text-slate-700" title={item}>{item}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ReviewBlock>
+  </div>
+);
+
+const ReviewBlock: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
+  <div className="rounded-xl border border-slate-200 bg-white/70 p-2">
+    <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+      {icon}
+      {title}
+    </div>
+    <div className="space-y-1.5">{children}</div>
+  </div>
+);
+
+function confidenceTone(score: number): string {
+  if (score >= 85) return 'text-emerald-700';
+  if (score >= 65) return 'text-blue-700';
+  if (score >= 45) return 'text-amber-700';
+  return 'text-red-700';
+}
+
+function confidenceBar(score: number): string {
+  if (score >= 85) return 'bg-emerald-500';
+  if (score >= 65) return 'bg-blue-500';
+  if (score >= 45) return 'bg-amber-500';
+  return 'bg-red-500';
+}
 
 const EditInput: React.FC<{ label: string; value: string; type?: string; onChange: (value: string) => void }> = ({ label, value, type = 'text', onChange }) => (
   <label className="block rounded-xl border border-slate-200 bg-white p-2">

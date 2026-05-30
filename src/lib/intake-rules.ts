@@ -245,7 +245,7 @@ export function isMissingIntakeValue(value: unknown): boolean {
 // Physical/facility issues that require detailed operational context before the description
 // is considered complete. Short initial reports for these are captured as preliminary only.
 const HVAC_TEXT_PATTERN = /\b(?:ac|hvac)\b|air\s?con|air conditioning|not cooling|not heating|no airflow/i;
-const PHYSICAL_ISSUE_TEXT_PATTERN = /repair|maintenance|broken|not working|not closing|not opening|stopped working|won't close|won't open|not cooling|not heating|too hot|too cold|very hot|very cold|temperature|malfunction|faulty|damaged|leak|leaking|plumbing|drain|clog|flush|sewage|socket|electrical|bulb|fused|flickering|machine|washing|dryer|pump|pest|mold|damp|\bdoor\b|\block\b|\bhandle\b|hinge|ceiling|crack|odour|odor|smell|stench|ventilation|locker|shower|washroom|toilet|steam|\bac\b|hvac|air\s?con|app crash|login issue|website down/i;
+const PHYSICAL_ISSUE_TEXT_PATTERN = /repair|maintenance|broken|not working|not closing|not opening|stopped working|won't close|won't open|not cooling|not heating|too hot|too cold|very hot|very cold|temperature|malfunction|faulty|damaged|come off|came off|loose|leak|leaking|plumbing|drain|clog|flush|sewage|socket|electrical|bulb|fused|flickering|machine|washing|dryer|pump|pest|mold|damp|\bdoor\b|\block\b|\bhandle\b|hinge|ceiling|wall|skirting|baseboard|trim|panel|crack|odour|odor|smell|stench|ventilation|locker|shower|washroom|toilet|steam|\bac\b|hvac|air\s?con|app crash|login issue|website down/i;
 
 function buildIssueText(context: IntakeContext, extraText = ''): string {
   return [
@@ -368,7 +368,7 @@ export function inferIntakeContextFromText(text: string, context: IntakeContext 
       inferred.category = 'Safety and Security';
       inferred.subCategory = /theft|stolen|missing cash|cash envelope/.test(lower) ? 'Theft Prevention Measures' : /harass|conflict/.test(lower) ? 'Harassment Reports' : 'Personal Safety Concerns';
     } else if (
-      /repair|maintenance|broken|not working|not closing|not opening|stopped working|isn't working|isnt working|won't close|won't open|malfunction|faulty|damaged|damage|crack|cracked|leak|leaking|overflow|plumbing|drain|clog|clogged|flush|sewage|socket|electrical|wiring|bulb|fused|flickering|lights not|light not|machine|washing machine|dryer|washing|pump|generator|pest|pest control|mold|mould|damp|seepage|\bdoor\b|\block\b|latch|handle|hinge/.test(lower) ||
+      /repair|maintenance|broken|not working|not closing|not opening|stopped working|isn't working|isnt working|won't close|won't open|malfunction|faulty|damaged|damage|come off|came off|loose|crack|cracked|leak|leaking|overflow|plumbing|drain|clog|clogged|flush|sewage|socket|electrical|wiring|bulb|fused|flickering|lights not|light not|machine|washing machine|dryer|washing|pump|generator|pest|pest control|mold|mould|damp|seepage|wall|skirting|baseboard|trim|panel|\bdoor\b|\block\b|latch|handle|hinge/.test(lower) ||
       HVAC_TEXT_PATTERN.test(lower)
     ) {
       inferred.category = 'Repair and Maintenance';

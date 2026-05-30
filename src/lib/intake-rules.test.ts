@@ -306,6 +306,24 @@ describe('intake publishability rules', () => {
     expect(getIntakeFieldDefinitions(context).map((field) => field.id)).toContain('machineSymptom');
   });
 
+  it('classifies loose office skirting as maintenance without digital fields', () => {
+    const text = 'the office walla skirting has come off at Kwality';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      reportedBy: 'ops@physique57india.com',
+    };
+
+    expect(context).toMatchObject({
+      intakeRoute: 'Internal Reporting',
+      category: 'Repair and Maintenance',
+      subCategory: 'General Maintenance Delays',
+      studio: 'Kwality House, Kemps Corner',
+    });
+    expect(getMissingIntakeFields(context)).not.toContain('appIssueSurface');
+    expect(getMissingIntakeFields(context)).not.toContain('appErrorObserved');
+  });
+
   it('asks door lock operational questions and infers Kwality without entity fields', () => {
     const text = 'door lock not closing at Kwality';
     const context: IntakeContext = {

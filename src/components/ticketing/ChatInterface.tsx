@@ -9,6 +9,8 @@ import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import { RoutingSettings, defaultRoutingSettings, loadRoutingSettings } from '@/lib/routing-settings';
 import {
   getMomenceMemberMemberships,
+  loadMomenceTicketContext,
+  MomenceInsightSummary,
   MomenceMemberOption,
   MomenceMembership,
   MomenceSessionOption,
@@ -26,7 +28,12 @@ import {
   IntakeContext,
 } from '@/lib/intake-rules';
 import { buildMasterDataLocationNames } from '@/lib/intake-master-data';
-import { shouldHoldDraftForMoreInfo } from '@/lib/intake-response-state';
+import {
+  shouldAcceptAiDetailForm,
+  shouldAcceptInferredSubCategory,
+  shouldHoldDraftForMoreInfo,
+  shouldReplaceInferredCategory,
+} from '@/lib/intake-response-state';
 import {
   ASSOCIATES,
   CATEGORIES,
@@ -47,6 +54,7 @@ import {
 } from '@/lib/ticketing-data';
 import { findExistingSubmittedTicket } from '@/lib/ticket-duplicate-matching';
 import { invokeTicketingFunction } from '@/lib/ticketing-functions';
+import { buildTicketReviewInsights } from '@/lib/ticket-review';
 import { SlaCountdown } from './SlaCountdown';
 
 interface SuggestedChip {
@@ -581,8 +589,12 @@ function mergeInferredContext(ctx: DetailContext, inferred: Partial<DetailContex
       continue;
     }
     if (key === 'category' && next.category !== value) {
+      if (!shouldReplaceInferredCategory(next.category, value)) continue;
       next.category = value;
       next.subCategory = undefined;
+      continue;
+    }
+    if (key === 'subCategory' && !shouldAcceptInferredSubCategory(next.category, value, CATEGORIES[next.category || ''])) {
       continue;
     }
     next[key] = value;
@@ -1240,12 +1252,17 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const incompleteDraftForm = pruneDetailForm(detailFormForIncompleteDraft(data?.ticket, responseContext), responseContext);
       const localMissingForm = pruneDetailForm(detailFormForContext(responseContext), responseContext);
       const deterministicForm = incompleteDraftForm || localMissingForm;
-      const normalizedForm = pruneDetailForm(
-        filterAiDetailForm(normalizeDetailForm(data?.detailForm), responseContext, requiredFieldSet),
-        responseContext
-      );
+      const acceptsAiDetailForm = shouldAcceptAiDetailForm({
+        remainingMissingFieldCount: remainingMissingFields.length,
+      });
+      const normalizedForm = acceptsAiDetailForm
+        ? pruneDetailForm(
+            filterAiDetailForm(normalizeDetailForm(data?.detailForm), responseContext, requiredFieldSet),
+            responseContext
+          )
+        : null;
       const detailForm = mergeDetailForms(deterministicForm, normalizedForm);
-      const parsedQuestionForm = !detailForm && !data?.ticket
+      const parsedQuestionForm = acceptsAiDetailForm && !detailForm && !data?.ticket
         ? pruneDetailForm(
             filterAiDetailForm(detailFormFromQuestionText(data?.reply || '', responseContext), responseContext, requiredFieldSet),
             responseContext
@@ -1564,6 +1581,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
               key={m.id}
               message={m}
               index={index}
+              tickets={tickets}
               onChipClick={handleChipClick}
               onConfirm={publishDraft}
               onEdit={refineDraft}
@@ -1697,6 +1715,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 const MessageBubble: React.FC<{
   message: Message;
   index: number;
+  tickets: Ticket[];
   onChipClick: (chip: SuggestedChip) => void;
   onConfirm: (messageId: string, draft: DraftTicket) => void;
   onEdit: (draft: DraftTicket) => void;
@@ -1705,7 +1724,7 @@ const MessageBubble: React.FC<{
   onDetailFormSubmit: (values: Record<string, string>, form?: DetailForm) => void;
   publishing: boolean;
   context: DetailContext;
-}> = ({ message, index, onChipClick, onConfirm, onEdit, onDiscard, onSaveEdit, onDetailFormSubmit, publishing, context }) => {
+}> = ({ message, index, tickets, onChipClick, onConfirm, onEdit, onDiscard, onSaveEdit, onDetailFormSubmit, publishing, context }) => {
   const isUser = message.role === 'user';
   const userTone = USER_TONES[index % USER_TONES.length];
   const visibleChips = (message.suggestedChips || []).filter((chip) => !context[chip.field]);
@@ -1829,8 +1848,10 @@ const MessageBubble: React.FC<{
 
       {message.ticket && (
         <div className="mt-2 w-full">
-          <TicketPreviewCard
+          <DraftTicketReviewPreview
             draft={mergeDraftWithContext(message.ticket, context)}
+            context={context}
+            tickets={tickets}
             onConfirm={() => onConfirm(message.id, mergeDraftWithContext(message.ticket as DraftTicket, context))}
             onEdit={() => onEdit(mergeDraftWithContext(message.ticket as DraftTicket, context))}
             onDiscard={() => onDiscard(message.id)}
@@ -1846,6 +1867,90 @@ const MessageBubble: React.FC<{
         <PublishedTicketSummary ticketId={message.ticketId} ticket={message.publishedTicket} />
       )}
     </div>
+  );
+};
+
+function firstContextValue(value?: string | null): string | undefined {
+  return value
+    ?.split('|')
+    .map((item) => item.trim())
+    .find(Boolean);
+}
+
+const DraftTicketReviewPreview: React.FC<{
+  draft: DraftTicket;
+  context: DetailContext;
+  tickets: Ticket[];
+  onConfirm: () => void;
+  onEdit: () => void;
+  onDiscard: () => void;
+  onSaveEdit: (draft: DraftTicket) => void;
+  confirmed?: boolean;
+  ticketId?: string;
+  confirmedTicket?: Ticket;
+  publishing?: boolean;
+}> = ({ draft, context, tickets, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing }) => {
+  const [momenceSummary, setMomenceSummary] = useState<MomenceInsightSummary | undefined>();
+  const [momenceLoading, setMomenceLoading] = useState(false);
+  const [momenceError, setMomenceError] = useState<string | null>(null);
+  const memberId = firstContextValue(context.memberId);
+  const sessionId = firstContextValue(context.sessionId);
+
+  useEffect(() => {
+    if (!memberId && !sessionId) {
+      setMomenceSummary(undefined);
+      setMomenceError(null);
+      setMomenceLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMomenceLoading(true);
+    setMomenceError(null);
+    loadMomenceTicketContext({ memberId, sessionId })
+      .then((momenceContext) => {
+        if (!cancelled) setMomenceSummary(momenceContext.summary);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMomenceSummary(undefined);
+          setMomenceError(error instanceof Error ? error.message : 'Momence context unavailable');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMomenceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [memberId, sessionId]);
+
+  const reviewContext = useMemo(() => contextFromDraft(draft, context), [context, draft]);
+  const duplicateTicket = useMemo(
+    () => findExistingSubmittedTicket(`${draft.title}\n${draft.description}`, reviewContext, tickets),
+    [draft.description, draft.title, reviewContext, tickets]
+  );
+  const reviewInsights = useMemo(
+    () => buildTicketReviewInsights({ draft, context: reviewContext, momenceSummary, duplicateTicket }),
+    [draft, duplicateTicket, momenceSummary, reviewContext]
+  );
+
+  return (
+    <TicketPreviewCard
+      draft={draft}
+      onConfirm={onConfirm}
+      onEdit={onEdit}
+      onDiscard={onDiscard}
+      onSaveEdit={onSaveEdit}
+      confirmed={confirmed}
+      ticketId={ticketId}
+      confirmedTicket={confirmedTicket}
+      publishing={publishing}
+      reviewInsights={reviewInsights}
+      momenceLoading={momenceLoading}
+      momenceError={momenceError}
+    />
   );
 };
 

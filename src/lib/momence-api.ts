@@ -55,8 +55,27 @@ export interface MomenceMembership {
   isFrozen?: boolean;
   eventCreditsLeft?: number | null;
   eventCreditsTotal?: number | null;
+  moneyCreditsLeft?: number | null;
+  moneyCreditsTotal?: number | null;
   usedSessions?: number | null;
   usageLimitForSessions?: number | null;
+  usedAppointments?: number | null;
+  usageLimitForAppointments?: number | null;
+  combinedUsage?: number | null;
+  combinedUsageLimit?: number | null;
+  usageLimitStartDate?: string | null;
+  usageLimitEndDate?: string | null;
+  freeze?: {
+    freezedAt?: string | null;
+    unfreezedScheduledAt?: string | null;
+    unfrozenAt?: string | null;
+    remainingFreezedMinutes?: number | null;
+    scheduledFreezeAt?: string | null;
+  } | null;
+  declinedRenewal?: {
+    declinedAt?: string;
+    cardLast4?: string | null;
+  } | null;
   membership?: {
     id?: number;
     name?: string;
@@ -130,8 +149,108 @@ export interface MomenceSessionOption {
   endsAt?: string;
 }
 
+export interface MomenceInsightInput {
+  member?: MomenceMemberDetail;
+  memberships?: MomenceMembership[];
+  memberBookings?: MomenceMemberBooking[];
+  notes?: MomenceMemberNote[];
+  session?: MomenceSessionDetail;
+  sessionBookings?: MomenceSessionBooking[];
+  tags?: MomenceTag[];
+}
+
+export interface MomenceMemberInsight {
+  id: string;
+  name: string;
+  email?: string;
+  phoneNumber?: string;
+  firstSeen?: string;
+  lastSeen?: string;
+  tags: string[];
+}
+
+export interface MomenceMembershipInsight {
+  id: string;
+  name: string;
+  type?: string;
+  status: 'Active' | 'Frozen';
+  creditsLabel?: string;
+  moneyCreditsLabel?: string;
+  usageLabel?: string;
+  usagePeriodLabel?: string;
+  validUntil?: string | null;
+  freezeLabel?: string;
+  scheduledFreezeAt?: string | null;
+  scheduledUnfreezeAt?: string | null;
+  declinedRenewalLabel?: string;
+}
+
+export interface MomenceBookingInsight {
+  id: string;
+  sessionId?: string;
+  classType: string;
+  startsAt?: string;
+  trainer?: string;
+  studio?: string;
+  checkedIn?: boolean;
+  cancelled?: boolean;
+}
+
+export interface MomenceSessionInsight {
+  id: string;
+  classType: string;
+  startsAt?: string;
+  endsAt?: string;
+  trainer?: string;
+  studio?: string;
+  fillRateLabel?: string;
+  waitlistLabel?: string;
+  matchingMemberBookingId?: string;
+  matchingMemberCheckedIn?: boolean;
+}
+
+export interface MomenceInsightSummary {
+  member?: MomenceMemberInsight;
+  membershipOverview: {
+    activeCount: number;
+    frozenCount: number;
+    memberships: MomenceMembershipInsight[];
+  };
+  bookingOverview: {
+    totalLoaded: number;
+    checkedInCount: number;
+    cancelledCount: number;
+    lastVisit?: MomenceBookingInsight;
+    nextBooking?: MomenceBookingInsight;
+    recentBookings: MomenceBookingInsight[];
+  };
+  noteOverview: {
+    count: number;
+    latestNote?: string;
+    latestModifiedAt?: string;
+  };
+  session?: MomenceSessionInsight;
+  availableTagCount: number;
+  ticketContextLines: string[];
+}
+
+export interface MomenceTicketContext extends MomenceInsightInput {
+  memberships: MomenceMembership[];
+  memberBookings: MomenceMemberBooking[];
+  notes: MomenceMemberNote[];
+  sessionBookings: MomenceSessionBooking[];
+  tags: MomenceTag[];
+  summary: MomenceInsightSummary;
+}
+
+export interface LoadMomenceTicketContextOptions {
+  memberId?: string | number | null;
+  sessionId?: string | number | null;
+  includeTags?: boolean;
+}
+
 interface MomenceRequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   params?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
 }
@@ -141,6 +260,138 @@ function compact(parts: Array<string | number | null | undefined>): string {
     .map((part) => (part == null ? '' : String(part).trim()))
     .filter(Boolean)
     .join(' ');
+}
+
+function fullName(value?: { firstName?: string; lastName?: string } | null): string {
+  return compact([value?.firstName, value?.lastName]);
+}
+
+function stripHtml(value?: string): string {
+  return (value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatCreditLabel(membership: MomenceMembership): string | undefined {
+  if (membership.eventCreditsLeft != null && membership.eventCreditsTotal != null) {
+    return `${membership.eventCreditsLeft}/${membership.eventCreditsTotal} credits left`;
+  }
+  if (membership.eventCreditsLeft != null) return `${membership.eventCreditsLeft} credits left`;
+  if (membership.usedSessions != null && membership.usageLimitForSessions != null) {
+    return `${membership.usedSessions}/${membership.usageLimitForSessions} sessions used`;
+  }
+  return undefined;
+}
+
+function formatMoneyCreditLabel(membership: MomenceMembership): string | undefined {
+  if (membership.moneyCreditsLeft != null && membership.moneyCreditsTotal != null) {
+    return `${membership.moneyCreditsLeft}/${membership.moneyCreditsTotal} money credits left`;
+  }
+  if (membership.moneyCreditsLeft != null) return `${membership.moneyCreditsLeft} money credits left`;
+  return undefined;
+}
+
+function formatUsageLabel(membership: MomenceMembership): string | undefined {
+  if (membership.combinedUsage != null && membership.combinedUsageLimit != null) {
+    return `${membership.combinedUsage}/${membership.combinedUsageLimit} combined usage`;
+  }
+  const parts = [
+    membership.usedSessions != null && membership.usageLimitForSessions != null
+      ? `${membership.usedSessions}/${membership.usageLimitForSessions} sessions used`
+      : undefined,
+    membership.usedAppointments != null && membership.usageLimitForAppointments != null
+      ? `${membership.usedAppointments}/${membership.usageLimitForAppointments} appointments used`
+      : undefined,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' | ') : undefined;
+}
+
+function formatUsagePeriodLabel(membership: MomenceMembership): string | undefined {
+  if (!membership.usageLimitStartDate && !membership.usageLimitEndDate) return undefined;
+  return `Usage window ${membership.usageLimitStartDate || 'open'} to ${membership.usageLimitEndDate || 'open'}`;
+}
+
+function formatFreezeLabel(membership: MomenceMembership): string | undefined {
+  if (!membership.freeze) return membership.isFrozen ? 'Frozen' : undefined;
+  if (membership.freeze.scheduledFreezeAt) return `Scheduled freeze ${membership.freeze.scheduledFreezeAt}`;
+  if (membership.isFrozen || membership.freeze.freezedAt) return 'Frozen now';
+  return undefined;
+}
+
+function formatDeclinedRenewalLabel(membership: MomenceMembership): string | undefined {
+  if (!membership.declinedRenewal?.declinedAt) return undefined;
+  return compact([
+    `Renewal declined ${membership.declinedRenewal.declinedAt}`,
+    membership.declinedRenewal.cardLast4 ? `card ${membership.declinedRenewal.cardLast4}` : undefined,
+  ]);
+}
+
+function sessionName(session?: MomenceSession | null): string {
+  if (!session) return 'Unknown session';
+  return session.name || session.type || `Momence session #${session.id}`;
+}
+
+function bookingInsight(booking: MomenceMemberBooking): MomenceBookingInsight {
+  const session = booking.session;
+  return {
+    id: String(booking.id),
+    sessionId: session?.id != null ? String(session.id) : undefined,
+    classType: sessionName(session),
+    startsAt: session?.startsAt,
+    trainer: fullName(session?.teacher) || undefined,
+    studio: session?.inPersonLocation?.name,
+    checkedIn: booking.checkedIn,
+    cancelled: Boolean(booking.cancelledAt),
+  };
+}
+
+function getBookingTime(booking: MomenceMemberBooking): number {
+  const value = booking.session?.startsAt || booking.createdAt;
+  if (!value) return Number.NaN;
+  return new Date(value).getTime();
+}
+
+function latestNote(notes: MomenceMemberNote[]): MomenceMemberNote | undefined {
+  return [...notes]
+    .filter((note) => stripHtml(note.note))
+    .sort((a, b) => {
+      const aTime = new Date(a.modifiedAt || a.createdAt || '').getTime();
+      const bTime = new Date(b.modifiedAt || b.createdAt || '').getTime();
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    })[0];
+}
+
+function buildTicketContextLines(summary: Omit<MomenceInsightSummary, 'ticketContextLines'>): string[] {
+  const lines: string[] = [];
+  if (summary.member) {
+    lines.push(`Momence member: ${summary.member.name}`);
+    if (summary.member.email || summary.member.phoneNumber) {
+      lines.push(`Momence contact: ${compact([summary.member.email, summary.member.phoneNumber])}`);
+    }
+    if (summary.member.tags.length) lines.push(`Momence tags: ${summary.member.tags.join(', ')}`);
+  }
+  if (summary.membershipOverview.memberships.length) {
+    lines.push(`Active memberships: ${summary.membershipOverview.memberships.map((item) => compact([
+      item.name,
+      item.type,
+      item.status === 'Frozen' ? '(Frozen)' : undefined,
+      item.creditsLabel,
+      item.moneyCreditsLabel,
+      item.usageLabel,
+      item.freezeLabel,
+      item.declinedRenewalLabel,
+    ])).join(' | ')}`);
+  }
+  if (summary.bookingOverview.lastVisit) {
+    lines.push(`Last Momence visit: ${compact([summary.bookingOverview.lastVisit.classType, summary.bookingOverview.lastVisit.startsAt, summary.bookingOverview.lastVisit.checkedIn ? 'checked in' : undefined])}`);
+  }
+  if (summary.bookingOverview.nextBooking) {
+    lines.push(`Next Momence booking: ${compact([summary.bookingOverview.nextBooking.classType, summary.bookingOverview.nextBooking.startsAt])}`);
+  }
+  if (summary.session) {
+    lines.push(`Selected Momence session: ${compact([summary.session.classType, summary.session.startsAt, summary.session.trainer, summary.session.studio])}`);
+    if (summary.session.fillRateLabel) lines.push(`Selected session capacity: ${summary.session.fillRateLabel}`);
+  }
+  if (summary.noteOverview.latestNote) lines.push(`Latest Momence note: ${summary.noteOverview.latestNote}`);
+  return lines;
 }
 
 function normalizeSearchValue(value: string): string {
@@ -267,6 +518,118 @@ async function callMomence<T>(path: string, options: MomenceRequestOptions = {})
   return data as T;
 }
 
+export function buildMomenceInsightSummary(input: MomenceInsightInput): MomenceInsightSummary {
+  const memberships = input.memberships || [];
+  const memberBookings = input.memberBookings || [];
+  const notes = input.notes || [];
+  const sessionBookings = input.sessionBookings || [];
+  const tags = input.tags || [];
+  const now = Date.now();
+
+  const memberName = fullName(input.member) || (input.member ? `Momence member #${input.member.id}` : '');
+  const memberTags = (input.member?.customerTags || [])
+    .map((tag) => tag.name)
+    .filter(Boolean);
+
+  const member = input.member
+    ? {
+        id: String(input.member.id),
+        name: memberName,
+        email: input.member.email,
+        phoneNumber: input.member.phoneNumber || undefined,
+        firstSeen: input.member.firstSeen,
+        lastSeen: input.member.lastSeen,
+        tags: memberTags,
+      }
+    : undefined;
+
+  const membershipInsights = memberships.map((membership) => ({
+    id: String(membership.id),
+    name: membership.membership?.name || membership.type || `Membership #${membership.id}`,
+    type: membership.type,
+    status: membership.isFrozen ? 'Frozen' as const : 'Active' as const,
+    creditsLabel: formatCreditLabel(membership),
+    moneyCreditsLabel: formatMoneyCreditLabel(membership),
+    usageLabel: formatUsageLabel(membership),
+    usagePeriodLabel: formatUsagePeriodLabel(membership),
+    validUntil: membership.endDate,
+    freezeLabel: formatFreezeLabel(membership),
+    scheduledFreezeAt: membership.freeze?.scheduledFreezeAt,
+    scheduledUnfreezeAt: membership.freeze?.unfreezedScheduledAt,
+    declinedRenewalLabel: formatDeclinedRenewalLabel(membership),
+  }));
+
+  const sortedBookings = [...memberBookings].sort((a, b) => {
+    const bTime = getBookingTime(b);
+    const aTime = getBookingTime(a);
+    return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+  });
+  const lastVisit = sortedBookings.find((booking) => {
+    const time = getBookingTime(booking);
+    return Number.isFinite(time) && time <= now && !booking.cancelledAt;
+  });
+  const nextBooking = [...memberBookings]
+    .filter((booking) => {
+      const time = getBookingTime(booking);
+      return Number.isFinite(time) && time > now && !booking.cancelledAt;
+    })
+    .sort((a, b) => getBookingTime(a) - getBookingTime(b))[0];
+  const note = latestNote(notes);
+
+  const matchingSessionBooking = member && input.session
+    ? sessionBookings.find((booking) => String(booking.member?.id) === member.id && !booking.cancelledAt)
+    : undefined;
+  const session = input.session
+    ? {
+        id: String(input.session.id),
+        classType: sessionName(input.session),
+        startsAt: input.session.startsAt,
+        endsAt: input.session.endsAt,
+        trainer: fullName(input.session.teacher) || undefined,
+        studio: input.session.inPersonLocation?.name,
+        fillRateLabel: input.session.capacity != null
+          ? `${input.session.bookingCount || 0}/${input.session.capacity} booked`
+          : input.session.bookingCount != null
+            ? `${input.session.bookingCount} booked`
+            : undefined,
+        waitlistLabel: input.session.waitlistBookingCount != null
+          ? `${input.session.waitlistBookingCount}/${input.session.waitlistCapacity ?? 'unlimited'} waitlisted`
+          : undefined,
+        matchingMemberBookingId: matchingSessionBooking ? String(matchingSessionBooking.id) : undefined,
+        matchingMemberCheckedIn: matchingSessionBooking?.checkedIn,
+      }
+    : undefined;
+
+  const summaryWithoutLines = {
+    member,
+    membershipOverview: {
+      activeCount: membershipInsights.filter((membership) => membership.status === 'Active').length,
+      frozenCount: membershipInsights.filter((membership) => membership.status === 'Frozen').length,
+      memberships: membershipInsights,
+    },
+    bookingOverview: {
+      totalLoaded: memberBookings.length,
+      checkedInCount: memberBookings.filter((booking) => booking.checkedIn).length,
+      cancelledCount: memberBookings.filter((booking) => booking.cancelledAt).length,
+      lastVisit: lastVisit ? bookingInsight(lastVisit) : undefined,
+      nextBooking: nextBooking ? bookingInsight(nextBooking) : undefined,
+      recentBookings: sortedBookings.slice(0, 5).map(bookingInsight),
+    },
+    noteOverview: {
+      count: notes.length,
+      latestNote: note ? stripHtml(note.note).slice(0, 240) : undefined,
+      latestModifiedAt: note?.modifiedAt || note?.createdAt,
+    },
+    session,
+    availableTagCount: tags.length,
+  };
+
+  return {
+    ...summaryWithoutLines,
+    ticketContextLines: buildTicketContextLines(summaryWithoutLines),
+  };
+}
+
 export async function searchMomenceMembers(query: string): Promise<MomenceMemberOption[]> {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length < 2) return [];
@@ -384,6 +747,48 @@ export async function getMomenceMember(memberId: string | number) {
   return callMomence<MomenceMemberDetail>(`/host/members/${memberId}`);
 }
 
+export async function loadMomenceTicketContext({
+  memberId,
+  sessionId,
+  includeTags = false,
+}: LoadMomenceTicketContextOptions): Promise<MomenceTicketContext> {
+  const normalizedMemberId = memberId == null || memberId === '' ? undefined : memberId;
+  const normalizedSessionId = sessionId == null || sessionId === '' ? undefined : sessionId;
+
+  const [
+    member,
+    memberships,
+    memberBookings,
+    notes,
+    session,
+    sessionBookings,
+    tags,
+  ] = await Promise.all([
+    normalizedMemberId ? getMomenceMember(normalizedMemberId) : Promise.resolve(undefined),
+    normalizedMemberId ? getMomenceMemberMemberships(normalizedMemberId) : Promise.resolve([]),
+    normalizedMemberId ? getMomenceMemberBookings(normalizedMemberId) : Promise.resolve([]),
+    normalizedMemberId ? getMomenceMemberNotes(normalizedMemberId) : Promise.resolve([]),
+    normalizedSessionId ? getMomenceSession(normalizedSessionId) : Promise.resolve(undefined),
+    normalizedSessionId ? getMomenceSessionBookings(normalizedSessionId) : Promise.resolve([]),
+    includeTags ? listMomenceTags() : Promise.resolve([]),
+  ]);
+
+  const raw = {
+    member,
+    memberships,
+    memberBookings,
+    notes,
+    session,
+    sessionBookings,
+    tags,
+  };
+
+  return {
+    ...raw,
+    summary: buildMomenceInsightSummary(raw),
+  };
+}
+
 export async function getMomenceMemberMemberships(memberId: string | number) {
   const response = await callMomence<PaginatedMomenceResponse<MomenceMembership>>(
     `/host/members/${memberId}/bought-memberships/active`,
@@ -454,6 +859,63 @@ export async function addMomenceMemberToWaitlist(memberId: string | number, sess
   return callMomence<{ waitlistBookingId?: number }>(`/host/sessions/${sessionId}/waitlist/bookings`, {
     method: 'POST',
     body: { memberId: Number(memberId) },
+  });
+}
+
+export async function freezeMomenceMembership(
+  memberId: string | number,
+  boughtMembershipId: string | number,
+  options: { freezeAt?: string | null; unfreezeAt?: string | null; reason?: string | null } = {}
+) {
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/membership-freeze`, {
+    method: 'PUT',
+    body: {
+      freezeType: options.freezeAt ? 'scheduled' : 'now',
+      freezeAt: options.freezeAt || null,
+      unfreezeType: options.unfreezeAt ? 'scheduled' : 'not_set',
+      unfreezeAt: options.unfreezeAt || null,
+      reason: options.reason?.trim() || null,
+    },
+  });
+}
+
+export async function scheduleMomenceMembershipFreeze(
+  memberId: string | number,
+  boughtMembershipId: string | number,
+  freezeAt: string
+) {
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/membership-schedule-freeze`, {
+    method: 'PUT',
+    body: {
+      freezeType: 'scheduled',
+      freezeAt,
+    },
+  });
+}
+
+export async function unfreezeMomenceMembership(memberId: string | number, boughtMembershipId: string | number) {
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/membership-schedule-freeze`, {
+    method: 'DELETE',
+  });
+}
+
+export async function scheduleMomenceMembershipUnfreeze(
+  memberId: string | number,
+  boughtMembershipId: string | number,
+  unfreezeAt: string
+) {
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/membership-schedule-unfreeze`, {
+    method: 'PUT',
+    body: {
+      unfreezeType: 'scheduled',
+      unfreezeAt,
+    },
+  });
+}
+
+export async function removeScheduledMomenceMembershipUnfreeze(memberId: string | number, boughtMembershipId: string | number) {
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/membership-schedule-unfreeze`, {
+    method: 'DELETE',
   });
 }
 

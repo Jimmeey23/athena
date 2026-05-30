@@ -38,6 +38,11 @@ const ALLOWED_REQUESTS: Array<{ method: string; pattern: RegExp }> = [
   { method: 'DELETE', pattern: /^\/host\/session-recurring-bookings\/\d+$/ },
   { method: 'POST', pattern: /^\/host\/sessions\/\d+\/bookings\/free$/ },
   { method: 'POST', pattern: /^\/host\/sessions\/\d+\/waitlist\/bookings$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/membership-freeze$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/membership-schedule-freeze$/ },
+  { method: 'DELETE', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/membership-schedule-freeze$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/membership-schedule-unfreeze$/ },
+  { method: 'DELETE', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/membership-schedule-unfreeze$/ },
 ];
 
 function json(body: unknown, status = 200) {
