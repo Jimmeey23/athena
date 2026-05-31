@@ -76,7 +76,7 @@ describe('trainer profile evaluation engine', () => {
     expect(ticket.title).toContain('Pranjali');
     expect(ticket.category).toBe('Trainer Feedback');
     expect(ticket.subCategory).toBe('Knowledge and Competence');
-    expect(ticket.priority).toBe('Medium');
+    expect(ticket.priority).toBe('Low');
     expect(ticket.trainer).toBe('Pranjali');
     expect(ticket.studio).toBe('Kemps Corner');
     expect(ticket.description).toContain('Instructor Evaluation Brief');
@@ -86,6 +86,40 @@ describe('trainer profile evaluation engine', () => {
     expect(ticket.tags).toContain('trainer-profile');
     expect(ticket.tags).toContain('profile-only');
     expect(ticket.assignedTo).toBe('Trainer Profile');
+  });
+
+  it('excludes inactive and unspecified instructors from trainer profile tabs', () => {
+    const profiles = buildTrainerProfilesFromReviews([{
+      id: 'inactive-review-1',
+      createdAt: '2026-05-31T00:00:00.000Z',
+      trainer: 'Upasna Paranjpe',
+      template: 'Barre',
+      studio: 'Kwality House, Kemps Corner',
+      classType: 'Studio Barre 57',
+      reviewPeriod: 'May 2026',
+      scores: [{ category: 'Client feedback', weightage: 20, score: 18 }],
+      feedback: 'Legacy trainer review should not create an active profile tab.',
+      totalWeightage: 20,
+      totalScore: 18,
+      scorePercent: 90,
+      source: 'fillout',
+      sourceRef: 'fillout:legacy:inactive-review-1',
+    }, {
+      id: 'unspecified-review-1',
+      createdAt: '2026-05-31T00:00:00.000Z',
+      trainer: 'Unspecified Instructor',
+      template: 'Barre',
+      scores: [{ category: 'Client feedback', weightage: 20, score: 10 }],
+      feedback: 'Incomplete trainer mapping should not create a tab.',
+      totalWeightage: 20,
+      totalScore: 10,
+      scorePercent: 50,
+      source: 'fillout',
+      sourceRef: 'fillout:legacy:unspecified-review-1',
+    }]);
+
+    expect(profiles.map((profile) => profile.trainer)).not.toContain('Upasna Paranjpe');
+    expect(profiles.map((profile) => profile.trainer)).not.toContain('Unspecified Instructor');
   });
 
   it('identifies trainer evaluation records that should stay out of operational ticket queues', () => {

@@ -29,6 +29,21 @@ export interface TrainerProfile {
 }
 
 const STORAGE_KEY = 'p57_trainer_profiles_v1';
+const INACTIVE_TRAINER_NAMES = new Set([
+  'Unspecified Instructor',
+  'Upasna Paranjpe',
+  'Kabir Varma',
+  'Janhavi Jain',
+  'Nishanth Raj',
+  'Poojitha Bhaskar',
+  'Veena Narasimhan',
+  'Saniya Jaiswal',
+]);
+
+function isActiveTrainerName(trainer: string): boolean {
+  const normalized = trainer.trim();
+  return Boolean(normalized) && !INACTIVE_TRAINER_NAMES.has(normalized);
+}
 
 function getStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
@@ -51,7 +66,7 @@ function summarizeProfile(trainer: string, reviews: TrainerReviewRecord[]): Trai
 
 export function loadTrainerProfiles(): TrainerProfile[] {
   const storage = getStorage();
-  if (!storage) return TRAINERS.map((trainer) => summarizeProfile(trainer, []));
+  if (!storage) return TRAINERS.filter(isActiveTrainerName).map((trainer) => summarizeProfile(trainer, []));
   try {
     const raw = storage.getItem(STORAGE_KEY);
     const records = raw ? JSON.parse(raw) as TrainerReviewRecord[] : [];
@@ -62,6 +77,7 @@ export function loadTrainerProfiles(): TrainerProfile[] {
     }, {});
     const trainerNames = Array.from(new Set([...TRAINERS, ...Object.keys(grouped)]));
     return trainerNames
+      .filter(isActiveTrainerName)
       .map((trainer) => summarizeProfile(
         trainer,
         (grouped[trainer] || []).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
@@ -72,7 +88,7 @@ export function loadTrainerProfiles(): TrainerProfile[] {
         return a.trainer.localeCompare(b.trainer);
       });
   } catch {
-    return TRAINERS.map((trainer) => summarizeProfile(trainer, []));
+    return TRAINERS.filter(isActiveTrainerName).map((trainer) => summarizeProfile(trainer, []));
   }
 }
 
@@ -141,6 +157,7 @@ export function buildTrainerProfilesFromReviews(records: TrainerReviewRecord[]):
   }, {});
   const trainerNames = Array.from(new Set([...TRAINERS, ...Object.keys(grouped)]));
   return trainerNames
+    .filter(isActiveTrainerName)
     .map((trainer) => summarizeProfile(
       trainer,
       (grouped[trainer] || []).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
@@ -170,7 +187,7 @@ export function buildTrainerEvaluationTicket(input: TrainerEvaluationInput, reco
     description: buildTrainerEvaluationText(input),
     category: 'Trainer Feedback',
     subCategory: 'Knowledge and Competence',
-    priority: review.scorePercent < 65 ? 'High' : review.scorePercent < 80 ? 'Medium' : 'Low',
+    priority: 'Low',
     studio: input.studio || STUDIOS[0],
     trainer: input.trainer,
     classType: input.classType || null,

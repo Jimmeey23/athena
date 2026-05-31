@@ -43,6 +43,7 @@ function formatDate(value?: string, fallback = 'No reviews yet') {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   }).format(date);
 }
 
@@ -53,6 +54,7 @@ function formatReviewPeriod(value?: string) {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Asia/Kolkata',
   }).format(date);
 }
 
@@ -82,16 +84,18 @@ function criterionPercent(score: number, weightage: number) {
   return weightage ? Math.max(0, Math.min(100, Math.round((score / weightage) * 100))) : 0;
 }
 
+type CriterionRow = TrainerReviewRecord['scores'][number] & { percent: number };
+
 function reviewKey(review: TrainerReviewRecord) {
   return review.sourceRef || review.id;
 }
 
 function reviewPeriodLabel(review: TrainerReviewRecord) {
   const periodDate = parseFlexibleDate(review.reviewPeriod);
-  if (periodDate) return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(periodDate);
+  if (periodDate) return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(periodDate);
   if (review.reviewPeriod?.trim()) return review.reviewPeriod.trim();
   const createdDate = parseFlexibleDate(review.createdAt);
-  return createdDate ? new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(createdDate) : 'Undated Reviews';
+  return createdDate ? new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(createdDate) : 'Undated Reviews';
 }
 
 function groupReviewsByPeriod(reviews: TrainerReviewRecord[]) {
@@ -118,7 +122,7 @@ export const TrainerProfilesPanel: React.FC = () => {
   const { tickets } = useTickets();
   const [localReviews, setLocalReviews] = useState<TrainerReviewRecord[]>(() => loadLocalTrainerReviewRecords());
   const [selectedTrainer, setSelectedTrainer] = useState<string>('');
-  const [expandedReviewKey, setExpandedReviewKey] = useState<string>('');
+  const [activeReviewKey, setActiveReviewKey] = useState<string>('');
   const profiles = useMemo<TrainerProfile[]>(
     () => buildTrainerProfilesFromReviews([
       ...trainerReviewRecordsFromTickets(tickets),
@@ -142,7 +146,7 @@ export const TrainerProfilesPanel: React.FC = () => {
   }, [profiles, selectedTrainer]);
 
   useEffect(() => {
-    setExpandedReviewKey('');
+    setActiveReviewKey('');
   }, [selectedTrainer]);
 
   const selectedProfile = useMemo(
@@ -227,8 +231,8 @@ export const TrainerProfilesPanel: React.FC = () => {
                 <TrainerProfileDetail
                   profile={selectedProfile}
                   ticketBySourceRef={ticketBySourceRef}
-                  expandedReviewKey={expandedReviewKey}
-                  onToggleReview={(key) => setExpandedReviewKey((current) => current === key ? '' : key)}
+                  activeReviewKey={activeReviewKey}
+                  onSelectReview={setActiveReviewKey}
                 />
               )}
             </section>
@@ -249,19 +253,24 @@ const Metric: React.FC<{ label: string; value: string | number }> = ({ label, va
 const TrainerProfileDetail: React.FC<{
   profile: TrainerProfile;
   ticketBySourceRef: Map<string, Ticket>;
-  expandedReviewKey: string;
-  onToggleReview: (key: string) => void;
-}> = ({ profile, ticketBySourceRef, expandedReviewKey, onToggleReview }) => {
+  activeReviewKey: string;
+  onSelectReview: (key: string) => void;
+}> = ({ profile, ticketBySourceRef, activeReviewKey, onSelectReview }) => {
   const latest = profile.reviews[0];
+  const activeReview = profile.reviews.find((review) => reviewKey(review) === activeReviewKey) || latest;
   const groupedReviews = groupReviewsByPeriod(profile.reviews);
   const highScore = profile.reviews.length ? Math.max(...profile.reviews.map((review) => review.scorePercent)) : 0;
-  const chartRows = latest?.scores.map((item) => ({
+  const activeRows = activeReview?.scores.map((item) => ({
+    ...item,
+    percent: criterionPercent(item.score, item.weightage),
+  })) || [];
+  const chartRows = activeRows.map((item) => ({
     criterion: item.category.length > 18 ? `${item.category.slice(0, 18)}...` : item.category,
     fullCriterion: item.category,
-    percent: criterionPercent(item.score, item.weightage),
+    percent: item.percent,
     score: item.score,
     weightage: item.weightage,
-  })) || [];
+  }));
   const trendRows = profile.reviews
     .slice(0, 10)
     .reverse()
@@ -284,8 +293,8 @@ const TrainerProfileDetail: React.FC<{
                 <div className="mt-3 flex flex-wrap gap-2">
                   <ProfilePill icon={<ClipboardList className="h-3.5 w-3.5" />} label={`${profile.reviews.length} assessment${profile.reviews.length === 1 ? '' : 's'}`} />
                   <ProfilePill icon={<Award className="h-3.5 w-3.5" />} label={`Best score ${highScore}%`} />
-                  {latest?.studio && <ProfilePill icon={<MapPin className="h-3.5 w-3.5" />} label={latest.studio} />}
-                  {latest?.classType && <ProfilePill icon={<Activity className="h-3.5 w-3.5" />} label={latest.classType} />}
+                  {activeReview?.studio && <ProfilePill icon={<MapPin className="h-3.5 w-3.5" />} label={activeReview.studio} />}
+                  {activeReview?.classType && <ProfilePill icon={<Activity className="h-3.5 w-3.5" />} label={activeReview.classType} />}
                 </div>
               </div>
             </div>
@@ -297,18 +306,20 @@ const TrainerProfileDetail: React.FC<{
           </div>
         </div>
 
-        {latest && (
+        {activeReview && (
           <div className="space-y-5 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <TrendingUp className="h-4 w-4 text-blue-600" />
-                  Latest Weighted Review
+                  {activeReviewKey ? 'Selected Assessment Drilldown' : 'Latest Weighted Review'}
                 </div>
                 <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
                   <CalendarDays className="h-3.5 w-3.5 text-blue-600" />
-                  {formatReviewPeriod(latest.reviewPeriod)}
+                  {formatReviewPeriod(activeReview.reviewPeriod)}
                 </div>
             </div>
+
+            <DrilldownAnalytics review={activeReview} profile={profile} rows={activeRows} />
 
             <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -348,9 +359,9 @@ const TrainerProfileDetail: React.FC<{
             </div>
 
             <div className="space-y-3">
-              <InsightBlock title="Evaluator Feedback" value={latest.feedback} />
-              <InsightBlock title="Focus Points" value={latest.focusPoints} icon={<Target className="h-4 w-4 text-blue-600" />} />
-              <InsightBlock title="Goals" value={latest.goals} />
+              <InsightBlock title="Evaluator Feedback" value={activeReview.feedback} />
+              <InsightBlock title="Focus Points" value={activeReview.focusPoints} icon={<Target className="h-4 w-4 text-blue-600" />} />
+              <InsightBlock title="Goals" value={activeReview.goals} />
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-slate-200">
@@ -364,8 +375,8 @@ const TrainerProfileDetail: React.FC<{
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {latest.scores.map((item) => {
-                    const percent = criterionPercent(item.score, item.weightage);
+                  {activeRows.map((item) => {
+                    const percent = item.percent;
                     return (
                       <tr key={item.category}>
                         <td className="px-3 py-2 font-medium text-slate-800">{item.category}</td>
@@ -418,19 +429,19 @@ const TrainerProfileDetail: React.FC<{
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{group.period}</div>
                 <div className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500">
-                  {group.reviews.length} ticket{group.reviews.length === 1 ? '' : 's'}
+                  {group.reviews.length} assessment{group.reviews.length === 1 ? '' : 's'}
                 </div>
               </div>
               <div className="space-y-3">
                 {group.reviews.map((review) => {
                   const ticket = review.sourceRef ? ticketBySourceRef.get(review.sourceRef) : undefined;
                   const key = reviewKey(review);
-                  const expanded = expandedReviewKey === key;
+                  const selected = activeReview ? reviewKey(activeReview) === key : false;
                   return (
-                    <div key={key} className={`overflow-hidden rounded-xl border ${expanded ? 'border-blue-200 bg-blue-50/30' : 'border-slate-100 bg-white'}`}>
+                    <div key={key} className={`overflow-hidden rounded-xl border ${selected ? 'border-blue-300 bg-blue-50/70 shadow-[0_10px_30px_rgba(37,99,235,0.10)]' : 'border-slate-100 bg-white'}`}>
                       <button
                         type="button"
-                        onClick={() => onToggleReview(key)}
+                        onClick={() => onSelectReview(key)}
                         className="grid w-full gap-3 px-3 py-3 text-left transition hover:bg-slate-50 lg:grid-cols-[190px_1fr_125px]"
                       >
                         <div>
@@ -452,10 +463,11 @@ const TrainerProfileDetail: React.FC<{
                           <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${scoreTone(review.scorePercent)}`}>
                             {review.scorePercent}%
                           </span>
-                          <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">{expanded ? 'Collapse' : 'Expand'}</div>
+                          <div className={`mt-2 text-[10px] font-bold uppercase tracking-[0.12em] ${selected ? 'text-blue-600' : 'text-slate-400'}`}>
+                            {selected ? 'Viewing' : 'View Drilldown'}
+                          </div>
                         </div>
                       </button>
-                      {expanded && <ExpandedReview review={review} />}
                     </div>
                   );
                 })}
@@ -480,58 +492,45 @@ const ProfilePill: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon,
   </span>
 );
 
-const ExpandedReview: React.FC<{ review: TrainerReviewRecord }> = ({ review }) => {
-  const rows = review.scores.map((item) => ({
-    ...item,
-    percent: criterionPercent(item.score, item.weightage),
-  }));
+const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: TrainerProfile; rows: CriterionRow[] }> = ({ review, profile, rows }) => {
+  const sortedRows = [...rows].sort((a, b) => b.percent - a.percent);
+  const strengths = sortedRows.filter((item) => item.percent >= 80).slice(0, 4);
   const attention = [...rows].sort((a, b) => a.percent - b.percent).slice(0, 4);
-  const strengths = rows.filter((item) => item.percent >= 85).slice(0, 4);
+  const delta = review.scorePercent - profile.averageScorePercent;
+  const weightedRisk = rows
+    .filter((item) => item.percent < 70)
+    .reduce((sum, item) => sum + item.weightage, 0);
+  const scoreDensity = review.totalWeightage ? Math.round((review.totalScore / review.totalWeightage) * 100) : review.scorePercent;
 
   return (
-    <div className="border-t border-blue-100 bg-white px-3 pb-4 pt-3">
-      <div className="grid gap-4">
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                <th className="px-3 py-2 font-bold">Criterion</th>
-                <th className="px-3 py-2 text-right font-bold">Score</th>
-                <th className="px-3 py-2 text-right font-bold">Read</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((item) => (
-                <tr key={item.category}>
-                  <td className="px-3 py-2 font-medium text-slate-800">{item.category}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-700">{item.score.toFixed(1)} / {item.weightage}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
-                        <div className={`h-full rounded-full ${scoreColor(item.percent)}`} style={{ width: `${item.percent}%` }} />
-                      </div>
-                      <span className="w-9 text-right font-bold text-slate-700">{item.percent}%</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <DrillMetric label="Selected Score" value={`${review.scorePercent}%`} helper={scoreBand(review.scorePercent)} tone={scoreTone(review.scorePercent)} />
+        <DrillMetric
+          label="Vs Profile Avg"
+          value={`${delta > 0 ? '+' : ''}${delta}%`}
+          helper={`${profile.averageScorePercent}% profile mean`}
+          tone={delta >= 0 ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-rose-100 bg-rose-50 text-rose-700'}
+        />
+        <DrillMetric label="Weighted Yield" value={`${scoreDensity}%`} helper={`${review.totalScore.toFixed(1)} / ${review.totalWeightage}`} tone="border-blue-100 bg-blue-50 text-blue-700" />
+        <DrillMetric label="Risk Weight" value={`${weightedRisk}`} helper="points below 70%" tone={weightedRisk ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'} />
+      </div>
 
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <TechnicalList title="Strength Signals" items={strengths.map((item) => `${item.category}: ${item.percent}%`)} fallback="No strength threshold captured." />
-            <TechnicalList title="Coaching Attention" items={attention.map((item) => `${item.category}: ${item.percent}%`)} fallback="No attention areas captured." />
-          </div>
-          <InsightBlock title="Evaluation Notes" value={review.feedback} />
-          <InsightBlock title="Focus Points" value={review.focusPoints} icon={<Target className="h-4 w-4 text-blue-600" />} />
-          <InsightBlock title="Goals / Coaching Notes" value={review.goals} />
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <TechnicalList title="Strongest Signals" items={strengths.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)} fallback="No criterion reached the strength threshold." />
+        <TechnicalList title="Coaching Attention" items={attention.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)} fallback="No attention areas captured." />
       </div>
     </div>
   );
 };
+
+const DrillMetric: React.FC<{ label: string; value: string; helper: string; tone: string }> = ({ label, value, helper, tone }) => (
+  <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
+    <div className="text-[10px] font-bold uppercase tracking-[0.16em] opacity-75">{label}</div>
+    <div className="mt-2 text-2xl font-semibold">{value}</div>
+    <div className="mt-1 text-[11px] font-semibold opacity-80">{helper}</div>
+  </div>
+);
 
 const TechnicalList: React.FC<{ title: string; items: string[]; fallback: string }> = ({ title, items, fallback }) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -547,12 +546,41 @@ const TechnicalList: React.FC<{ title: string; items: string[]; fallback: string
   </div>
 );
 
+function richFeedbackItems(value?: string): Array<{ label?: string; text: string }> {
+  const raw = value?.trim();
+  if (!raw) return [{ text: 'No detail captured.' }];
+  return raw
+    .split(/\n+|(?<=\.)\s+(?=[A-Z])/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^([^:]{3,42}):\s*(.+)$/);
+      return match ? { label: match[1].trim(), text: match[2].trim() } : { text: line };
+    });
+}
+
+const RichFeedbackList: React.FC<{ value?: string }> = ({ value }) => (
+  <ul className="space-y-2 text-xs leading-relaxed text-slate-600">
+    {richFeedbackItems(value).map((item, index) => (
+      <li key={`${item.label || item.text}-${index}`} className="flex gap-2">
+        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+        <span>
+          {item.label && <span className="font-semibold text-slate-900">{item.label}: </span>}
+          {item.text}
+        </span>
+      </li>
+    ))}
+  </ul>
+);
+
 const InsightBlock: React.FC<{ title: string; value?: string; icon?: React.ReactNode }> = ({ title, value, icon }) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
     <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-slate-900">
       {icon}
       {title}
     </div>
-    <p className="text-xs leading-relaxed text-slate-600">{value || 'No detail captured.'}</p>
+    {title.toLowerCase().includes('feedback') || title.toLowerCase().includes('evaluation')
+      ? <RichFeedbackList value={value} />
+      : <p className="text-xs leading-relaxed text-slate-600">{value || 'No detail captured.'}</p>}
   </div>
 );
