@@ -70,7 +70,7 @@ interface TicketEventRow {
 }
 
 const CHART_COLORS = ['#0f766e', '#2563eb', '#be123c', '#7c3aed', '#ca8a04', '#475569', '#0891b2', '#16a34a'];
-const REPORT_GROUPS: ReportDefinition['group'][] = ['Leadership', 'Operations', 'Member Voice', 'Revenue', 'Quality'];
+const REPORT_GROUPS: ReportDefinition['group'][] = ['Leadership', 'Operations', 'Client Feedback', 'Revenue', 'Quality'];
 const PRIORITIES: Ticket['priority'][] = ['Critical', 'High', 'Medium', 'Low'];
 const SLA_STATES = ['Breached', 'At Risk', 'On Track', 'Closed'];
 const SOURCE_TYPES: Array<{ value: ReportFilters['sourceType']; label: string }> = [

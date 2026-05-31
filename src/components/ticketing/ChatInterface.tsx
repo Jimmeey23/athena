@@ -6,7 +6,6 @@ import { TicketPreviewCard } from './TicketPreviewCard';
 import { ContextPicker, Context } from './ContextPicker';
 import { useTickets } from './useTickets';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
-import { RoutingSettings, defaultRoutingSettings, loadRoutingSettings } from '@/lib/routing-settings';
 import {
   getMomenceMemberMemberships,
   loadMomenceTicketContext,
@@ -27,7 +26,6 @@ import {
   isMissingIntakeValue,
   IntakeContext,
 } from '@/lib/intake-rules';
-import { buildMasterDataLocationNames } from '@/lib/intake-master-data';
 import {
   shouldAcceptAiDetailForm,
   shouldAcceptInferredSubCategory,
@@ -35,7 +33,6 @@ import {
   shouldReplaceInferredCategory,
 } from '@/lib/intake-response-state';
 import {
-  ASSOCIATES,
   CATEGORIES,
   CLASS_TYPES,
   FREEZE_REASONS,
@@ -54,7 +51,10 @@ import {
 } from '@/lib/ticketing-data';
 import { findExistingSubmittedTicket } from '@/lib/ticket-duplicate-matching';
 import { invokeTicketingFunction } from '@/lib/ticketing-functions';
+import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
 import { buildTicketReviewInsights } from '@/lib/ticket-review';
+import { getGreetingQuickActions, isCasualGreeting } from '@/lib/athena-chat-intent';
+import { shouldUseOptionButtons } from '@/lib/intake-option-buttons';
 import { SlaCountdown } from './SlaCountdown';
 
 interface SuggestedChip {
@@ -216,71 +216,6 @@ function getReporterName(user: ReturnType<typeof useBackendAuth>['user']): strin
   return fullName || name || user?.email || 'Authenticated user';
 }
 
-const ATHENA_SYSTEM_PROMPT = `
-You are Athena, the Physique 57 India internal operations ticket intake assistant.
-
-YOUR GOAL: Turn a staff member's initial report into a complete, actionable ticket — one the assigned owner can act on immediately without asking a single follow-up question.
-
-HOW TO DECIDE WHAT TO ASK:
-Read the initial report and ask yourself: what would the person assigned this ticket need to know to act?
-Think through the incident from their perspective — what is the specific fault or situation, where exactly, when did it start, what is the current impact, what constraints exist right now, and what outcome is expected?
-Identify what is missing from the initial report and collect only that — in a single structured form.
-
-Do not use a fixed list of fields. Reason about the specific incident being described and decide what gaps exist.
-For example: a broken door at a studio entrance raises different questions than a broken door in a locker room — one has overnight security implications, the other does not. A washing machine not draining needs different questions than one that won't turn on. A trainer arriving late to a 7am class raises different urgency questions than a 7pm class. Think contextually.
-
-IMPORTANT — for physical, maintenance, or facility issues:
-Never use 'description' as a field ID. Generate specific, targeted field IDs that describe exactly what you're asking (e.g. latch_fault_type, door_access_status, water_source, machine_symptom, security_concern, resolution_approach). The first form must collect the full operational picture — fault specifics, current access or safety implications, and the expected resolution — all in one go. Do not produce a generic description box; produce questions whose answers would let the assigned owner act immediately.
-
-FORM DESIGN RULES:
-- Collect all missing information in ONE detailForm — do not spread it across multiple rounds when the gaps are knowable upfront
-- Field labels must describe exactly what you're asking, specific to this incident — not generic
-- For bounded answer spaces, use select with options tailored to the situation
-- For open descriptions, use textarea with a placeholder hint that reflects the item being reported
-- Use datetime-local for timestamps, date for date-only, number for counts
-- Field IDs must be snake_case and self-describing (e.g. door_fault_type, current_access_situation)
-- Never ask for reportedBy — the frontend supplies it from the signed-in user
-
-WHEN TO DRAFT IMMEDIATELY vs WHEN TO ASK FIRST:
-Draft immediately only if the initial report already contains everything the assigned owner needs.
-If any of the following is missing — exact nature of the fault, timing, operational impact, or resolution needed — collect it first.
-A one-sentence report is rarely enough to draft from. Probe before drafting.
-
-INTAKE INFERENCE:
-- Infer exactly one intake route: Request, Complaint, Feedback, or Internal Reporting
-- Infer the best category and subcategory from approved master data — do not require manual selection
-- Infer priority with a short urgency reason
-- Always populate inferredContext with category, subCategory, intakeRoute, and priority once inferred, even while asking for more details
-
-ENTITY FIELDS — memberName, memberContact, classType, classDateTime, trainer, sessionId, membership:
-These fields refer to a specific named person or class booking in Momence. Include them ONLY when the incident is directly about or requires one.
-Ask yourself: does resolving this issue require knowing who a specific member is, or which specific class booking it relates to?
-If the answer is no — do not include entity fields.
-Before the client-impact check, issues that do not need entity fields include anything physical (door, machine, AC, plumbing, lighting, pest), ambient environment, tech/ops systems, app or Wi-Fi issues.
-Issues that need entity fields: a named member's billing request, a freeze or rollover for a specific person, a complaint about how a trainer treated a named member in a specific class.
-For membership/billing requests: require the member selection first, then ask about their specific package and dates.
-
-ROUTING AND MASTER DATA:
-- Use only approved master-data values for studios, trainers, class types, categories, subcategories, priorities, and associates
-- For the studio field, treat masterData.studios as authoritative; masterData.locations may include routing/location aliases and must not invalidate a selected studio value
-- Use provided routingRules, employees, departments, and locations as authoritative — never invent names, escalation paths, or SLAs
-- Member and class/session fields must use Momence-powered UI pickers, not plain text inputs
-
-CLIENT IMPACT CHECK:
-- After Athena has inferred the issue route/category/subcategory and understands the operational issue, always confirm whether any clients/community members were directly or indirectly affected.
-- Use field ID clientsAffected with select options: Yes - directly affected, Yes - indirectly affected, Yes - directly and indirectly affected, No clients affected, Not confirmed yet.
-- Do not draft or publish until clientsAffected has been answered.
-- If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search. Staff may select one or multiple affected clients from Momence.
-- This client-impact rule is the exception to the usual physical/ops entity-field restriction: even an operational issue needs memberName when affected clients are confirmed.
-- If clientsAffected is "No clients affected" or "Not confirmed yet", do not ask for memberName unless the user later confirms affected clients.
-
-TICKET QUALITY:
-- Title: specific operational summary — name the exact item, area, studio, or person. Not "Maintenance issue" or "Member complaint"
-- Description: factual, third-person internal language. What was reported, what the impact is, what resolution is expected
-- Priority: Critical for safety or access risk, High for service failure affecting classes, Medium for operational issues, Low for cosmetic or deferred items
-- Ticket creation happens only after explicit user approval of the displayed draft
-`.trim();
-
 const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
   intakeRoute: {
     id: 'intakeRoute',
@@ -298,28 +233,28 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
   },
   clientsAffected: {
     id: 'clientsAffected',
-    label: 'Were any clients directly or indirectly affected?',
+    label: 'Were any clients affected?',
     type: 'select',
     required: true,
     options: [...CLIENTS_AFFECTED_OPTIONS],
   },
   studio: {
     id: 'studio',
-    label: 'Studio Space',
+    label: 'Studio',
     type: 'select',
     required: true,
     options: STUDIOS,
   },
   category: {
     id: 'category',
-    label: 'Member Voice Category',
+    label: 'Category',
     type: 'select',
     required: true,
     options: Object.keys(CATEGORIES),
   },
   subCategory: {
     id: 'subCategory',
-    label: 'Specific Touchpoint',
+    label: 'Issue Type',
     type: 'select',
     required: true,
     dependsOn: 'category',
@@ -327,13 +262,13 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
   },
   trainer: {
     id: 'trainer',
-    label: 'Studio Instructor',
+    label: 'Instructor',
     type: 'select',
     options: TRAINERS,
   },
   classType: {
     id: 'classType',
-    label: 'Signature Experience',
+    label: 'Class / Session',
     type: 'select',
     required: true,
     options: CLASS_TYPES,
@@ -346,7 +281,7 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
   },
   memberName: {
     id: 'memberName',
-    label: 'Community Member Name',
+    label: 'Member Name',
     type: 'text',
     required: true,
   },
@@ -371,7 +306,7 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
   },
   desiredResolution: {
     id: 'desiredResolution',
-    label: "Member's requested resolution",
+    label: 'Requested resolution',
     type: 'textarea',
   },
   incidentDateTime: {
@@ -573,6 +508,7 @@ function normalizeInferredContext(input: unknown): Partial<DetailContext> {
   assignString('desiredResolution');
   assignString('urgencyReason');
   assignString('clientsAffected');
+  assignString('membership');
 
   return next;
 }
@@ -756,7 +692,7 @@ function requiredFieldsForIssue(ctx: DetailContext, draft?: DraftTicket | null):
         subCategory: ctx.subCategory || draft.subCategory,
       }
     : ctx;
-  return getMissingIntakeFields(mergedContext);
+  return getMissingIntakeFields(mergedContext, { includeClientImpact: Boolean(draft) });
 }
 
 const MEMBER_ENTITY_KEYS = ['memberId', 'memberName', 'memberContact', 'membership'] as const;
@@ -848,15 +784,15 @@ function buildClientDraft(ctx: DetailContext, text: string): DraftTicket {
   const includeMemberContext = shouldCarryMemberContext(text, ctx);
   const includeSessionContext = shouldCarrySessionContext(text, ctx);
   const description = [
-    `Member voice summary: ${ctx.description || text}`,
+    `Issue summary: ${ctx.description || text}`,
     '',
     'Operational context:',
     ctx.intakeRoute ? `- Intake route: ${ctx.intakeRoute}` : null,
     `- Category: ${category} / ${subCategory}`,
-    includeMemberContext && ctx.memberName ? `- Community member: ${ctx.memberName}` : null,
-    ctx.studio ? `- Studio space: ${ctx.studio}` : null,
-    includeSessionContext && ctx.trainer ? `- Studio instructor: ${ctx.trainer}` : null,
-    includeSessionContext && ctx.classType ? `- Signature experience/session: ${ctx.classType}` : null,
+    includeMemberContext && ctx.memberName ? `- Member: ${ctx.memberName}` : null,
+    ctx.studio ? `- Studio: ${ctx.studio}` : null,
+    includeSessionContext && ctx.trainer ? `- Instructor: ${ctx.trainer}` : null,
+    includeSessionContext && ctx.classType ? `- Class/session: ${ctx.classType}` : null,
     ctx.incidentDateTime ? `- Approx. incident date/time: ${ctx.incidentDateTime}` : null,
     ctx.desiredResolution ? `- Requested resolution: ${ctx.desiredResolution}` : null,
     ...Object.entries(ctx)
@@ -926,7 +862,6 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const [voiceLiveText, setVoiceLiveText] = useState('');
   const [voiceHint, setVoiceHint] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [routingSettings, setRoutingSettings] = useState<RoutingSettings>(() => defaultRoutingSettings());
   const [now, setNow] = useState<Date>(new Date());
   const publishingRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -955,16 +890,6 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
-
-  useEffect(() => {
-    let mounted = true;
-    loadRoutingSettings().then((settings) => {
-      if (mounted) setRoutingSettings(settings);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     const handle = window.setInterval(() => setNow(new Date()), 1000);
@@ -1108,7 +1033,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     if (ctx.subCategory) parts.push(`Sub-category: ${ctx.subCategory}`);
     if (ctx.reportedBy) parts.push(`Reported by: ${ctx.reportedBy}`);
     if (ctx.priority) parts.push(`Priority: ${ctx.priority}`);
-    if (ctx.description) parts.push(`Member stated feedback: ${ctx.description}`);
+    if (ctx.description) parts.push(`Issue summary: ${ctx.description}`);
     if (ctx.incidentDateTime) parts.push(`Incident date/time: ${ctx.incidentDateTime}`);
     if (ctx.desiredResolution) parts.push(`Requested resolution: ${ctx.desiredResolution}`);
     Object.entries(ctx).forEach(([key, value]) => {
@@ -1124,6 +1049,26 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 
   const sendMessage = async (text: string, contextOverride?: DetailContext) => {
     if (!text.trim() || loading) return;
+    if (!contextOverride && !pendingSingleField && isCasualGreeting(text)) {
+      const userMsg: Message = {
+        id: `u-${Date.now()}`,
+        role: 'user',
+        content: text,
+      };
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          aiGenerated: true,
+          content: "Hi, I'm Athena. What are we logging?",
+          suggestedChips: getGreetingQuickActions(),
+        },
+      ]);
+      setInput('');
+      return;
+    }
     let activeContext: DetailContext = { ...(contextOverride || context), reportedBy: reporterName };
     if (!contextOverride && pendingSingleField && pendingSingleField.type !== 'select') {
       activeContext = applyDetailValue(context, pendingSingleField.id, text.trim());
@@ -1181,55 +1126,22 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         ]);
       }
 
-      const userMessages = newMessages.filter((m) => m.id !== 'greet').slice(-8);
-      const firstUserIdx = userMessages.findIndex((m) => m.role === 'user');
-      const apiMessages = userMessages.map((m, idx) => ({
-        role: m.role,
-        content: idx === firstUserIdx && m.role === 'user' && preamble ? preamble + m.content : m.content,
-      }));
-      if (apiMessages.length > 0 && preamble) {
-        apiMessages[apiMessages.length - 1] = {
-          ...apiMessages[apiMessages.length - 1],
-          content: preamble + apiMessages[apiMessages.length - 1].content,
-        };
-      }
+      const missingFields = requiredFieldsForIssue(activeContext);
 
       const { data, error } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
-        body: {
-          action: 'draftTicket',
-          draftOnly: true,
-          approved: false,
+        body: buildAthenaDraftRequestBody({
           aiProvider: import.meta.env.VITE_AI_PROVIDER || 'deepseek',
-          instructions: ATHENA_SYSTEM_PROMPT,
-          masterData: {
-            routes: INTAKE_ROUTES,
-            studios: STUDIOS,
-            instructors: TRAINERS,
-            classTypes: CLASS_TYPES,
-            categories: CATEGORIES,
-            routingRules: routingSettings.routingRules.filter((rule) => rule.active).slice(0, 260),
-            departments: routingSettings.departments.filter((department) => department.active).map((department) => department.name),
-            locations: buildMasterDataLocationNames(routingSettings.locations),
-            associates: ASSOCIATES.map((associate) => associate.name),
-            employees: routingSettings.employees.filter((employee) => employee.active).map((employee) => ({
-              name: employee.name,
-              department: employee.department,
-              location: employee.location,
-              manager: employee.manager,
-            })),
-            priorities: Object.keys(PRIORITY_SLA),
-            sentiments: MEMBER_SENTIMENT_OPTIONS,
-          },
-          messages: apiMessages,
+          messages: newMessages,
+          preamble,
           conversationId,
           context: activeContext,
           intakeContract: {
-            missingFields: requiredFieldsForIssue(activeContext),
-            fields: requiredFieldsForIssue(activeContext)
+            missingFields,
+            fields: missingFields
               .map((id) => getDetailField(id))
               .filter(Boolean),
           },
-        },
+        }),
       });
 
       if (error) throw error;
@@ -1993,11 +1905,12 @@ const PublishedTicketSummary: React.FC<{ ticketId: string; ticket?: Ticket }> = 
 
 const fieldHelpText = (field: DetailFormField): string => {
   const id = String(field.id);
-  if (id === 'clientsAffected') return 'Confirm whether a community member was directly or indirectly impacted before Athena drafts the ticket.';
-  if (id === 'memberName' || id === 'memberContact' || id === 'membership') return 'Use Momence search where possible so the member record, contact and membership stay consistent.';
-  if (id === 'classType' || id === 'sessionId' || id === 'classDateTime' || id === 'trainer') return 'Use Momence session search when this relates to a specific studio session or instructor touchpoint.';
+  if (id === 'clientsAffected') return 'Confirm whether clients were impacted before publishing the ticket.';
+  if (id === 'memberName' || id === 'memberContact') return 'Use Momence search where possible so the member record and contact stay consistent.';
+  if (id === 'membership') return 'Choose the active package from Momence results when available, or from the standard membership list.';
+  if (id === 'classType' || id === 'sessionId' || id === 'classDateTime' || id === 'trainer') return 'Choose the relevant class/session context for the member issue.';
   if (id === 'priority') return 'Choose the operational urgency. Safety, access and retention-risk issues should be High or Critical.';
-  if (id === 'description') return 'Capture the member voice, concrete facts, and what happened without adding subjective interpretation.';
+  if (id === 'description') return 'Capture the concrete facts and what happened without adding subjective interpretation.';
   if (id === 'desiredResolution') return 'Document what the member asked Physique 57 to do next, including their preferred follow-up channel.';
   if (id === 'incidentDateTime') return 'Use the earliest known time the issue was noticed, reported, or experienced.';
   if (id === 'category' || id === 'subCategory') return 'Pick the closest routing category so ownership, analytics and SLA handling stay accurate.';
@@ -2064,13 +1977,13 @@ const DetailCaptureForm: React.FC<{
     if (initialContext[key]) initialValues[key] = initialContext[key] || '';
   }
   const [values, setValues] = useState<Record<string, string>>(initialValues);
-  const [membershipOptions, setMembershipOptions] = useState<string[]>([]);
+  const [membershipOptions, setMembershipOptions] = useState<string[]>(MEMBERSHIPS);
   const hasMemberFields = form.fields.some((field) => field.id === 'memberName' || field.id === 'memberContact');
   const hasSessionFields = form.fields.some((field) => field.id === 'classType' || field.id === 'classDateTime' || field.id === 'sessionId');
 
   useEffect(() => {
     if (!values.memberId) {
-      setMembershipOptions([]);
+      setMembershipOptions(MEMBERSHIPS);
       return;
     }
     let cancelled = false;
@@ -2079,7 +1992,7 @@ const DetailCaptureForm: React.FC<{
         if (!cancelled) setMembershipOptions(options);
       })
       .catch(() => {
-        if (!cancelled) setMembershipOptions([]);
+        if (!cancelled) setMembershipOptions(MEMBERSHIPS);
       });
     return () => {
       cancelled = true;
@@ -2145,7 +2058,7 @@ const DetailCaptureForm: React.FC<{
                 memberId: appendCsvUnique(current.memberId, member.id),
                 memberName: appendCsvUnique(current.memberName, member.name),
                 memberContact: appendCsvUnique(current.memberContact, member.email || member.phoneNumber || member.description || ''),
-                membership: '',
+                membership: current.membership || '',
               }));
             }}
             onRemove={(memberName) => {
@@ -2169,7 +2082,9 @@ const DetailCaptureForm: React.FC<{
             onRemove={(sessionName) => {
               setValues((current) => ({
                 ...current,
+                sessionId: '',
                 classType: removeCsvItem(current.classType, sessionName),
+                classDateTime: '',
               }));
             }}
           />
@@ -2189,7 +2104,7 @@ const DetailCaptureForm: React.FC<{
               : field.id === 'membership' && values.memberId
                 ? membershipOptions
                 : field.id === 'membership'
-                  ? []
+                  ? MEMBERSHIPS
                   : field.options || [];
 
           return (
@@ -2220,18 +2135,26 @@ const DetailCaptureForm: React.FC<{
               </div>
               {field.type === 'select' ? (
                 (() => {
-                  const forceSingle = new Set(['intakeRoute', 'category', 'subCategory', 'priority', 'studio', 'memberSentiment', 'clientsAffected']);
+                  const forceSingle = new Set(['intakeRoute', 'category', 'subCategory', 'priority', 'studio', 'memberSentiment', 'clientsAffected', 'membership']);
                   const isMulti = !forceSingle.has(field.id);
+                  const disabledSelect = field.id === 'subCategory' && !values.category;
+                  const useButtons = !isMulti && !disabledSelect && shouldUseOptionButtons({ id, optionCount: options.length });
                   return isMulti ? (
                     <MultiSelectDropdown
                       value={values[id] || ''}
                       options={options}
                       placeholder={
-                        field.id === 'membership' && !values.memberId
-                          ? 'Select a Momence member first'
-                          : `Select ${field.label.toLowerCase()}`
+                        `Select ${field.label.toLowerCase()}`
                       }
-                      disabled={field.id === 'membership' && !values.memberId}
+                      disabled={disabledSelect}
+                      onChange={(nextValue) => setValue(id, nextValue)}
+                    />
+                  ) : useButtons ? (
+                    <OptionButtonGroup
+                      id={`detail-${id}`}
+                      label={field.label}
+                      value={values[id] || ''}
+                      options={options}
                       onChange={(nextValue) => setValue(id, nextValue)}
                     />
                   ) : (
@@ -2239,13 +2162,11 @@ const DetailCaptureForm: React.FC<{
                   id={`detail-${id}`}
                   value={values[id] || ''}
                   onChange={(event) => setValue(id, event.target.value)}
-                  disabled={(field.id === 'membership' && !values.memberId) || (field.id === 'subCategory' && !values.category)}
+                  disabled={disabledSelect}
                   className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-500/10 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
                 >
                   <option value="">
-                    {field.id === 'membership' && !values.memberId
-                      ? 'Select a Momence member first'
-                      : field.id === 'subCategory' && !values.category
+                    {field.id === 'subCategory' && !values.category
                         ? 'Select category first'
                       : `Select ${field.label.toLowerCase()}`}
                   </option>
@@ -2262,7 +2183,7 @@ const DetailCaptureForm: React.FC<{
                   onChange={(event) => setValue(id, event.target.value)}
                   rows={4}
                   className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-500/10"
-                  placeholder="Capture what the member stated..."
+                  placeholder="Describe the issue and relevant details..."
                 />
               ) : (
                 <input
@@ -2293,6 +2214,35 @@ const DetailCaptureForm: React.FC<{
     </form>
   );
 };
+
+const OptionButtonGroup: React.FC<{
+  id: string;
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}> = ({ id, label, value, options, onChange }) => (
+  <div id={id} role="group" aria-label={label} className="flex flex-wrap gap-2">
+    {options.map((option) => {
+      const selected = value === option;
+      return (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          className={`min-h-10 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-rose-500/15 ${
+            selected
+              ? 'border-rose-700 bg-rose-700 text-white shadow-sm'
+              : 'border-slate-200 bg-slate-50 text-stone-700 hover:border-rose-200 hover:bg-white'
+          }`}
+          aria-pressed={selected}
+        >
+          {option}
+        </button>
+      );
+    })}
+  </div>
+);
 
 const MultiSelectDropdown: React.FC<{
   value: string;
@@ -2413,9 +2363,10 @@ function formatMembershipOption(membership: MomenceMembership): string {
 
 async function loadActiveMembershipOptions(memberId: string): Promise<string[]> {
   const memberships = await getMomenceMemberMemberships(memberId);
-  return memberships
+  const activeMembershipOptions = memberships
     .filter((membership) => !membership.isFrozen)
     .map(formatMembershipOption);
+  return Array.from(new Set([...activeMembershipOptions, ...MEMBERSHIPS]));
 }
 
 const MomenceMemberFormField: React.FC<{
@@ -2513,6 +2464,14 @@ const MomenceSessionFormField: React.FC<{
 
   useEffect(() => {
     const handle = window.setTimeout(async () => {
+      const selectedSessions = (values.classType || '')
+        .split('|')
+        .map((sessionName) => sessionName.trim().toLowerCase())
+        .filter(Boolean);
+      if (selectedSessions.includes(query.trim().toLowerCase()) || query.trim().length < 2) {
+        setOptions([]);
+        return;
+      }
       try {
         setError(null);
         setOptions(await searchMomenceSessions(query));
@@ -2521,7 +2480,7 @@ const MomenceSessionFormField: React.FC<{
       }
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [query]);
+  }, [query, values.classType]);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-rose-500 focus-within:ring-4 focus-within:ring-rose-500/10 md:col-span-2">
@@ -2530,7 +2489,10 @@ const MomenceSessionFormField: React.FC<{
       </span>
       <input
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          if (values.classType && event.target.value !== values.classType) setOptions([]);
+        }}
         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
         placeholder="Search Momence sessions by class, instructor, studio, or date"
       />
@@ -2541,7 +2503,11 @@ const MomenceSessionFormField: React.FC<{
             <button
               key={sessionName}
               type="button"
-              onClick={() => onRemove(sessionName)}
+              onClick={() => {
+                setQuery('');
+                setOptions([]);
+                onRemove(sessionName);
+              }}
               className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800"
               title="Remove session"
             >
@@ -2559,7 +2525,7 @@ const MomenceSessionFormField: React.FC<{
               type="button"
               onClick={() => {
                 onSelect(option);
-                setQuery(option.label);
+                setQuery(option.classType);
                 setOptions([]);
               }}
               className="block w-full border-b border-stone-100 px-3 py-2 text-left text-xs last:border-0 hover:bg-slate-50"

@@ -595,7 +595,7 @@ export const REQUEST_TYPES = [
   'Class Credit Extension',
   'Refund / Billing Review',
   'Hosted Class Feedback',
-  'General Member Voice',
+  'General Feedback',
   'Operational Issue',
   'Safety Concern',
   'Digital / App Support',

@@ -149,7 +149,7 @@ export const TicketDashboard: React.FC = () => {
               Submitted Tickets
             </h2>
             <p className="text-sm text-stone-500">
-              Newest tickets appear first across member voice, SLA risk, assignments and trends.
+              Newest tickets appear first across client feedback, SLA risk, assignments and trends.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

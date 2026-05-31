@@ -356,7 +356,7 @@ const TriageQueuePanel: React.FC = () => {
     { title: 'Awaiting Member', description: 'Blocked on member response', tickets: newestByDate(awaiting), tone: 'emerald' as const },
   ];
   return (
-    <WorkspacePanel title="Triage Queue" description="Live operational queue for active member voice follow-up.">
+    <WorkspacePanel title="Triage Queue" description="Live operational queue for active client follow-up.">
       <div className="grid gap-3 md:grid-cols-6">
         <StatCard label="Open" value={openTickets.length} />
         <StatCard label="Breached" value={breached.length} tone="danger" />

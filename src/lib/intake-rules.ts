@@ -1,5 +1,51 @@
 export type IntakePriority = 'Critical' | 'High' | 'Medium' | 'Low';
 
+const KNOWN_MEMBERSHIP_NAMES = [
+  'Barre 1 month Unlimited',
+  'Barre 2 week Unlimited',
+  'Barre 3 months Unlimited',
+  'Barre 6 month Unlimited',
+  'Barre Annual Membership',
+  'Newcomers 2 For 1',
+  "Owner's Special - 2 for 1",
+  'powerCycle 1 month Unlimited',
+  'powerCycle 2 week Unlimited',
+  'powerCycle 3 months Unlimited',
+  'powerCycle 6 months Unlimited',
+  'powerCycle Annual Membership',
+  'Strength Lab 1 month Unlimited',
+  'Strength Lab 2 week Unlimited',
+  'Strength Lab 3 months Unlimited',
+  'Strength Lab 6 months Unlimited',
+  'Strength Lab Annual Membership',
+  'Studio 1 Month Unlimited Membership',
+  'Studio 10 Single Class Pack',
+  'Studio 12 Class Package',
+  'Studio 2 Week Unlimited Membership',
+  'Studio 20 Single Class Pack',
+  'Studio 3 Month U/L Monthly Installment',
+  'Studio 3 Month Unlimited Membership',
+  'Studio 30 Single Class Pack',
+  'Studio 4 Class Package',
+  'Studio 6 Month Unlimited Membership',
+  'Studio 8 Class Package',
+  'Studio Annual Membership - Monthly Intsallment',
+  'Studio Annual Unlimited Membership',
+  'Studio Extended 10 Single Class Pack',
+  'Studio Happy Hour Private',
+  'Studio Newcomers 2 Week Unlimited Membership',
+  'Studio Private - Anisha (Single Class)',
+  'Studio Private Class',
+  'Studio Private Class X 10',
+  'Studio Privates - Anisha x 10',
+  'Studio Single Class',
+  'Summer Bootcamp - Studio 6 Week Unlimited',
+  'Virtual Private - Anisha',
+  'Virtual Private Class',
+  'Virtual Private Class X 10',
+  'Virtual Privates - Anisha x 10',
+];
+
 export interface IntakeContext {
   intakeRoute?: string;
   requestType?: string;
@@ -22,6 +68,7 @@ export interface IntakeContext {
   desiredResolution?: string;
   urgencyReason?: string;
   memberSentiment?: string;
+  momencePurchaseContext?: string;
   freezeStartDate?: string;
   freezeEndDate?: string;
   freezeReason?: string;
@@ -101,29 +148,39 @@ export interface IntakeFieldDefinition {
   dependsOn?: string;
 }
 
+export interface MissingIntakeFieldOptions {
+  includeClientImpact?: boolean;
+}
+
 const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
   intakeRoute: { id: 'intakeRoute', label: 'Intake Route', type: 'select', required: true, options: INTAKE_ROUTES },
   clientsAffected: {
     id: 'clientsAffected',
-    label: 'Were any clients directly or indirectly affected?',
+    label: 'Were any clients affected?',
     type: 'select',
     required: true,
     options: [...CLIENTS_AFFECTED_OPTIONS],
   },
-  category: { id: 'category', label: 'Member Voice Category', type: 'select', required: true },
-  subCategory: { id: 'subCategory', label: 'Specific Touchpoint', type: 'select', required: true, dependsOn: 'category' },
-  studio: { id: 'studio', label: 'Studio Space', type: 'select', required: true },
+  category: { id: 'category', label: 'Category', type: 'select', required: true },
+  subCategory: { id: 'subCategory', label: 'Issue type', type: 'select', required: true, dependsOn: 'category' },
+  studio: { id: 'studio', label: 'Studio', type: 'select', required: true },
   incidentDateTime: { id: 'incidentDateTime', label: 'When was this first noticed?', type: 'datetime-local', required: true },
   reportedBy: { id: 'reportedBy', label: 'Documented By', type: 'text', required: true },
   priority: { id: 'priority', label: 'Priority', type: 'select', required: true, options: ['Critical', 'High', 'Medium', 'Low'] },
-  description: { id: 'description', label: 'Member stated feedback or operational summary', type: 'textarea', required: true },
-  memberName: { id: 'memberName', label: 'Community Member', type: 'text', required: true },
+  description: { id: 'description', label: 'Issue summary', type: 'textarea', required: true },
+  memberName: { id: 'memberName', label: 'Member', type: 'text', required: true },
   memberContact: { id: 'memberContact', label: 'Member Contact', type: 'text' },
   classType: { id: 'classType', label: 'Momence Class / Session', type: 'select', required: true },
-  trainer: { id: 'trainer', label: 'Studio Instructor', type: 'select' },
+  trainer: { id: 'trainer', label: 'Instructor', type: 'select' },
   membership: { id: 'membership', label: 'Active Package / Membership', type: 'select', required: true },
-  desiredResolution: { id: 'desiredResolution', label: "Member's requested resolution", type: 'textarea' },
+  desiredResolution: { id: 'desiredResolution', label: 'Requested resolution', type: 'textarea' },
   memberSentiment: { id: 'memberSentiment', label: 'Member Sentiment', type: 'select' },
+  momencePurchaseContext: {
+    id: 'momencePurchaseContext',
+    label: 'Momence purchase/payment context',
+    type: 'textarea',
+    required: true,
+  },
   freezeStartDate: { id: 'freezeStartDate', label: 'Requested Freeze Start Date', type: 'date', required: true },
   freezeEndDate: { id: 'freezeEndDate', label: 'Requested Freeze End Date', type: 'date', required: true },
   freezeReason: { id: 'freezeReason', label: 'Freeze Reason Stated by Member', type: 'select', required: true },
@@ -184,7 +241,7 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
     required: true,
     options: ['Light not working', 'Flickering light', 'Socket not working', 'Exposed/loose wiring', 'Trip or power loss', 'Other / unsure'],
   },
-  affectedArea: { id: 'affectedArea', label: 'Affected area inside the studio space', type: 'text', required: true },
+  affectedArea: { id: 'affectedArea', label: 'Affected area inside the studio', type: 'text', required: true },
   operationalImpact: {
     id: 'operationalImpact',
     label: 'Operational impact right now',
@@ -234,6 +291,143 @@ function hasConfirmedAffectedClients(value?: string): boolean {
   return /^yes\b/i.test(value?.trim() || '');
 }
 
+function shouldRequireClientImpactCheck(context: IntakeContext, issueText: string): boolean {
+  if (!isMissingIntakeValue(context.clientsAffected)) return false;
+
+  const route = (context.intakeRoute || '').toLowerCase();
+  const category = context.category || '';
+  const lower = issueText.toLowerCase();
+
+  if (hasConfirmedAffectedClients(context.clientsAffected)) return false;
+
+  if (
+    /\b(member|client|customer|guest|prospect|attendee|lead|class|session|booking|waitlist|refund|billing|payment|membership|package|freeze|roll\s?over|extension|complain|complaint|said|reported|requested|felt|uncomfortable|walked out|injury|medical|theft|harass)\b/.test(lower)
+  ) {
+    return true;
+  }
+
+  if (PHYSICAL_ONLY_CATEGORIES.has(category)) return false;
+
+  return [
+    'Customer Service and Communication',
+    'Pricing and Memberships',
+    'Billing & Membership',
+    'Sales & Consultation',
+    'Hosted Class & Partnerships',
+    'Trainer Feedback',
+    'Class Experience',
+    'Scheduling',
+    'Booking & Schedule',
+    'Front Desk & Service',
+    'Instructor & Class Quality',
+    'Safety and Security',
+    'Safety & Medical',
+    'Theft and Lost Items',
+    'Member Progress & Transformation',
+  ].includes(category) || route === 'complaint';
+}
+
+function shouldRequireNamedMemberContext(context: IntakeContext, issueText: string): boolean {
+  if (!isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName)) return false;
+
+  const category = context.category || '';
+  if (PHYSICAL_ONLY_CATEGORIES.has(category)) return false;
+
+  const entityText = [
+    context.initialReport,
+    context.description,
+    context.requestType,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const lower = [
+    entityText,
+    context.intakeRoute,
+    context.category,
+    context.subCategory,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const mentionsMember = /\b(member|client|customer|guest|prospect)\b/.test(entityText);
+  const needsPersonalFollowUp =
+    /refund|billing|payment|membership|package|freeze|roll\s?over|extension|renewal|cancel|complain|complaint|follow-up|follow up|contact|whatsapp|email|phone|profile|account/.test(lower);
+
+  return mentionsMember && needsPersonalFollowUp;
+}
+
+function shouldRequireCommercialVerificationContext(context: IntakeContext, issueText: string): boolean {
+  const category = context.category || '';
+  if (PHYSICAL_ONLY_CATEGORIES.has(category)) return false;
+
+  const lower = [
+    issueText,
+    context.initialReport,
+    context.description,
+    context.requestType,
+    context.category,
+    context.subCategory,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const memberReference = /\b(member|client|customer|guest|prospect)\b/.test(lower) || !isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName);
+  if (!memberReference) return false;
+
+  const commercialConcern =
+    /refund|billing|payment|paid|amount|charge|charged|invoice|receipt|purchase|membership|package|renewal|expiry|credit|waiver|freeze|pause|roll\s?over|extension|pricing|price/.test(lower) ||
+    ['Pricing and Memberships', 'Billing & Membership'].includes(category);
+
+  const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
+  const classAccessConcern =
+    mentionsClassContext &&
+    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+
+  return commercialConcern || classAccessConcern;
+}
+
+function shouldRequireClassAccessVerification(context: IntakeContext, issueText: string): boolean {
+  if (!shouldRequireCommercialVerificationContext(context, issueText)) return false;
+
+  const lower = [
+    issueText,
+    context.initialReport,
+    context.description,
+    context.requestType,
+    context.category,
+    context.subCategory,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower) &&
+    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+}
+
+function shouldRequireComplaintResolution(context: IntakeContext, issueText: string): boolean {
+  if (!isMissingIntakeValue(context.desiredResolution)) return false;
+  if (!shouldRequireNamedMemberContext({ ...context, memberId: undefined, memberName: undefined }, issueText)) return false;
+
+  const lower = [
+    context.initialReport,
+    context.description,
+    context.requestType,
+    context.category,
+    context.subCategory,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (/wants?\s+(a\s+)?(follow-?up|call|email|whatsapp|refund|waiver|extension|credit)|requested\s+(a\s+)?(follow-?up|call|email|whatsapp|refund|waiver|extension|credit)/.test(lower)) {
+    return false;
+  }
+
+  return /complain|complaint|refund|billing|payment|delay|not resolved|follow-?up/.test(lower);
+}
+
+function shouldRequireFullIssueSummary(context: IntakeContext, issueText: string): boolean {
+  const description = context.description?.trim() || '';
+  if (!description) return true;
+  if (!shouldRequireNamedMemberContext({ ...context, memberId: undefined, memberName: undefined }, issueText)) return false;
+
+  const lower = [
+    context.initialReport,
+    context.description,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return description.length < 60 && /complain|complaint|refund|billing|payment|delay|not resolved/.test(lower);
+}
+
 export function isMissingIntakeValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value !== 'string') return false;
@@ -256,6 +450,64 @@ function buildIssueText(context: IntakeContext, extraText = ''): string {
     context.subCategory,
     context.description,
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function normalizeMembershipText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/owner['’]s/g, 'owners')
+    .replace(/\bu\/l\b/g, 'unlimited')
+    .replace(/\bintsallment\b/g, 'installment')
+    .replace(/\bmonths\b/g, 'month')
+    .replace(/\bclasses\b/g, 'class')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function inferMembershipFromText(text: string): string | undefined {
+  const normalizedText = normalizeMembershipText(text);
+  if (!normalizedText) return undefined;
+
+  const directMatch = KNOWN_MEMBERSHIP_NAMES.find((membership) =>
+    normalizedText.includes(normalizeMembershipText(membership))
+  );
+  if (directMatch) return directMatch;
+
+  const methodPrefix =
+    /\bpower cycle\b.{0,36}\b(?:annual|year|6 month|3 month|2 week|1 month|unlimited|membership|package)\b/.test(normalizedText) ? 'powerCycle'
+      : /\bstrength lab\b.{0,36}\b(?:annual|year|6 month|3 month|2 week|1 month|unlimited|membership|package)\b/.test(normalizedText) ? 'Strength Lab'
+        : /\bbarre\b.{0,36}\b(?:annual|year|6 month|3 month|2 week|1 month|unlimited|membership|package)\b/.test(normalizedText) ? 'Barre'
+          : 'Studio';
+
+  const duration =
+    /\bannual|year\b/.test(normalizedText) ? 'annual'
+      : /\b6\s*month\b/.test(normalizedText) ? '6 month'
+        : /\b3\s*month\b/.test(normalizedText) ? '3 month'
+          : /\b2\s*week\b/.test(normalizedText) ? '2 week'
+            : /\b1\s*month\b/.test(normalizedText) ? '1 month'
+              : undefined;
+  if (!duration) return undefined;
+
+  const packageKind =
+    /\bunlimited|u l\b/.test(normalizedText) ? 'unlimited'
+      : /\bsingle\s*class|class\s*pack|package\b/.test(normalizedText) ? 'package'
+        : undefined;
+  if (!packageKind) return undefined;
+
+  let candidates = KNOWN_MEMBERSHIP_NAMES.filter((membership) => {
+    const normalizedMembership = normalizeMembershipText(membership);
+    return normalizedMembership.includes(normalizeMembershipText(methodPrefix)) &&
+      normalizedMembership.includes(duration) &&
+      normalizedMembership.includes(packageKind);
+  });
+
+  if (/\bunlimited\b/.test(normalizedText) && !/\binstallment\b/.test(normalizedText)) {
+    const nonInstallment = candidates.filter((membership) => !/\binstall?ment|intsallment/i.test(membership));
+    if (nonInstallment.length) candidates = nonInstallment;
+  }
+
+  return candidates[0] || undefined;
 }
 
 function getIssueProfileFieldIds(context: IntakeContext): string[] {
@@ -429,7 +681,12 @@ export function inferIntakeContextFromText(text: string, context: IntakeContext 
   }
 
   if (!context.urgencyReason && inferred.priority) {
-    inferred.urgencyReason = `Priority inferred as ${inferred.priority} from the documented member voice.`;
+    inferred.urgencyReason = `Priority inferred as ${inferred.priority} from the report.`;
+  }
+
+  if (isMissingIntakeValue(context.membership)) {
+    const membership = inferMembershipFromText(lower);
+    if (membership) inferred.membership = membership;
   }
 
   if (isMissingIntakeValue(context.studio)) {
@@ -443,11 +700,12 @@ export function inferIntakeContextFromText(text: string, context: IntakeContext 
   return inferred;
 }
 
-export function getMissingIntakeFields(context: IntakeContext): string[] {
+export function getMissingIntakeFields(context: IntakeContext, options: MissingIntakeFieldOptions = {}): string[] {
   const fields: string[] = [];
   const add = (field: string, value?: string | null) => {
     if (isMissingIntakeValue(value) && !fields.includes(field)) fields.push(field);
   };
+  const includeClientImpact = options.includeClientImpact ?? true;
 
   const route = context.intakeRoute || '';
   const category = context.category || '';
@@ -466,6 +724,8 @@ export function getMissingIntakeFields(context: IntakeContext): string[] {
   const categoryPathText = `${category} ${subCategory} ${issueText}`.toLowerCase();
   const membershipSpecific =
     /freeze|pause|roll|extension|membership|package|renewal|upgrade|downgrade|auto-renew|refund|expiry|credit|class pack|billing|payment/.test(issueText);
+  const commercialVerification = shouldRequireCommercialVerificationContext(context, issueText);
+  const classAccessVerification = shouldRequireClassAccessVerification(context, issueText);
   const hostedSpecific = /hosted|partner|influencer|partnership/.test(issueText) || category === 'Hosted Class & Partnerships';
   const prioritySpecific =
     routeLower !== 'feedback' ||
@@ -484,7 +744,26 @@ export function getMissingIntakeFields(context: IntakeContext): string[] {
     getIssueProfileFieldIds(context).forEach((field) => add(field, context[field]));
   }
 
-  add('clientsAffected', context.clientsAffected);
+  if (shouldRequireNamedMemberContext(context, issueText)) {
+    add('memberName', context.memberId || context.memberName);
+  }
+
+  if (commercialVerification) {
+    add('studio', context.studio);
+    add('memberName', context.memberId || context.memberName);
+    add('membership', context.membership);
+    add('incidentDateTime', context.incidentDateTime);
+    add('momencePurchaseContext', context.momencePurchaseContext);
+    add('desiredResolution', context.desiredResolution);
+    add('memberSentiment', context.memberSentiment);
+    if (classAccessVerification) {
+      add('classType', context.sessionId || context.classType);
+    }
+  }
+
+  if (includeClientImpact && shouldRequireClientImpactCheck(context, issueText)) {
+    add('clientsAffected', context.clientsAffected);
+  }
   const requireAffectedClientSelection = hasConfirmedAffectedClients(context.clientsAffected);
 
   if (requireAffectedClientSelection) {
@@ -522,7 +801,7 @@ export function getMissingIntakeFields(context: IntakeContext): string[] {
     }
   }
 
-  if ((routeLower === 'request' || routeLower === 'complaint') && /desired resolution|requested resolution|what resolution|what does the member want/.test(issueText)) {
+  if (shouldRequireComplaintResolution(context, issueText) || ((routeLower === 'request' || routeLower === 'complaint') && /desired resolution|requested resolution|what resolution|what does the member want/.test(issueText))) {
     add('desiredResolution', context.desiredResolution);
   }
   if ((routeLower === 'feedback' || routeLower === 'complaint') && /sentiment unclear|member sentiment|how upset|frustration level/.test(issueText)) {
@@ -535,7 +814,7 @@ export function getMissingIntakeFields(context: IntakeContext): string[] {
   // operational detail — not the generic 'description' field. Don't require description
   // for those categories; let the AI reason about what specific questions to ask.
   if (!isPhysicalCategory) {
-    add('description', context.description);
+    add('description', shouldRequireFullIssueSummary(context, issueText) ? '' : context.description);
   }
 
   return fields;

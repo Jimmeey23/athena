@@ -44,6 +44,7 @@ export interface TicketReviewInsights {
   confidence: TicketReviewConfidence[];
   routingRationale: string[];
   momenceChips: string[];
+  riskSignals: string[];
   duplicateWarning?: {
     ticketId: string;
     title: string;
@@ -150,14 +151,37 @@ export function buildTicketReviewInsights({
       ])
     : [];
 
+  const combinedRiskText = [
+    draft.title,
+    draft.description,
+    draft.category,
+    draft.subCategory,
+    draft.sentiment,
+    context.desiredResolution,
+    ...(momenceSummary?.member?.tags || []),
+    momenceSummary?.noteOverview.latestNote,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const slaHours = PRIORITY_SLA[draft.priority]?.hours ?? PRIORITY_SLA.Medium.hours;
+  const riskSignals = unique([
+    /frustrat|anger|angry|refund|cancel|unhappy|dissatisf|retention|churn|not renew|renewal/.test(combinedRiskText)
+      ? 'Retention risk: frustration/refund/cancellation signal needs proactive follow-up.'
+      : undefined,
+    draft.priority === 'Critical' || draft.priority === 'High'
+      ? `SLA risk: ${draft.priority} priority ticket should be published promptly to start the ${slaHours}h SLA clock.`
+      : undefined,
+    duplicateTicket
+      ? `Duplicate risk: possible existing ticket ${duplicateTicket.id} should be linked or merged if it is the same issue.`
+      : undefined,
+  ]);
+
   const sections: TicketReviewSection[] = [
     {
-      title: 'Member voice',
+      title: 'Client details',
       items: unique([
-        draft.memberName || 'No community member selected',
+        draft.memberName || 'No member selected',
         draft.memberContact || undefined,
         draft.sentiment || undefined,
-        draft.description || 'No member voice captured yet',
+        draft.description || 'No issue summary captured yet',
       ]),
     },
     {
@@ -189,7 +213,7 @@ export function buildTicketReviewInsights({
 
   return {
     confidence: [
-      { label: 'Classification', score: classificationScore, detail: 'Category, subcategory and member voice completeness' },
+      { label: 'Classification', score: classificationScore, detail: 'Category, subcategory and summary completeness' },
       { label: 'Priority', score: priorityScore, detail: 'Priority, sentiment and impact signals' },
       { label: 'Routing', score: routingScore, detail: 'Department, owner, studio and reporter readiness' },
       { label: 'SLA', score: slaScore, detail: 'Priority-to-SLA mapping readiness' },
@@ -197,6 +221,7 @@ export function buildTicketReviewInsights({
     ],
     routingRationale,
     momenceChips,
+    riskSignals,
     duplicateWarning: duplicateTicket
       ? {
           ticketId: duplicateTicket.id,

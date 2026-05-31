@@ -25,6 +25,8 @@ type DraftTicket = {
   tags?: string[];
   sentiment?: string | null;
   conversationSummary?: string | null;
+  assignedTo?: string | null;
+  department?: string | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -45,6 +47,7 @@ type RequestBody = {
   context?: Record<string, unknown>;
   intakeContract?: Record<string, unknown>;
   masterData?: Record<string, unknown>;
+  promptProfile?: string;
   reportId?: string;
   period?: Record<string, unknown>;
   filters?: Record<string, unknown>;
@@ -56,9 +59,7 @@ type RequestBody = {
   aiProvider?: AiProvider;
 };
 
-// This is the fallback prompt used only when the frontend does not send instructions.
-// The authoritative prompt is in ChatInterface.tsx and is always sent as body.instructions.
-// Keep both in sync.
+// Authoritative Athena prompt. The frontend sends a compact prompt profile, not prompt text.
 const ATHENA_SYSTEM_PROMPT = `
 You are Athena, the Physique 57 India internal operations ticket intake assistant.
 
@@ -76,7 +77,10 @@ IMPORTANT — for physical, maintenance, or facility issues:
 Never use 'description' as a field ID. Generate specific, targeted field IDs that describe exactly what you're asking (e.g. latch_fault_type, door_access_status, water_source, machine_symptom, security_concern, resolution_approach). The first form must collect the full operational picture — fault specifics, current access or safety implications, and the expected resolution — all in one go. Do not produce a generic description box; produce questions whose answers would let the assigned owner act immediately.
 
 FORM DESIGN RULES:
+- Sound like a helpful internal AI assistant. If the user only greets you or uses small talk, reply naturally and ask what they want to log. Do not open a ticket form from a greeting.
+- Use plain operational labels in user-facing copy: member, client, studio, class/session, instructor, category, issue type. Avoid heavy brand lingo like "Member Voice", "Studio Space", "Signature Experience", or "Community Member" unless quoting source data.
 - Collect all missing information in ONE detailForm — do not spread it across multiple rounds when the gaps are knowable upfront
+- Keep the first intake lightweight: prefer 2-3 grouped, high-signal questions. Add extra required fields only when the owner could not act without them.
 - Field labels must describe exactly what you're asking, specific to this incident — not generic
 - For bounded answer spaces, use select with options tailored to the situation
 - For open descriptions, use textarea with a placeholder hint that reflects the item being reported
@@ -103,15 +107,23 @@ Before the client-impact check, issues that do not need entity fields include an
 Issues that need entity fields: a named member's billing request, a freeze or rollover for a specific person, a complaint about how a trainer treated a named member in a specific class.
 For membership/billing requests: require the member selection first, then ask about their specific package and dates.
 
+MEMBER COMMERCIAL / CLASS-ACCESS INCIDENTS:
+When the report involves a named or identifiable member plus any package, payment, purchase, refund, billing, membership, renewal, expiry, credit, waiver, class-entry, eligibility, first-class restriction, late-entry, or policy-dispute issue, do not draft a ticket until the operational verification context is complete.
+Reason from the issue family, not from fixed examples or canned responses. The missing context may vary, but the owner usually needs: studio, selected Momence member, active package/membership, relevant Momence purchase/payment context available to staff (amount paid, purchase date, invoice/receipt/payment status, or a note that it is not visible), relevant class/session when the dispute is tied to a session or entry decision, what policy or communication the member says they received, what resolution was offered, the member's response, member sentiment, and the requested outcome.
+Use existing canonical fields where possible: studio, memberName, membership, classType, incidentDateTime, momencePurchaseContext, desiredResolution, and memberSentiment. For issue-specific gaps such as "policy communication received" or "resolution offered", create targeted snake_case fields rather than a generic description field.
+Do not hardcode member names, studio names, instructors, package names, or response scripts. Ask only for context that is missing from the current conversation or selected Momence context.
+
 ROUTING AND MASTER DATA:
 - Use only approved master-data values for studios, trainers, class types, categories, subcategories, priorities, and associates
 - Use provided routingRules, employees, departments, and locations as authoritative — never invent names, escalation paths, or SLAs
 - Member and class/session fields must use Momence-powered UI pickers, not plain text inputs
 
 CLIENT IMPACT CHECK:
-- After Athena has inferred the issue route/category/subcategory and understands the operational issue, always confirm whether any clients/community members were directly or indirectly affected.
+- Treat clientsAffected as a pre-publish check, not a first-turn intake question. Do not ask it before the ticket draft unless the user already raised client impact and the answer is needed to identify affected clients.
+- Ask whether clients were affected ONLY when the report plausibly involves members/clients, a class/session, booking, billing/membership, sales/lead activity, safety/security, front desk/customer service, or the user explicitly mentions members, clients, guests, attendees, prospects, discomfort, complaints, or class impact.
+- Do NOT ask for clientsAffected for purely internal operational/facility issues when no client impact is mentioned, such as "AC not cooling in Bandra studio", "door lock broken", "light not working", or "washing machine not draining".
 - Use field ID clientsAffected with select options: Yes - directly affected, Yes - indirectly affected, Yes - directly and indirectly affected, No clients affected, Not confirmed yet.
-- Do not draft or publish until clientsAffected has been answered.
+- Do not draft or publish when clientsAffected is required but unanswered.
 - If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search. Staff may select one or multiple affected clients from Momence.
 - This client-impact rule is the exception to the usual physical/ops entity-field restriction: even an operational issue needs memberName when affected clients are confirmed.
 - If clientsAffected is "No clients affected" or "Not confirmed yet", do not ask for memberName unless the user later confirms affected clients.
@@ -169,6 +181,7 @@ type DetailFieldId =
   | 'desiredResolution'
   | 'incidentDateTime'
   | 'memberSentiment'
+  | 'momencePurchaseContext'
   | 'freezeStartDate'
   | 'freezeEndDate'
   | 'freezeReason'
@@ -240,6 +253,19 @@ const ASSIGNMENT_RULES: Record<string, { assignedTo: string; team: string }> = {
   'General Feedback': { assignedTo: 'Nunu Yeptomi', team: 'Customer Service' },
 };
 const REFUND_CATEGORIES = ['Billing & Membership', 'Pricing and Memberships'];
+const SERVER_MASTER_DATA = {
+  routes: ['Request', 'Complaint', 'Feedback', 'Internal Reporting'],
+  studios: [
+    'Kwality House, Kemps Corner',
+    'Supreme HQ, Bandra',
+    'Kenkere House, Bengaluru',
+    'Courtside, Mumbai',
+    'the Studio by Copper & Cloves, Bengaluru',
+  ],
+  categories: Object.keys(ASSIGNMENT_RULES),
+  priorities: Object.keys(PRIORITY_SLA_HOURS),
+  clientsAffectedOptions: CLIENTS_AFFECTED_OPTIONS,
+};
 
 function isBengaluruStudio(studio?: string | null): boolean {
   return /bengaluru|bangalore|copper/i.test(studio || '');
@@ -290,7 +316,7 @@ function bearerToken(authorization: string): string {
   return match?.[1]?.trim() || '';
 }
 
-async function authenticateRequest(request: Request): Promise<Response | null> {
+async function authenticateRequest(request: Request): Promise<Response | { user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } }> {
   const supabaseUrl = Deno.env.get('TICKETING_SUPABASE_URL') || Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('TICKETING_SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
   if (!supabaseUrl || !anonKey) return json({ error: 'Missing Supabase auth configuration' }, 500);
@@ -304,11 +330,20 @@ async function authenticateRequest(request: Request): Promise<Response | null> {
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
 
-  return null;
+  return { user: data.user };
 }
 
 function cleanString(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function isCasualGreeting(text: string): boolean {
+  const value = text.trim();
+  if (!value) return false;
+  const greetingPattern = /^(hi|hello|hey|heya|hiya|good\s+(morning|afternoon|evening)|namaste|yo)(\s+athena)?[.!?\s]*$/i;
+  const issueSignalPattern = /\b(ac|hvac|broken|not working|issue|problem|complaint|member|client|refund|billing|payment|class|session|trainer|instructor|studio|booking|schedule|maintenance|repair|leak|dirty|urgent)\b/i;
+  if (issueSignalPattern.test(value) && !greetingPattern.test(value)) return false;
+  return greetingPattern.test(value);
 }
 
 function normalizePriority(value: unknown): Priority {
@@ -318,6 +353,180 @@ function normalizePriority(value: unknown): Priority {
 
 function hasConfirmedAffectedClients(value: unknown): boolean {
   return /^yes\b/i.test(cleanString(value));
+}
+
+function shouldRequireClientImpactCheck(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  if (cleanString(context.clientsAffected)) return false;
+
+  const route = cleanString(context.intakeRoute).toLowerCase();
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.requestType),
+    cleanString(context.category),
+    cleanString(context.subCategory),
+    cleanString(context.description),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (
+    /\b(member|client|customer|guest|prospect|attendee|lead|class|session|booking|waitlist|refund|billing|payment|membership|package|freeze|roll\s?over|extension|complain|complaint|said|reported|requested|felt|uncomfortable|walked out|injury|medical|theft|harass)\b/.test(lower)
+  ) {
+    return true;
+  }
+
+  if (['Repair and Maintenance', 'Studio Amenities and Facilities', 'Facility & Equipment', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
+    return false;
+  }
+
+  return [
+    'Customer Service and Communication',
+    'Pricing and Memberships',
+    'Billing & Membership',
+    'Sales & Consultation',
+    'Hosted Class & Partnerships',
+    'Trainer Feedback',
+    'Class Experience',
+    'Scheduling',
+    'Booking & Schedule',
+    'Front Desk & Service',
+    'Instructor & Class Quality',
+    'Safety and Security',
+    'Safety & Medical',
+    'Theft and Lost Items',
+    'Member Progress & Transformation',
+  ].includes(category) || route === 'complaint';
+}
+
+function shouldRequireNamedMemberContext(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  if (cleanString(context.memberId) || cleanString(context.memberName)) return false;
+  if (['Repair and Maintenance', 'Studio Amenities and Facilities', 'Facility & Equipment', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
+    return false;
+  }
+
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.requestType),
+    cleanString(context.category),
+    cleanString(context.subCategory),
+    cleanString(context.description),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const entityText = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.description),
+    cleanString(context.requestType),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /\b(member|client|customer|guest|prospect)\b/.test(entityText)
+    && /refund|billing|payment|membership|package|freeze|roll\s?over|extension|renewal|cancel|complain|complaint|follow-up|follow up|contact|whatsapp|email|phone|profile|account/.test(lower);
+}
+
+function shouldRequireCommercialVerificationContext(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  if (['Repair and Maintenance', 'Studio Amenities and Facilities', 'Facility & Equipment', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
+    return false;
+  }
+
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.description),
+    cleanString(context.requestType),
+    cleanString(context.category),
+    cleanString(context.subCategory),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const memberReference =
+    /\b(member|client|customer|guest|prospect)\b/.test(lower) ||
+    Boolean(cleanString(context.memberId)) ||
+    Boolean(cleanString(context.memberName));
+  if (!memberReference) return false;
+
+  const commercialConcern =
+    /refund|billing|payment|paid|amount|charge|charged|invoice|receipt|purchase|membership|package|renewal|expiry|credit|waiver|freeze|pause|roll\s?over|extension|pricing|price/.test(lower) ||
+    ['Pricing and Memberships', 'Billing & Membership'].includes(category);
+
+  const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
+  const classAccessConcern =
+    mentionsClassContext &&
+    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+
+  return commercialConcern || classAccessConcern;
+}
+
+function shouldRequireClassAccessVerification(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  if (!shouldRequireCommercialVerificationContext(text, context, category)) return false;
+
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.description),
+    cleanString(context.requestType),
+    cleanString(context.category),
+    cleanString(context.subCategory),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower) &&
+    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+}
+
+function shouldRequireComplaintResolution(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  if (cleanString(context.desiredResolution)) return false;
+  if (!shouldRequireNamedMemberContext(text, { ...context, memberId: '', memberName: '' }, category)) return false;
+
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.description),
+    cleanString(context.requestType),
+    cleanString(context.category),
+    cleanString(context.subCategory),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (/wants?\s+(a\s+)?(follow-?up|call|email|whatsapp|refund|waiver|extension|credit)|requested\s+(a\s+)?(follow-?up|call|email|whatsapp|refund|waiver|extension|credit)/.test(lower)) {
+    return false;
+  }
+
+  return /complain|complaint|refund|billing|payment|delay|not resolved|follow-?up/.test(lower);
+}
+
+function shouldRequireFullIssueSummary(
+  text: string,
+  context: Record<string, unknown>,
+  category: string,
+): boolean {
+  const description = cleanString(context.description);
+  if (!description) return true;
+  if (!shouldRequireNamedMemberContext(text, { ...context, memberId: '', memberName: '' }, category)) return false;
+
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    description,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return description.length < 60 && /complain|complaint|refund|billing|payment|delay|not resolved/.test(lower);
 }
 
 function computeSlaDueAt(priority: Priority): string {
@@ -368,22 +577,22 @@ function professionalDescription(text: string, context: Record<string, unknown>,
   const incidentDateTime = cleanString(context.incidentDateTime);
 
   return [
-    `Member voice summary: ${text || 'Community member feedback requires internal follow-up.'}`,
+    `Summary: ${text || 'The report requires internal follow-up.'}`,
     '',
     'Operational context:',
     `- Intake route: ${route}`,
     `- Category: ${category} / ${subCategory}`,
     clientsAffected ? `- Client impact check: ${clientsAffected}` : null,
-    member ? `- Community member: ${member}` : null,
-    studio ? `- Studio space: ${studio}` : null,
-    trainer ? `- Studio instructor: ${trainer}` : null,
-    classType ? `- Signature experience/session: ${classType}` : null,
+    member ? `- Member: ${member}` : null,
+    studio ? `- Studio: ${studio}` : null,
+    trainer ? `- Instructor: ${trainer}` : null,
+    classType ? `- Class/session: ${classType}` : null,
     incidentDateTime ? `- Approx. incident date/time: ${incidentDateTime}` : null,
     membership ? `- Active package/membership: ${membership}` : null,
     '',
     `Requested resolution: ${resolution || 'Resolution pathway to be confirmed by the assigned owner after review.'}`,
     '',
-    'Athena review note: Ticket was drafted from internal documentation of member voice and should be validated before operational action.',
+    'Athena review note: Ticket was drafted from internal intake details and should be validated before operational action.',
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -420,7 +629,7 @@ function fallbackDraft(messages: ChatMessage[] = [], context: Record<string, unk
   ].filter(Boolean);
 
   return {
-    title: titleParts.join(' · ').slice(0, 96) || 'Member voice requiring follow-up',
+    title: titleParts.join(' · ').slice(0, 96) || 'Issue requiring follow-up',
     description: professionalDescription(text, context, category, subCategory),
     category,
     subCategory,
@@ -558,13 +767,14 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       instructions,
       '',
       'Return JSON only using this schema:',
-      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "memberSentiment": string, "desiredResolution": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
+      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
       '',
-      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment.',
+      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext.',
       'Do not ask for reportedBy; the frontend supplies it from the signed-in user.',
       'For issue-specific fields, create clear snake_case IDs prefixed by the category or subcategory, and include options for select fields.',
-      'Infer category and subCategory from member voice whenever possible. Ask for category or subCategory only when the text is genuinely ambiguous after using the approved master data.',
-      `Always include clientsAffected as a required select before drafting unless context already has one of these values: ${CLIENTS_AFFECTED_OPTIONS.join(', ')}.`,
+      'Infer category and subCategory from the report whenever possible. Ask for category or subCategory only when the text is genuinely ambiguous after using the approved master data.',
+      `Use clientsAffected as a required select only for the pre-publish client-impact check or when the user has explicitly raised client impact; valid values are: ${CLIENTS_AFFECTED_OPTIONS.join(', ')}.`,
+      'Do not include clientsAffected in the first intake form for pure internal ops/facility reports.',
       'If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search for the affected clients.',
       'If memberName/memberContact is needed, use memberName so the frontend renders Momence member search.',
       'If class/session details are needed, use classType so the frontend renders Momence session search.',
@@ -573,7 +783,7 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
     userContent: JSON.stringify({
       context: body.context || {},
       intakeContract: body.intakeContract || {},
-      masterData: body.masterData || {},
+      masterData: SERVER_MASTER_DATA,
       messages: body.messages || [],
     }),
   });
@@ -781,7 +991,11 @@ function inferContextFromText(text: string, context: Record<string, unknown> = {
   return inferred;
 }
 
-function requiredFieldsForIssue(text: string, context: Record<string, unknown>): DetailFieldId[] {
+function requiredFieldsForIssue(
+  text: string,
+  context: Record<string, unknown>,
+  options: { includeClientImpact?: boolean } = {},
+): DetailFieldId[] {
   const lower = [
     text,
     cleanString(context.initialReport),
@@ -832,8 +1046,11 @@ function requiredFieldsForIssue(text: string, context: Record<string, unknown>):
   ]);
   const classContextCategories = new Set(['Scheduling', 'Class Experience', 'Trainer Feedback', 'Instructor & Class Quality', 'Booking & Schedule']);
   const membershipSpecific = /freeze|pause|roll|extension|membership|package|renewal|upgrade|downgrade|auto-renew|refund|expiry|credit|class pack|billing|payment/.test(lower);
+  const commercialVerification = shouldRequireCommercialVerificationContext(text, context, category);
+  const classAccessVerification = shouldRequireClassAccessVerification(text, context, category);
   const hostedSpecific = /hosted|partner|influencer|partnership/.test(lower) || category === 'Hosted Class & Partnerships';
   const prioritySpecific = route !== 'feedback' || /safety|security|theft|repair|maintenance|tech|operating|pricing|membership|customer service|complaint|urgent|injury|hazard/.test(`${category} ${subCategory} ${lower}`.toLowerCase());
+  const includeClientImpact = options.includeClientImpact ?? false;
 
   // Always require studio for any physical in-studio category — no keyword guard needed
   if (physicalStudioCategories.has(category)) add('studio', context.studio);
@@ -879,7 +1096,24 @@ function requiredFieldsForIssue(text: string, context: Record<string, unknown>):
       add('currentWorkaround', context.currentWorkaround);
     }
   }
-  add('clientsAffected', context.clientsAffected);
+  if (shouldRequireNamedMemberContext(text, context, category)) {
+    add('memberName', context.memberId || context.memberName);
+  }
+  if (commercialVerification) {
+    add('studio', context.studio);
+    add('memberName', context.memberId || context.memberName);
+    add('membership', context.membership);
+    add('incidentDateTime', context.incidentDateTime);
+    add('momencePurchaseContext', context.momencePurchaseContext);
+    add('desiredResolution', context.desiredResolution);
+    add('memberSentiment', context.memberSentiment);
+    if (classAccessVerification) {
+      add('classType', context.sessionId || context.classType);
+    }
+  }
+  if (includeClientImpact && shouldRequireClientImpactCheck(lower, context, category)) {
+    add('clientsAffected', context.clientsAffected);
+  }
   if (hasConfirmedAffectedClients(context.clientsAffected)) {
     add('memberName', context.memberId || context.memberName);
   }
@@ -907,9 +1141,9 @@ function requiredFieldsForIssue(text: string, context: Record<string, unknown>):
       add('followUpPreference', context.followUpPreference);
     }
   }
-  // desiredResolution: let the AI decide whether to ask — only add as a guard for explicit
-  // member requests/complaints where the intake route is known and it is genuinely missing
-  if (route === 'request' && !physicalOnlyCategories.has(category) && /desired resolution|requested resolution|what resolution/.test(lower)) {
+  // desiredResolution: ask for the requested outcome on brief personal complaints so the
+  // owner can act without a follow-up.
+  if (shouldRequireComplaintResolution(text, context, category) || (route === 'request' && !physicalOnlyCategories.has(category) && /desired resolution|requested resolution|what resolution/.test(lower))) {
     add('desiredResolution', context.desiredResolution);
   }
   if ((route === 'feedback' || route === 'complaint') && /sentiment unclear|member sentiment|how upset|frustration level/.test(lower)) add('memberSentiment', context.memberSentiment);
@@ -922,7 +1156,7 @@ function requiredFieldsForIssue(text: string, context: Record<string, unknown>):
   // "Describe the issue" placeholder instead of the AI's contextual, targeted questions.
   // For all other categories, require description if not yet captured.
   if (!isPhysicalCategory) {
-    add('description', context.description);
+    add('description', shouldRequireFullIssueSummary(text, context, category) ? '' : context.description);
   }
 
   return Array.from(new Set(fields));
@@ -950,9 +1184,22 @@ function buildSourceRef(draft: DraftTicket, context: Record<string, unknown> = {
   return `approved-draft:${Math.abs(hash).toString(36)}`;
 }
 
-function toTicketRow(draft: DraftTicket, context: Record<string, unknown> = {}, conversationId?: string | null) {
+function toTicketRow(
+  draft: DraftTicket,
+  context: Record<string, unknown> = {},
+  conversationId?: string | null,
+  createdBy?: string | null,
+) {
   const priority = normalizePriority(draft.priority);
-  const assignment = resolveAssignment(draft.category, draft.studio, draft.subCategory);
+  const fallbackAssignment = resolveAssignment(draft.category, draft.studio, draft.subCategory);
+  const assignedTo = cleanString(draft.assignedTo)
+    || cleanString(context.assignedTo)
+    || cleanString(context.owner)
+    || fallbackAssignment.assignedTo;
+  const team = cleanString(draft.department)
+    || cleanString(context.department)
+    || cleanString(context.team)
+    || fallbackAssignment.team;
 
   return {
     source_ref: buildSourceRef(draft, context, conversationId),
@@ -969,8 +1216,8 @@ function toTicketRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     member_name: draft.memberName || null,
     member_contact: draft.memberContact || null,
     reported_by: draft.reportedBy || 'AI Intake',
-    assigned_to: assignment.assignedTo,
-    team: assignment.team,
+    assigned_to: assignedTo,
+    team,
     tags: Array.from(new Set([...(draft.tags || []), 'ai-approved'])),
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || draft.description,
@@ -979,13 +1226,14 @@ function toTicketRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
       source_ref: buildSourceRef(draft, context, conversationId),
       intake_context: context,
       routing: {
-        department: assignment.team,
-        assigned_to: assignment.assignedTo,
+        department: team,
+        assigned_to: assignedTo,
         status: 'New',
         priority,
-        routing_source: 'athena_employee_directory',
+        routing_source: assignedTo === fallbackAssignment.assignedTo ? 'athena_employee_directory' : 'approved_context',
       },
     },
+    created_by: createdBy || null,
     sla_due_at: computeSlaDueAt(priority),
   };
 }
@@ -1000,11 +1248,11 @@ function getMissingColumnName(error: unknown): string | null {
   return match?.[1] || null;
 }
 
-function removeUnsupportedTicketColumn(row: Record<string, unknown>, column: string) {
+function removeUnsupportedTicketColumn<T extends Record<string, unknown>>(row: T, column: string): T {
   if (!(column in row)) return row;
   const next = { ...row };
   delete next[column];
-  return next;
+  return next as T;
 }
 
 Deno.serve(async (request) => {
@@ -1013,8 +1261,9 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json() as RequestBody;
-    const authError = await authenticateRequest(request);
-    if (authError) return authError;
+    const authResult = await authenticateRequest(request);
+    if (authResult instanceof Response) return authResult;
+    const authUser = authResult.user;
 
     if (body.action === 'generateReportNarrative') {
       const narrative = await askAiForReportNarrative(body);
@@ -1066,7 +1315,7 @@ Deno.serve(async (request) => {
         });
       }
 
-      let rowForInsert = toTicketRow(draft, body.context || {}, body.conversationId);
+      let rowForInsert = toTicketRow(draft, body.context || {}, body.conversationId, authUser.id);
       let data: Record<string, unknown> | null = null;
       let createError: { code?: string; message?: string } | null = null;
 
@@ -1101,18 +1350,56 @@ Deno.serve(async (request) => {
         }
         return json({ error: createError?.message || 'Ticket creation failed' }, 500);
       }
+
+      const ticketId = cleanString(data.id);
+      const { error: eventError } = await supabase.from('ticket_events').insert({
+        ticket_id: ticketId,
+        event_type: 'ticket_created',
+        actor: draft.reportedBy || authUser.email || 'Authenticated user',
+        to_value: 'New',
+        metadata: {
+          conversationId: body.conversationId,
+          source: 'approved_draft',
+        },
+        created_by: authUser.id,
+      });
+      if (eventError) {
+        console.warn('Ticket event logging failed:', eventError.message);
+      }
+
       return json({
-        reply: `Ticket ${data.id} has been created from the approved draft.`,
+        reply: `Ticket ${ticketId} has been created from the approved draft.`,
         createdTicket: data,
       });
     }
 
     const messages = body.messages || [];
-    const instructions = cleanString(body.instructions, ATHENA_SYSTEM_PROMPT);
+    const promptProfile = cleanString(body.promptProfile, 'athena-intake-v1');
+    const instructions = ATHENA_SYSTEM_PROMPT;
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content || '';
 
     // Strip context preamble the frontend prepends to get the raw issue text
     const rawIssueText = latestUserMessage.replace(/^\[Context[^\]]*\]\s*/i, '').trim();
+
+    if (isCasualGreeting(rawIssueText)) {
+      return json({
+        conversationId: body.conversationId || crypto.randomUUID(),
+        promptProfile: `${promptProfile}:greeting`,
+        needsMoreInfo: false,
+        reply: "Hi, I'm Athena. What are we logging?",
+        detailForm: null,
+        ticket: null,
+        suggestedChips: [
+          { label: 'Complaint', value: 'Complaint', field: 'intakeRoute' },
+          { label: 'Request', value: 'Request', field: 'intakeRoute' },
+          { label: 'Feedback', value: 'Feedback', field: 'intakeRoute' },
+        ],
+        inferredContext: {},
+        missingFields: [],
+        publishable: false,
+        urgencyReason: '',
+      });
+    }
 
     const isFormSubmission = /^here are the missing details/i.test(rawIssueText);
     const bodyContext = body.context || {};
@@ -1173,7 +1460,7 @@ Deno.serve(async (request) => {
       const aiTicket = needsMoreInfo ? null : aiResponse.ticket || fallbackDraft(messages, aiContext);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
-        promptProfile: instructions.includes('Athena') ? 'athena-ai-dynamic' : 'custom-ai-dynamic',
+        promptProfile: `${promptProfile}:ai-dynamic`,
         needsMoreInfo,
         reply: needsMoreInfo && !filteredAiForm
           ? 'I need a few details before drafting this ticket. Please complete the form below.'
@@ -1201,7 +1488,7 @@ Deno.serve(async (request) => {
     if (missingFields.length > 0) {
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
-        promptProfile: instructions.includes('Athena') ? 'athena-fallback' : 'custom-fallback',
+        promptProfile: `${promptProfile}:fallback`,
         needsMoreInfo: true,
         reply: 'I need a few details before drafting this ticket. Please complete the form below.',
         detailForm: {
@@ -1215,7 +1502,7 @@ Deno.serve(async (request) => {
         missingFields,
         publishable: false,
         urgencyReason: inferredContext.priority
-          ? `Fallback priority inferred as ${inferredContext.priority} from the documented member voice.`
+          ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
           : '',
       });
     }
@@ -1232,7 +1519,7 @@ Deno.serve(async (request) => {
     if (draftMissingFields.length > 0) {
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
-        promptProfile: instructions.includes('Athena') ? 'athena-v2-incomplete' : 'custom-incomplete',
+        promptProfile: `${promptProfile}:incomplete`,
         needsMoreInfo: true,
         reply: 'Almost there — I need a couple more details before drafting this ticket.',
         detailForm: {
@@ -1246,13 +1533,13 @@ Deno.serve(async (request) => {
         missingFields: draftMissingFields,
         publishable: false,
         urgencyReason: inferredContext.priority
-          ? `Fallback priority inferred as ${inferredContext.priority} from the documented member voice.`
+          ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
           : '',
       });
     }
     return json({
       conversationId: body.conversationId || crypto.randomUUID(),
-      promptProfile: instructions.includes('Athena') ? 'athena-v2' : 'custom',
+      promptProfile: `${promptProfile}:drafted`,
       needsMoreInfo: false,
       reply: 'I drafted the ticket below. Please review it before publishing.',
       ticket: draft,
@@ -1261,7 +1548,7 @@ Deno.serve(async (request) => {
       missingFields: [],
       publishable: true,
       urgencyReason: inferredContext.priority
-        ? `Fallback priority inferred as ${inferredContext.priority} from the documented member voice.`
+        ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
         : '',
     });
   } catch (error) {

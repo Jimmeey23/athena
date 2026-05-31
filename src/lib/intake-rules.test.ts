@@ -31,6 +31,23 @@ describe('intake publishability rules', () => {
     expect(isIntakePublishable(context)).toBe(false);
   });
 
+  it('does not require client impact for purely internal operational issues', () => {
+    const text = 'AC not cooling in Bandra studio';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      reportedBy: 'ops@physique57india.com',
+      incidentDateTime: '2026-05-23T09:30',
+      hvacSymptom: 'Not cooling',
+      affectedArea: 'Reception and studio one',
+      operationalImpact: 'Front desk moved check-in away from the warm area.',
+      currentWorkaround: 'Fans are running until the technician arrives.',
+      resolutionRequirement: 'Vendor inspection and repair needed today.',
+    };
+
+    expect(getMissingIntakeFields(context)).toEqual([]);
+  });
+
   it('treats placeholder values as missing while accepting a real studio', () => {
     const context: IntakeContext = {
       intakeRoute: 'Complaint',
@@ -228,6 +245,8 @@ describe('intake publishability rules', () => {
     };
 
     expect(getMissingIntakeFields(context)).toContain('clientsAffected');
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toContain('memberName');
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('clientsAffected');
     expect(getMissingIntakeFields({ ...context, clientsAffected: 'Yes - directly affected' })).toContain('memberName');
     expect(getMissingIntakeFields({
       ...context,
@@ -237,8 +256,69 @@ describe('intake publishability rules', () => {
     })).not.toContain('memberName');
   });
 
-  it('requires client impact confirmation before drafting operational issues', () => {
-    const text = 'AC not cooling in Bandra studio';
+  it('asks for member, incident detail, and requested resolution for brief refund complaints', () => {
+    const text = 'A member complained about refund delay';
+    const context = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      description: text,
+      reportedBy: 'ops@physique57india.com',
+    };
+
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([
+      'memberName',
+      'studio',
+      'membership',
+      'incidentDateTime',
+      'momencePurchaseContext',
+      'desiredResolution',
+      'memberSentiment',
+      'description',
+    ]);
+  });
+
+  it('requires commercial Momence context for member package and class access disputes', () => {
+    const text = [
+      'Client Shaziya Andhyrujina is currently on a 3-month unlimited package.',
+      'She came in for the 4:30 PM Power Cycle but was denied entry because it was her first Power Cycle class.',
+      'She said the restriction was not clearly communicated when she purchased the membership and requested a refund.',
+    ].join(' ');
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      description: text,
+      priority: 'High',
+      reportedBy: 'Front Desk',
+    };
+
+    expect(context.membership).toBe('Studio 3 Month Unlimited Membership');
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
+      'studio',
+      'memberName',
+      'classType',
+      'incidentDateTime',
+      'desiredResolution',
+      'memberSentiment',
+    ]));
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('membership');
+  });
+
+  it('infers specified membership packages from the initial report', () => {
+    expect(
+      inferIntakeContextFromText('Client is currently on a 3-month unlimited package and requested a refund.')
+    ).toMatchObject({
+      membership: 'Studio 3 Month Unlimited Membership',
+    });
+
+    expect(
+      inferIntakeContextFromText('Member has a power cycle 3 months unlimited membership.')
+    ).toMatchObject({
+      membership: 'powerCycle 3 months Unlimited',
+    });
+  });
+
+  it('requires client impact confirmation when an operational issue mentions member impact', () => {
+    const text = 'AC not cooling in Bandra studio and two members said they felt uncomfortable after class.';
     const context: IntakeContext = {
       ...inferIntakeContextFromText(text),
       initialReport: text,
@@ -252,6 +332,7 @@ describe('intake publishability rules', () => {
     };
 
     expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([]);
     expect(getMissingIntakeFields({ ...context, clientsAffected: 'No clients affected' })).toEqual([]);
   });
 
@@ -299,7 +380,6 @@ describe('intake publishability rules', () => {
       'operationalImpact',
       'currentWorkaround',
       'resolutionRequirement',
-      'clientsAffected',
     ]);
     expect(getMissingIntakeFields(context)).not.toContain('memberName');
     expect(getMissingIntakeFields(context)).not.toContain('classType');
@@ -344,7 +424,6 @@ describe('intake publishability rules', () => {
       'accessStatus',
       'securityRisk',
       'resolutionRequirement',
-      'clientsAffected',
     ]);
     expect(getMissingIntakeFields(context)).not.toContain('memberName');
     expect(getMissingIntakeFields(context)).not.toContain('classType');
@@ -371,7 +450,6 @@ describe('intake publishability rules', () => {
       'operationalImpact',
       'currentWorkaround',
       'resolutionRequirement',
-      'clientsAffected',
     ]);
   });
 });

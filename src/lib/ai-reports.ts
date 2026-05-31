@@ -61,7 +61,7 @@ export interface TicketReportEvent {
 export interface ReportDefinition {
   id: ReportId;
   title: string;
-  group: 'Leadership' | 'Operations' | 'Member Voice' | 'Revenue' | 'Quality';
+  group: 'Leadership' | 'Operations' | 'Client Feedback' | 'Revenue' | 'Quality';
   description: string;
   bestFor: string;
   chart: 'trend' | 'category' | 'status' | 'priority' | 'studio' | 'owner' | 'sla' | 'sentiment' | 'completeness';
@@ -266,8 +266,8 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'category_driver_analysis',
     title: 'Category Driver Analysis',
-    group: 'Member Voice',
-    description: 'Top member voice categories driving ticket creation.',
+    group: 'Client Feedback',
+    description: 'Top client feedback categories driving ticket creation.',
     bestFor: 'Identifying operational themes to fix upstream',
     chart: 'category',
     match: 'category',
@@ -275,7 +275,7 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'recurring_subcategory_analysis',
     title: 'Recurring Subcategory Analysis',
-    group: 'Member Voice',
+    group: 'Client Feedback',
     description: 'Recurring touchpoints and subcategory patterns.',
     bestFor: 'Reducing repeat issues and tightening SOPs',
     chart: 'category',
@@ -283,9 +283,9 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
   },
   {
     id: 'studio_space_performance',
-    title: 'Studio Space Performance',
+    title: 'Studio Performance',
     group: 'Operations',
-    description: 'Ticket load and risk distribution by studio space.',
+    description: 'Ticket load and risk distribution by studio.',
     bestFor: 'Studio-level operating reviews',
     chart: 'studio',
     match: 'studio',
@@ -319,9 +319,9 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
   },
   {
     id: 'member_voice_sentiment_report',
-    title: 'Member Voice Sentiment Report',
-    group: 'Member Voice',
-    description: 'Sentiment distribution and emotionally charged member voice.',
+    title: 'Client Sentiment Report',
+    group: 'Client Feedback',
+    description: 'Sentiment distribution and emotionally charged client feedback.',
     bestFor: 'Member experience recovery and retention reviews',
     chart: 'sentiment',
     match: 'sentiment',
@@ -329,7 +329,7 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'complaint_retention_risk_report',
     title: 'Complaint & Retention Risk Report',
-    group: 'Member Voice',
+    group: 'Client Feedback',
     description: 'Complaint patterns, refund risk, anger signals, and unresolved high-priority items.',
     bestFor: 'Retention protection and service recovery',
     chart: 'category',

@@ -94,7 +94,9 @@ describe('buildTicketReviewInsights', () => {
     expect(review.momenceChips).toContain('VIP');
     expect(review.momenceChips).toContain('18/20 booked');
     expect(review.duplicateWarning?.ticketId).toBe('P57-DUP1');
-    expect(review.sections.find((section) => section.title === 'Member voice')?.items).toContain('Asha Rao');
+    expect(review.riskSignals).toContain('Retention risk: frustration/refund/cancellation signal needs proactive follow-up.');
+    expect(review.riskSignals).toContain('SLA risk: High priority ticket should be published promptly to start the 8h SLA clock.');
+    expect(review.sections.find((section) => section.title === 'Client details')?.items).toContain('Asha Rao');
   });
 
   it('lowers confidence when important routing and Momence details are missing', () => {

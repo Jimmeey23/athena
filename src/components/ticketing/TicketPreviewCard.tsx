@@ -130,9 +130,9 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
               onChange={(value) => updateEditedDraft('studio', value)}
             />
             <EditInput label="Instructor" value={editedDraft.trainer || ''} onChange={(value) => updateEditedDraft('trainer', value)} />
-            <EditInput label="Signature experience" value={editedDraft.classType || ''} onChange={(value) => updateEditedDraft('classType', value)} />
+            <EditInput label="Class / Session" value={editedDraft.classType || ''} onChange={(value) => updateEditedDraft('classType', value)} />
             <EditInput label="Session time" type="datetime-local" value={editedDraft.classDateTime || ''} onChange={(value) => updateEditedDraft('classDateTime', value)} />
-            <EditInput label="Community member" value={editedDraft.memberName || ''} onChange={(value) => updateEditedDraft('memberName', value)} />
+            <EditInput label="Member" value={editedDraft.memberName || ''} onChange={(value) => updateEditedDraft('memberName', value)} />
             <EditInput label="Member contact" value={editedDraft.memberContact || ''} onChange={(value) => updateEditedDraft('memberContact', value)} />
             <EditInput label="Documented by" value={editedDraft.reportedBy || ''} onChange={(value) => updateEditedDraft('reportedBy', value)} />
             <EditInput label="Owner" value={editedDraft.assignedTo || ''} onChange={(value) => updateEditedDraft('assignedTo', value)} />
@@ -146,10 +146,10 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
       <div className="mb-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
         <Row icon={<Tag className="h-3 w-3" />} label="Classification" value={`${draft.category} / ${draft.subCategory}`} />
         <Row icon={<MapPin className="h-3 w-3" />} label="Studio" value={draft.studio} />
-        {draft.memberName && <Row icon={<User className="h-3 w-3" />} label="Community member" value={draft.memberName} />}
+        {draft.memberName && <Row icon={<User className="h-3 w-3" />} label="Member" value={draft.memberName} />}
         {draft.memberContact && <Row icon={<User className="h-3 w-3" />} label="Member contact" value={draft.memberContact} />}
         {draft.trainer && <Row icon={<User className="h-3 w-3" />} label="Instructor" value={draft.trainer} />}
-        {draft.classType && <Row icon={<Calendar className="h-3 w-3" />} label="Signature experience" value={draft.classType} />}
+        {draft.classType && <Row icon={<Calendar className="h-3 w-3" />} label="Class / Session" value={draft.classType} />}
         {draft.classDateTime && <Row icon={<Clock className="h-3 w-3" />} label="Session time" value={new Date(draft.classDateTime).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} />}
         <Row icon={<ShieldCheck className="h-3 w-3" />} label="Documented by" value={draft.reportedBy || 'Auto-assigned'} />
         <Row icon={<User className="h-3 w-3" />} label="Owner" value={draft.assignedTo || 'Auto-routed'} />
@@ -227,6 +227,15 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
                 className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 transition hover:-translate-y-0.5 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
               >
                 Discard draft
+              </button>
+              <button
+                onClick={() => {
+                  onEdit();
+                  setEditing(true);
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 transition hover:-translate-y-0.5 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-800"
+              >
+                <Route className="w-3.5 h-3.5" /> Fix routing
               </button>
               <button
                 onClick={() => {
@@ -366,6 +375,16 @@ const TicketReviewPanel: React.FC<{
         )}
       </ReviewBlock>
     </div>
+
+    {insights.riskSignals.length > 0 && (
+      <ReviewBlock icon={<AlertTriangle className="h-3.5 w-3.5" />} title="Smart risk flags">
+        {insights.riskSignals.map((line) => (
+          <div key={line} className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800">
+            {line}
+          </div>
+        ))}
+      </ReviewBlock>
+    )}
 
     <ReviewBlock icon={<Layers3 className="h-3.5 w-3.5" />} title="Review before publish">
       <div className="grid gap-2 md:grid-cols-2">

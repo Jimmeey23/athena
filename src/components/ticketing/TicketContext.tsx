@@ -25,6 +25,8 @@ import {
   ticketEmailInFlightKey,
   TicketEmailEventType,
 } from '@/lib/ticket-email-notifications';
+import { buildApprovedTicketCreateRequest } from '@/lib/ticket-approved-creation';
+import { invokeTicketingFunction } from '@/lib/ticketing-functions';
 import {
   ApprovedTicketDraft,
   ManualTicketInput,
@@ -97,6 +99,11 @@ interface TicketAttachmentRecord {
   size: number;
   publicUrl: string;
   uploadedAt: string;
+}
+
+interface CreateTicketFunctionResponse {
+  createdTicket?: DbTicketRow;
+  reply?: string;
 }
 
 const ATTACHMENT_BUCKET = 'ticket-attachments';
@@ -960,7 +967,6 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         reportedBy: signedInReporter,
       };
       const publishContext = { ...(context || {}), reportedBy: signedInReporter };
-      const sourceRef = buildSourceRef(draft, context || {}, conversationId);
       const configuredAssignment = await resolveConfiguredAssignment(publishDraft.category, publishDraft.subCategory, publishDraft.studio, {
         reporterName: signedInReporter,
         reporterEmail: authData.session?.user.email || undefined,
@@ -986,90 +992,31 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             ...configuredAssignment,
             team: contextDepartment || configuredAssignment.team,
           };
-      const insertRow: DbTicketPatch = {
-        ...toInsertRow(
-          {
-            ...publishDraft,
-            assignedTo: contextAssignedTo || publishDraft.assignedTo,
-            department: contextDepartment || publishDraft.department,
-          },
-          { ...publishContext, conversationId },
-          publishAssignment
-        ),
-        created_by: authData.session?.user.id,
+      const draftForServer = {
+        ...publishDraft,
+        assignedTo: publishAssignment.assignedTo,
+        department: publishAssignment.team,
       };
-
-      const findExistingTicket = async () => {
-        const byMetadata = await backendSupabase
-          .from('tickets')
-          .select('*')
-          .contains('metadata', { source_ref: sourceRef })
-          .maybeSingle();
-        if (!byMetadata.error || byMetadata.data) return byMetadata;
-
-        const bySourceRef = await backendSupabase
-          .from('tickets')
-          .select('*')
-          .eq('source_ref', sourceRef)
-          .maybeSingle();
-        if (bySourceRef.error?.code === '42703') return byMetadata;
-        return bySourceRef;
+      const contextForServer = {
+        ...publishContext,
+        assignedTo: publishAssignment.assignedTo,
+        owner: publishAssignment.assignedTo,
+        department: publishAssignment.team,
+        team: publishAssignment.team,
+        conversationId,
       };
-
-      const { data: existing, error: existingError } = await findExistingTicket();
-      if (existingError && existingError.code !== 'PGRST116') {
-        console.warn('Existing ticket lookup failed:', getErrorMessage(existingError, 'Unknown lookup error'));
-      }
-
-      if (existing) return normalizeCreatedTicket(existing as DbTicketRow);
-
-      let rowForInsert: DbTicketPatch = insertRow;
-      let created: DbTicketRow | null = null;
-      let createError: unknown = null;
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const { data, error } = await backendSupabase
-          .from('tickets')
-          .insert(rowForInsert)
-          .select('*')
-          .single();
-
-        if (!error) {
-          created = data as DbTicketRow;
-          createError = null;
-          break;
-        }
-
-        createError = error;
-        const missingColumn = getMissingColumnName(error);
-        if (!missingColumn || !(missingColumn in rowForInsert)) break;
-        rowForInsert = removeUnsupportedTicketColumn(rowForInsert, missingColumn);
-      }
-
-      if (createError || !created) {
-        const error = createError as { code?: string } | null;
-        if (error?.code === '23505') {
-          const { data: duplicated, error: duplicateFetchError } = await findExistingTicket();
-          if (duplicated) return normalizeCreatedTicket(duplicated as DbTicketRow);
-          if (duplicateFetchError) throwSupabaseError(duplicateFetchError, 'Could not fetch the existing approved ticket');
-        }
-        throwSupabaseError(createError, 'Ticket creation failed');
-      }
-
-      const { error: eventError } = await backendSupabase.from('ticket_events').insert({
-        ticket_id: created.id,
-        event_type: 'ticket_created',
-        actor: signedInReporter,
-        to_value: 'New',
-        metadata: {
+      const { data, error } = await invokeTicketingFunction<CreateTicketFunctionResponse>('ticket-ai-chat', {
+        body: buildApprovedTicketCreateRequest({
+          draft: draftForServer,
           conversationId,
-          source: 'approved_draft',
-        },
-        created_by: authData.session?.user.id,
+          context: contextForServer,
+        }),
       });
-      if (eventError) {
-        console.warn('Ticket event logging failed:', getErrorMessage(eventError, 'Unknown ticket event error'));
-      }
+
+      if (error) throwSupabaseError(error, 'Ticket creation failed');
+      if (!data?.createdTicket) throw new Error(data?.reply || 'Ticket creation failed');
+
+      let created = data.createdTicket as DbTicketRow;
 
       if (attachments.length > 0) {
         try {
@@ -1096,6 +1043,8 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       const ticket = normalizeCreatedTicket(created as DbTicketRow | Ticket);
+      setLiveTickets((prev) => dedupeAndSortTickets([ticket, ...prev]));
+      setSelectedTicketState(ticket);
       await notifyTicketEmail('ticket_assigned', ticket, signedInReporter);
       await refresh();
       return ticket;
