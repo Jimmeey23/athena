@@ -115,6 +115,19 @@ export function trainerReviewRecordsFromTickets(tickets: Ticket[]): TrainerRevie
   });
 }
 
+export function isTrainerEvaluationProfileOnly(ticket: Pick<Ticket, 'category' | 'tags' | 'metadata'>): boolean {
+  const metadata = ticket.metadata || {};
+  return Boolean(
+    metadata.profileOnly === true ||
+    ticket.tags.includes('profile-only') ||
+    (
+      ticket.category === 'Trainer Feedback' &&
+      ticket.tags.includes('trainer-profile') &&
+      Boolean(metadata.trainerReview)
+    )
+  );
+}
+
 export function buildTrainerProfilesFromReviews(records: TrainerReviewRecord[]): TrainerProfile[] {
   const uniqueRecords = Array.from(records.reduce<Map<string, TrainerReviewRecord>>((acc, record) => {
     const key = record.sourceRef || record.id;
@@ -161,8 +174,8 @@ export function buildTrainerEvaluationTicket(input: TrainerEvaluationInput, reco
     studio: input.studio || STUDIOS[0],
     trainer: input.trainer,
     classType: input.classType || null,
-    assignedTo: 'Anisha Shah',
-    tags: ['trainer-profile', 'instructor-evaluation', input.template.toLowerCase()],
+    assignedTo: 'Trainer Profile',
+    tags: ['trainer-profile', 'instructor-evaluation', 'profile-only', input.template.toLowerCase()],
     sentiment: review.scorePercent >= 80 ? 'Positive' : review.scorePercent >= 65 ? 'Neutral' : 'Concern',
   };
 }

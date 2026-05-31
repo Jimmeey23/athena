@@ -644,6 +644,16 @@ const FormattedTicketText: React.FC<{ text: string }> = ({ text }) => {
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
   let bullets: string[] = [];
+  const headingLabels = new Set([
+    'Instructor Evaluation Brief',
+    'Evaluation Snapshot',
+    'Weighted Scorecard',
+    'Demonstrated Strengths',
+    'Coaching Attention Areas',
+    'Evaluator / Training Notes',
+    'Coaching Plan And Follow-up',
+    'Routing Context',
+  ]);
 
   const flushBullets = () => {
     if (bullets.length === 0) return;
@@ -669,6 +679,18 @@ const FormattedTicketText: React.FC<{ text: string }> = ({ text }) => {
       return;
     }
     flushBullets();
+    if (headingLabels.has(line)) {
+      const isTitle = line === 'Instructor Evaluation Brief';
+      elements.push(
+        <div
+          key={`heading-${index}`}
+          className={isTitle ? 'mb-3 text-sm font-bold uppercase tracking-wider text-slate-900' : 'mb-1 mt-3 text-xs font-bold uppercase tracking-wider text-blue-700'}
+        >
+          {line}
+        </div>
+      );
+      return;
+    }
     elements.push(<p key={`p-${index}`} className="mb-2">{line}</p>);
   });
   flushBullets();

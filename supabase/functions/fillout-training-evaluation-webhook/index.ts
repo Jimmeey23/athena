@@ -17,6 +17,8 @@ const PRIORITY_SLA_HOURS = {
   Low: 72,
 } as const;
 
+const TRAINER_PROFILE_OWNER = 'Trainer Profile';
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -34,6 +36,12 @@ function clean(value: unknown, fallback = ''): string {
 
 function computeSlaDueAt(priority: keyof typeof PRIORITY_SLA_HOURS): string {
   return new Date(Date.now() + PRIORITY_SLA_HOURS[priority] * 60 * 60 * 1000).toISOString();
+}
+
+function performanceBand(scorePercent: number): string {
+  if (scorePercent < 65) return 'High coaching priority';
+  if (scorePercent < 80) return 'Development watch';
+  return 'On-track performance';
 }
 
 function webhookAuthorized(request: Request): boolean {
@@ -66,9 +74,10 @@ Deno.serve(async (request) => {
     const mapping = mapFilloutTrainingEvaluation(payload);
     const input = mapping.input;
     const scorePercent = mapping.record.scorePercent;
-    const priority = scorePercent < 65 ? 'High' : scorePercent < 80 ? 'Medium' : 'Low';
+    const priority = 'Low';
     const description = buildTrainerEvaluationText(input);
     const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const recordTimestamp = mapping.record.createdAt || mapping.receivedAt;
     const row = {
       source_ref: mapping.sourceRef,
       title: `Instructor evaluation · ${input.trainer} · ${input.template}`,
@@ -76,7 +85,7 @@ Deno.serve(async (request) => {
       category: 'Trainer Feedback',
       sub_category: 'Knowledge and Competence',
       priority,
-      status: 'New',
+      status: 'Closed',
       studio: clean(input.studio, 'Unspecified Studio'),
       trainer: input.trainer,
       class_type: input.classType || null,
@@ -84,20 +93,21 @@ Deno.serve(async (request) => {
       member_name: null,
       member_contact: null,
       reported_by: 'Fillout webhook',
-      assigned_to: 'Anisha Shah',
+      assigned_to: TRAINER_PROFILE_OWNER,
       team: 'Training',
-      tags: ['trainer-profile', 'instructor-evaluation', 'fillout-webhook', input.template.toLowerCase()],
+      tags: ['trainer-profile', 'instructor-evaluation', 'profile-only', 'fillout-webhook', input.template.toLowerCase()],
       sentiment: scorePercent >= 80 ? 'Positive' : scorePercent >= 65 ? 'Neutral' : 'Concern',
       conversation_summary: [
-        `Instructor: ${input.trainer}`,
-        `Template: ${input.template}`,
-        `Score: ${scorePercent}%`,
-        input.focusPoints ? `Focus points: ${input.focusPoints}` : '',
-        input.goals ? `Goals: ${input.goals}` : '',
+        `Instructor evaluation submitted for ${input.trainer} (${input.template}).`,
+        `Weighted score: ${scorePercent}% · ${performanceBand(scorePercent)}.`,
+        input.focusPoints ? `Primary focus: ${input.focusPoints}` : '',
+        input.goals ? `Target goal: ${input.goals}` : '',
+        'Recorded under Trainer Profiles only. No operational owner or SLA follow-up required.',
       ].filter(Boolean).join('\n'),
       metadata: {
         source_ref: mapping.sourceRef,
         source: 'fillout_training_evaluation_webhook',
+        profileOnly: true,
         fillout: {
           submissionId: mapping.submissionId,
           formId: mapping.formId,
@@ -107,13 +117,14 @@ Deno.serve(async (request) => {
         trainerReview: mapping.record,
         routing: {
           department: 'Training',
-          assigned_to: 'Anisha Shah',
-          status: 'New',
+          assigned_to: TRAINER_PROFILE_OWNER,
+          status: 'Closed',
           priority,
+          profile_only: true,
           routing_source: 'fillout_training_evaluation_webhook',
         },
       },
-      sla_due_at: computeSlaDueAt(priority),
+      sla_due_at: recordTimestamp,
     };
 
     const existing = await supabase
@@ -131,13 +142,17 @@ Deno.serve(async (request) => {
           category: row.category,
           sub_category: row.sub_category,
           priority: row.priority,
+          status: row.status,
           studio: row.studio,
           trainer: row.trainer,
           class_type: row.class_type,
+          assigned_to: row.assigned_to,
+          team: row.team,
           tags: row.tags,
           sentiment: row.sentiment,
           conversation_summary: row.conversation_summary,
           metadata: row.metadata,
+          sla_due_at: row.sla_due_at,
         })
         .eq('id', existing.data.id)
         .select('*')
@@ -182,9 +197,9 @@ Deno.serve(async (request) => {
     if (ticketId) {
       const { error: eventError } = await supabase.from('ticket_events').insert({
         ticket_id: ticketId,
-        event_type: 'ticket_created',
+        event_type: 'trainer_evaluation_recorded',
         actor: 'Fillout webhook',
-        to_value: 'New',
+        to_value: 'Trainer Profile',
         metadata: {
           source: 'fillout_training_evaluation_webhook',
           sourceRef: mapping.sourceRef,

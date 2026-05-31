@@ -22,6 +22,7 @@ import {
   reportFileSlug,
 } from '@/lib/ai-reports';
 import { CATEGORIES, STATUSES, Ticket } from '@/lib/ticketing-data';
+import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
 import {
   AlertTriangle,
   BarChart3,
@@ -150,6 +151,7 @@ function printReport(report: GeneratedReport) {
 
 export const AiReportsPanel: React.FC = () => {
   const { tickets, loading, error, refresh, setSelectedTicket } = useTickets();
+  const operationalTickets = useMemo(() => tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)), [tickets]);
   const [selectedReportId, setSelectedReportId] = useState<ReportId>('executive_operations_summary');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('30d');
   const [period, setPeriod] = useState<ReportPeriod>(() => defaultPeriod());
@@ -161,15 +163,15 @@ export const AiReportsPanel: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const options = useMemo(() => ({
-    studios: uniqueSorted(tickets.map((ticket) => ticket.studio)),
-    categories: uniqueSorted([...Object.keys(CATEGORIES), ...tickets.map((ticket) => ticket.category)]),
-    owners: uniqueSorted(tickets.map((ticket) => ticket.assignedTo)),
-    sentiments: uniqueSorted(tickets.map((ticket) => ticket.sentiment || 'Unspecified')),
-  }), [tickets]);
+    studios: uniqueSorted(operationalTickets.map((ticket) => ticket.studio)),
+    categories: uniqueSorted([...Object.keys(CATEGORIES), ...operationalTickets.map((ticket) => ticket.category)]),
+    owners: uniqueSorted(operationalTickets.map((ticket) => ticket.assignedTo)),
+    sentiments: uniqueSorted(operationalTickets.map((ticket) => ticket.sentiment || 'Unspecified')),
+  }), [operationalTickets]);
 
   useEffect(() => {
     let cancelled = false;
-    const ids = tickets.filter((ticket) => !ticket.tags.includes('historic')).map((ticket) => ticket.id).filter(Boolean);
+    const ids = operationalTickets.filter((ticket) => !ticket.tags.includes('historic')).map((ticket) => ticket.id).filter(Boolean);
     if (ids.length === 0) {
       setEvents([]);
       return;
@@ -205,20 +207,20 @@ export const AiReportsPanel: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [tickets]);
+  }, [operationalTickets]);
 
   const report = useMemo(() => {
     const built = buildReport({
       reportId: selectedReportId,
-      tickets,
+      tickets: operationalTickets,
       events,
       period,
       filters,
     });
     return narrative ? { ...built, narrative } : built;
-  }, [events, filters, narrative, period, selectedReportId, tickets]);
+  }, [events, filters, narrative, operationalTickets, period, selectedReportId]);
 
-  const ticketById = useMemo(() => new Map(tickets.map((ticket) => [ticket.id, ticket])), [tickets]);
+  const ticketById = useMemo(() => new Map(operationalTickets.map((ticket) => [ticket.id, ticket])), [operationalTickets]);
 
   const setFilter = <K extends keyof ReportFilters>(key: K, value: ReportFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -397,7 +399,7 @@ export const AiReportsPanel: React.FC = () => {
             </div>
           </section>
 
-          {loading && tickets.length === 0 ? (
+          {loading && operationalTickets.length === 0 ? (
             <EmptyState label="Loading tickets for reporting..." />
           ) : report.reportTickets === 0 ? (
             <EmptyState label="No tickets match the selected report period and filters." />

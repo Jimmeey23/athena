@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   TRAINER_REVIEW_TEMPLATES,
+  buildTrainerEvaluationText,
   buildTrainerEvaluationTicket,
   buildTrainerProfilesFromReviews,
+  isTrainerEvaluationProfileOnly,
   loadTrainerProfiles,
   parseTrainerEvaluationText,
 } from './trainer-profiles';
@@ -77,8 +79,61 @@ describe('trainer profile evaluation engine', () => {
     expect(ticket.priority).toBe('Medium');
     expect(ticket.trainer).toBe('Pranjali');
     expect(ticket.studio).toBe('Kemps Corner');
-    expect(ticket.description).toContain('Focus points');
+    expect(ticket.description).toContain('Instructor Evaluation Brief');
+    expect(ticket.description).toContain('Weighted Scorecard');
+    expect(ticket.description).toContain('Coaching Plan And Follow-up');
+    expect(ticket.description).toContain('Primary focus');
     expect(ticket.tags).toContain('trainer-profile');
+    expect(ticket.tags).toContain('profile-only');
+    expect(ticket.assignedTo).toBe('Trainer Profile');
+  });
+
+  it('identifies trainer evaluation records that should stay out of operational ticket queues', () => {
+    expect(isTrainerEvaluationProfileOnly({
+      id: 'P57-TRAINER-1',
+      title: 'Instructor evaluation · Pranjali Jain · Barre',
+      description: 'Instructor Evaluation Brief',
+      category: 'Trainer Feedback',
+      subCategory: 'Knowledge and Competence',
+      priority: 'Low',
+      status: 'Closed',
+      studio: 'Kwality House, Kemps Corner',
+      trainer: 'Pranjali Jain',
+      assignedTo: 'Trainer Profile',
+      team: 'Training',
+      tags: ['trainer-profile', 'instructor-evaluation', 'profile-only'],
+      createdAt: '2026-05-31T00:00:00.000Z',
+      slaDueAt: '2026-05-31T00:00:00.000Z',
+      metadata: {
+        profileOnly: true,
+        trainerReview: { trainer: 'Pranjali Jain', template: 'Barre', scores: [] },
+      },
+    })).toBe(true);
+  });
+
+  it('formats trainer evaluation descriptions as structured operating briefs', () => {
+    const description = buildTrainerEvaluationText({
+      trainer: 'Pranjali Jain',
+      template: 'Barre',
+      studio: 'Kwality House, Kemps Corner',
+      classType: 'Studio Barre 57',
+      reviewPeriod: 'May 2026',
+      feedback: 'Members appreciate her precise cueing; transitions need more command.',
+      focusPoints: 'Increase command during transitions.',
+      goals: 'Lead the next hosted class warm-up.',
+      scores: [
+        { category: 'Client feedback', weightage: 12.5, score: 11 },
+        { category: 'Energy and vocals', weightage: 8, score: 4 },
+        { category: 'Musicality', weightage: 8, score: 7 },
+      ],
+    });
+
+    expect(description).toContain('Evaluation Snapshot');
+    expect(description).toContain('- Weighted score: 22/28.5 (77%)');
+    expect(description).toContain('Demonstrated Strengths');
+    expect(description).toContain('Coaching Attention Areas');
+    expect(description).toContain('- Energy and vocals needs focused coaching at 4/8.');
+    expect(description).toContain('Routing Context');
   });
 
   it('maps Fillout training evaluation submissions into profile-ready trainer review records', () => {
@@ -143,7 +198,40 @@ describe('trainer profile evaluation engine', () => {
     expect(mapped.record.scorePercent).toBeGreaterThan(0);
     expect(mapped.record.rawText).toContain('Overall energy and Vocals');
     expect(mapped.record.rawText).not.toContain('name: Trainer Name');
-    expect(mapped.record.feedback).toContain('post class sales');
+    expect(mapped.record.feedback).toContain('post-class sales');
+  });
+
+  it('maps official Fillout webhook response-list shape from a data wrapper', () => {
+    const mapped = mapFilloutTrainingEvaluation({
+      data: {
+        formId: 'ceKTqZnemVus',
+        submissionId: '905879176',
+        submissionTime: '2026-05-31T17:38:00.992Z',
+        questions: [
+          { id: 'dt', name: 'Date & Time', type: 'DateTimePicker', value: '2026-05-31T17:38:00.992Z' },
+          { id: 'level', name: 'Level', type: 'Dropdown', value: 'Barre' },
+          { id: 'center', name: 'Center', type: 'Dropdown', value: 'Kwality House, Kemps Corner' },
+          { id: 'trainer', name: 'Trainer Name', type: 'Dropdown', value: 'Pranjali Jain' },
+          { id: 'setup', name: '❖ Studio setup and vibe check: [A/C, sound check, lights, mic check, sound on]', type: 'NumberInput', value: 7 },
+          { id: 'connection', name: '❖ Client connection | USP integration | Motivation (WHYs)', type: 'NumberInput', value: 8 },
+          { id: 'energy', name: '❖ Overall energy and Vocals [Physical Energy and Vocal Enunciation/Ebbs flows]', type: 'NumberInput', value: 7.5 },
+          { id: 'mindful', name: '❖ Mindful moment and fun factor', type: 'NumberInput', value: 6.5 },
+          { id: 'music', name: '❖ Musical arc and musicality (Playlist and use of music in choreography)', type: 'NumberInput', value: 7 },
+          { id: 'choreo', name: '❖ Choreography and Sequencing [Class programming, level appropriation]', type: 'NumberInput', value: 7 },
+          { id: 'comments', name: 'Additional Comments', type: 'LongAnswer', value: 'Strong member connection and clean setup. Needs sharper closing sales language.' },
+        ],
+      },
+    }, new Date('2026-05-31T17:38:01.620Z'));
+
+    expect(mapped.sourceRef).toBe('fillout:ceKTqZnemVus:905879176');
+    expect(mapped.submissionId).toBe('905879176');
+    expect(mapped.formId).toBe('ceKTqZnemVus');
+    expect(mapped.input.trainer).toBe('Pranjali Jain');
+    expect(mapped.input.studio).toBe('Kwality House, Kemps Corner');
+    expect(mapped.input.reviewPeriod).toBe('2026-05-31T17:38:00.992Z');
+    expect(mapped.record.scorePercent).toBeGreaterThan(0);
+    expect(mapped.record.feedback).toContain('Strong member connection');
+    expect(mapped.record.rawText).toContain('Trainer Name: Pranjali Jain');
   });
 
   it('hydrates trainer profiles from review records while preserving trainers with no feedback', () => {

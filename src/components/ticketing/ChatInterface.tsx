@@ -63,6 +63,7 @@ import {
   TrainerReviewTemplate,
   buildTrainerEvaluationText,
   buildTrainerReviewRecord,
+  isTrainerEvaluationProfileOnly,
   parseTrainerEvaluationText,
   saveTrainerReview,
 } from '@/lib/trainer-profiles';
@@ -873,6 +874,12 @@ function scorePercentFromEvaluation(input: TrainerEvaluationInput): number {
   return totalWeightage ? Math.round((totalScore / totalWeightage) * 100) : 0;
 }
 
+function trainerEvaluationBand(scorePercent: number): string {
+  if (scorePercent < 65) return 'High coaching priority';
+  if (scorePercent < 80) return 'Development watch';
+  return 'On-track performance';
+}
+
 function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket {
   const scorePercent = scorePercentFromEvaluation(input);
   const structuredDescription = buildTrainerEvaluationText({ ...input, rawText: undefined });
@@ -885,7 +892,7 @@ function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket
     description: structuredDescription,
     category: 'Trainer Feedback',
     subCategory: 'Knowledge and Competence',
-    priority: scorePercent < 65 ? 'High' : scorePercent < 80 ? 'Medium' : 'Low',
+    priority: 'Low',
     studio: input.studio || STUDIOS[0],
     trainer: input.trainer,
     classType: input.classType || null,
@@ -893,18 +900,28 @@ function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket
     memberName: null,
     memberContact: null,
     reportedBy: null,
-    assignedTo: 'Anisha Shah',
-    tags: ['trainer-profile', 'instructor-evaluation', input.template.toLowerCase()],
+    assignedTo: 'Trainer Profile',
+    department: 'Training',
+    tags: ['trainer-profile', 'instructor-evaluation', 'profile-only', input.template.toLowerCase()],
     sentiment: scorePercent >= 80 ? 'Positive' : scorePercent >= 65 ? 'Neutral' : 'Concern',
     conversationSummary: [
-      `Instructor: ${input.trainer}`,
-      `Template: ${input.template}`,
-      `Score: ${scorePercent}%`,
-      input.focusPoints ? `Focus points: ${input.focusPoints}` : '',
-      input.goals ? `Goals: ${input.goals}` : '',
+      `Instructor evaluation drafted for ${input.trainer} (${input.template}).`,
+      `Weighted score: ${scorePercent}% · ${trainerEvaluationBand(scorePercent)}.`,
+      input.focusPoints ? `Primary focus: ${input.focusPoints}` : '',
+      input.goals ? `Target goal: ${input.goals}` : '',
+      'Recorded under Trainer Profiles only. No operational owner or SLA follow-up required.',
     ].filter(Boolean).join('\n'),
     metadata: {
+      profileOnly: true,
       trainerReview,
+      routing: {
+        department: 'Training',
+        assigned_to: 'Trainer Profile',
+        status: 'Closed',
+        priority: 'Low',
+        profile_only: true,
+        routing_source: 'trainer_profile_record',
+      },
     },
   };
 }
@@ -942,7 +959,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const activeChatEpochRef = useRef(0);
   const lastResetVersionRef = useRef(resetVersion);
   const recentTickets = useMemo(
-    () => [...tickets].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 2),
+    () => tickets
+      .filter((ticket) => !isTrainerEvaluationProfileOnly(ticket))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 2),
     [tickets]
   );
   const activeDraftReviewMessage = useMemo(
@@ -1192,7 +1212,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     const requestEpoch = activeChatEpochRef.current;
     try {
       setLoading(true);
-      const existingTicket = findExistingSubmittedTicket(capturedVoice || text, activeContext, tickets);
+      const existingTicket = findExistingSubmittedTicket(capturedVoice || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
       if (existingTicket) {
         setSelectedTicket(existingTicket);
         onOpenExistingTicket?.(existingTicket);
@@ -2210,7 +2230,7 @@ const DraftTicketReviewPreview: React.FC<{
 
   const reviewContext = useMemo(() => contextFromDraft(draft, context), [context, draft]);
   const duplicateTicket = useMemo(
-    () => findExistingSubmittedTicket(`${draft.title}\n${draft.description}`, reviewContext, tickets),
+    () => findExistingSubmittedTicket(`${draft.title}\n${draft.description}`, reviewContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket))),
     [draft.description, draft.title, reviewContext, tickets]
   );
   const reviewInsights = useMemo(

@@ -428,26 +428,32 @@ function buildSourceRef(draft: DraftTicket, context: Record<string, unknown> = {
 }
 
 function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, assignment?: ResolvedAssignment): DbTicketPatch {
+  const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
   const assignedTo = assignment?.assignedTo || resolveTicketAssignee(draft.category, draft.studio);
-  const team = assignment?.team || draft.department || resolveTicketDepartment(draft.category, assignedTo);
+  const effectiveAssignedTo = profileOnly ? 'Trainer Profile' : assignedTo;
+  const team = profileOnly ? 'Training' : assignment?.team || draft.department || resolveTicketDepartment(draft.category, assignedTo);
   const nextEscalation = assignment?.nextEscalation || getEscalationTarget(assignedTo);
-  const priority = (assignment?.priority || draft.priority) as Ticket['priority'];
-  const slaDueAt = assignment?.slaHours
+  const priority = (profileOnly ? 'Low' : assignment?.priority || draft.priority) as Ticket['priority'];
+  const slaDueAt = profileOnly
+    ? draft.classDateTime || new Date().toISOString()
+    : assignment?.slaHours
     ? new Date(Date.now() + assignment.slaHours * 60 * 60 * 1000).toISOString()
     : computeSlaDueAt(priority);
   const formattedDescription = formatTicketBody(draft.description);
   const metadata = {
+    ...(draft.metadata || {}),
     source_ref: buildSourceRef(draft, context),
     intake_context: context,
       routing: {
         department: team,
-        assigned_to: assignedTo,
-        owner_pool: assignment?.ownerPool || [assignedTo],
-        next_escalation: nextEscalation,
+        assigned_to: effectiveAssignedTo,
+        owner_pool: profileOnly ? [] : assignment?.ownerPool || [assignedTo],
+        next_escalation: profileOnly ? null : nextEscalation,
       priority,
       sla_due_at: slaDueAt,
-      status: 'New',
-      routing_source: assignment?.source || 'athena_employee_directory',
+      status: profileOnly ? 'Closed' : 'New',
+      profile_only: profileOnly,
+      routing_source: profileOnly ? 'trainer_profile_record' : assignment?.source || 'athena_employee_directory',
     },
     dynamic_fields: Object.fromEntries(
       Object.entries(context).filter(([key, value]) =>
@@ -478,7 +484,7 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     category: draft.category,
     sub_category: draft.subCategory,
     priority,
-    status: 'New',
+    status: profileOnly ? 'Closed' : 'New',
     studio: draft.studio || 'Unspecified Studio',
     trainer: draft.trainer || null,
     class_type: draft.classType || null,
@@ -486,9 +492,9 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     member_name: draft.memberName || null,
     member_contact: draft.memberContact || null,
     reported_by: draft.reportedBy || null,
-    assigned_to: assignedTo,
+    assigned_to: effectiveAssignedTo,
     team,
-    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved', assignment?.source || 'default-routing'])),
+    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved', profileOnly ? 'profile-only' : assignment?.source || 'default-routing'])),
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || formattedDescription,
     sla_due_at: slaDueAt,
@@ -930,8 +936,10 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const ticket = normalizeCreatedTicket(created);
       setLiveTickets((prev) => dedupeAndSortTickets([ticket, ...prev]));
-      setSelectedTicketState(ticket);
-      await notifyTicketEmail('ticket_assigned', ticket, reporterName);
+      if (!ticket.tags.includes('profile-only')) {
+        setSelectedTicketState(ticket);
+        await notifyTicketEmail('ticket_assigned', ticket, reporterName);
+      }
       await refresh();
       return ticket;
     },
@@ -1044,8 +1052,10 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const ticket = normalizeCreatedTicket(created as DbTicketRow | Ticket);
       setLiveTickets((prev) => dedupeAndSortTickets([ticket, ...prev]));
-      setSelectedTicketState(ticket);
-      await notifyTicketEmail('ticket_assigned', ticket, signedInReporter);
+      if (!ticket.tags.includes('profile-only')) {
+        setSelectedTicketState(ticket);
+        await notifyTicketEmail('ticket_assigned', ticket, signedInReporter);
+      }
       await refresh();
       return ticket;
     },

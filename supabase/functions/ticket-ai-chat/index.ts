@@ -1190,25 +1190,28 @@ function toTicketRow(
   conversationId?: string | null,
   createdBy?: string | null,
 ) {
+  const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
   const priority = normalizePriority(draft.priority);
   const fallbackAssignment = resolveAssignment(draft.category, draft.studio, draft.subCategory);
-  const assignedTo = cleanString(draft.assignedTo)
+  const assignedTo = profileOnly ? 'Trainer Profile' : cleanString(draft.assignedTo)
     || cleanString(context.assignedTo)
     || cleanString(context.owner)
     || fallbackAssignment.assignedTo;
-  const team = cleanString(draft.department)
+  const team = profileOnly ? 'Training' : cleanString(draft.department)
     || cleanString(context.department)
     || cleanString(context.team)
     || fallbackAssignment.team;
+  const effectivePriority = profileOnly ? 'Low' : priority;
+  const sourceRef = buildSourceRef(draft, context, conversationId);
 
   return {
-    source_ref: buildSourceRef(draft, context, conversationId),
+    source_ref: sourceRef,
     title: cleanString(draft.title, 'Member support ticket'),
     description: cleanString(draft.description, 'No description provided.'),
     category: cleanString(draft.category, 'General Feedback'),
     sub_category: cleanString(draft.subCategory, 'Other'),
-    priority,
-    status: 'New',
+    priority: effectivePriority,
+    status: profileOnly ? 'Closed' : 'New',
     studio: cleanString(draft.studio, 'Unspecified Studio'),
     trainer: draft.trainer || null,
     class_type: draft.classType || null,
@@ -1218,23 +1221,25 @@ function toTicketRow(
     reported_by: draft.reportedBy || 'AI Intake',
     assigned_to: assignedTo,
     team,
-    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved'])),
+    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved', profileOnly ? 'profile-only' : ''])).filter(Boolean),
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || draft.description,
     metadata: {
       ...(draft.metadata || {}),
-      source_ref: buildSourceRef(draft, context, conversationId),
+      source_ref: sourceRef,
+      profileOnly,
       intake_context: context,
       routing: {
         department: team,
         assigned_to: assignedTo,
-        status: 'New',
-        priority,
-        routing_source: assignedTo === fallbackAssignment.assignedTo ? 'athena_employee_directory' : 'approved_context',
+        status: profileOnly ? 'Closed' : 'New',
+        priority: effectivePriority,
+        profile_only: profileOnly,
+        routing_source: profileOnly ? 'trainer_profile_record' : assignedTo === fallbackAssignment.assignedTo ? 'athena_employee_directory' : 'approved_context',
       },
     },
     created_by: createdBy || null,
-    sla_due_at: computeSlaDueAt(priority),
+    sla_due_at: profileOnly ? cleanString(draft.classDateTime, new Date().toISOString()) : computeSlaDueAt(effectivePriority),
   };
 }
 

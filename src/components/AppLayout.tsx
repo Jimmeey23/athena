@@ -41,6 +41,7 @@ import {
   type RoutingStateFilter,
 } from '@/lib/settings-routing-ops';
 import { canOpenAppTab, visibleAppTabValues } from '@/lib/app-access';
+import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
 
 const TicketDashboard = lazy(() =>
   import('./ticketing/TicketDashboard').then((module) => ({ default: module.TicketDashboard }))
@@ -396,7 +397,8 @@ const StatCard: React.FC<{ label: string; value: string | number; tone?: 'defaul
 
 const TriageQueuePanel: React.FC = () => {
   const { tickets, setSelectedTicket } = useTickets();
-  const openTickets = tickets.filter((ticket) => !['Resolved', 'Closed'].includes(ticket.status));
+  const operationalTickets = tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket));
+  const openTickets = operationalTickets.filter((ticket) => !['Resolved', 'Closed'].includes(ticket.status));
   const breached = openTickets.filter((ticket) => getSlaState(ticket) === 'Breached');
   const atRisk = openTickets.filter((ticket) => getSlaState(ticket) === 'At Risk');
   const critical = openTickets.filter((ticket) => ticket.priority === 'Critical' || ticket.priority === 'High');
@@ -509,42 +511,43 @@ const NotificationsPanel: React.FC<{ onOpen: (ticket: Ticket) => void }> = ({ on
 
 const InsightsPanel: React.FC = () => {
   const { tickets, setSelectedTicket } = useTickets();
-  const open = tickets.filter((ticket) => !isClosedTicket(ticket));
-  const closed = tickets.filter(isClosedTicket);
+  const operationalTickets = tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket));
+  const open = operationalTickets.filter((ticket) => !isClosedTicket(ticket));
+  const closed = operationalTickets.filter(isClosedTicket);
   const highRisk = sortByRisk(open.filter((ticket) => ['Critical', 'High'].includes(ticket.priority) || getSlaState(ticket) === 'Breached')).slice(0, 10);
-  const topCategories = countBy(tickets, (ticket) => ticket.category).slice(0, 8);
-  const topSubCategories = countBy(tickets, (ticket) => ticket.subCategory).slice(0, 8);
-  const byStudio = countBy(tickets, (ticket) => ticket.studio).slice(0, 8);
-  const byAssignee = countBy(tickets, (ticket) => ticket.assignedTo).slice(0, 8);
-  const byStatus = countBy(tickets, (ticket) => ticket.status);
-  const byPriority = countBy(tickets, (ticket) => ticket.priority);
-  const bySla = countBy(tickets, (ticket) => getSlaState(ticket));
-  const createdTrend = createdTrendByDay(tickets, 10);
-  const resolutionRate = tickets.length ? Math.round((closed.length / tickets.length) * 100) : 0;
+  const topCategories = countBy(operationalTickets, (ticket) => ticket.category).slice(0, 8);
+  const topSubCategories = countBy(operationalTickets, (ticket) => ticket.subCategory).slice(0, 8);
+  const byStudio = countBy(operationalTickets, (ticket) => ticket.studio).slice(0, 8);
+  const byAssignee = countBy(operationalTickets, (ticket) => ticket.assignedTo).slice(0, 8);
+  const byStatus = countBy(operationalTickets, (ticket) => ticket.status);
+  const byPriority = countBy(operationalTickets, (ticket) => ticket.priority);
+  const bySla = countBy(operationalTickets, (ticket) => getSlaState(ticket));
+  const createdTrend = createdTrendByDay(operationalTickets, 10);
+  const resolutionRate = operationalTickets.length ? Math.round((closed.length / operationalTickets.length) * 100) : 0;
   return (
     <WorkspacePanel title="Insights" description="Quick signal view across submitted and historic tickets.">
       <div className="grid gap-3 md:grid-cols-4">
-        <StatCard label="Total Tickets" value={tickets.length} />
+        <StatCard label="Total Tickets" value={operationalTickets.length} />
         <StatCard label="Open" value={open.length} tone="blue" />
         <StatCard label="Resolution Rate" value={`${resolutionRate}%`} tone="green" />
-        <StatCard label="Studios" value={new Set(tickets.map((ticket) => ticket.studio)).size} tone="blue" />
+        <StatCard label="Studios" value={new Set(operationalTickets.map((ticket) => ticket.studio)).size} tone="blue" />
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-3">
-        <BreakdownCard title="Category Drivers" items={topCategories} total={tickets.length} color="bg-blue-600" />
-        <BreakdownCard title="Recurring Subcategories" items={topSubCategories} total={tickets.length} color="bg-blue-600" />
-        <BreakdownCard title="SLA Health" items={bySla} total={tickets.length} color="bg-emerald-600" />
+        <BreakdownCard title="Category Drivers" items={topCategories} total={operationalTickets.length} color="bg-blue-600" />
+        <BreakdownCard title="Recurring Subcategories" items={topSubCategories} total={operationalTickets.length} color="bg-blue-600" />
+        <BreakdownCard title="SLA Health" items={bySla} total={operationalTickets.length} color="bg-emerald-600" />
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
-        <BreakdownCard title="Studio Workload" items={byStudio} total={tickets.length} color="bg-cyan-600" />
-        <BreakdownCard title="Team Workload" items={byAssignee} total={tickets.length} color="bg-slate-700" />
+        <BreakdownCard title="Studio Workload" items={byStudio} total={operationalTickets.length} color="bg-cyan-600" />
+        <BreakdownCard title="Team Workload" items={byAssignee} total={operationalTickets.length} color="bg-slate-700" />
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(360px,0.8fr)_minmax(0,1.2fr)]">
         <div className="grid gap-4">
-          <BreakdownCard title="Status Funnel" items={byStatus} total={tickets.length} color="bg-blue-600" compact />
-          <BreakdownCard title="Priority Mix" items={byPriority} total={tickets.length} color="bg-red-600" compact />
+          <BreakdownCard title="Status Funnel" items={byStatus} total={operationalTickets.length} color="bg-blue-600" compact />
+          <BreakdownCard title="Priority Mix" items={byPriority} total={operationalTickets.length} color="bg-red-600" compact />
           <TrendCard title="Created Trend" items={createdTrend} />
         </div>
         <TriageTable title="Highest Risk Tickets" tickets={highRisk} onOpen={setSelectedTicket} />

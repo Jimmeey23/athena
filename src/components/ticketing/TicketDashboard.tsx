@@ -49,6 +49,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
 
 type DashboardView = 'list' | 'table' | 'kanban' | 'grouped' | 'sla' | 'analytics';
 type GroupBy = 'none' | 'status' | 'priority' | 'studio' | 'category' | 'assignee' | 'sla' | 'member';
@@ -106,6 +107,7 @@ const CHART_COLORS = ['#111827', '#64748b', '#2563eb', '#334155', '#1d4ed8', '#9
 
 export const TicketDashboard: React.FC = () => {
   const { tickets, setSelectedTicket, loading, error, refresh, createManualTicket } = useTickets();
+  const operationalTickets = useMemo(() => tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)), [tickets]);
   const [view, setView] = useState<DashboardView>('list');
   const [groupBy, setGroupBy] = useState<GroupBy>('status');
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -119,15 +121,15 @@ export const TicketDashboard: React.FC = () => {
     const unique = (values: Array<string | undefined>) =>
       Array.from(new Set(values.filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
     return {
-      studios: unique(tickets.map((t) => t.studio)),
-      categories: unique(tickets.map((t) => t.category)),
-      assignees: unique(tickets.map((t) => t.assignedTo)),
-      sentiments: unique(tickets.map((t) => t.sentiment)),
+      studios: unique(operationalTickets.map((t) => t.studio)),
+      categories: unique(operationalTickets.map((t) => t.category)),
+      assignees: unique(operationalTickets.map((t) => t.assignedTo)),
+      sentiments: unique(operationalTickets.map((t) => t.sentiment)),
     };
-  }, [tickets]);
+  }, [operationalTickets]);
 
-  const filtered = useMemo(() => sortNewestFirst(filterTickets(tickets, filters)), [tickets, filters]);
-  const stats = useMemo(() => buildStats(filtered, tickets.length), [filtered, tickets.length]);
+  const filtered = useMemo(() => sortNewestFirst(filterTickets(operationalTickets, filters)), [operationalTickets, filters]);
+  const stats = useMemo(() => buildStats(filtered, operationalTickets.length), [filtered, operationalTickets.length]);
   const groups = useMemo(() => groupTickets(filtered, groupBy), [filtered, groupBy]);
   const analytics = useMemo(() => buildAnalytics(filtered), [filtered]);
 
@@ -263,7 +265,7 @@ export const TicketDashboard: React.FC = () => {
             {error}
           </div>
         )}
-        {loading && tickets.length === 0 ? (
+        {loading && operationalTickets.length === 0 ? (
           <EmptyState icon={<Circle className="h-8 w-8 animate-pulse" />} label="Loading tickets from database..." />
         ) : filtered.length === 0 ? (
           <EmptyState icon={<ListFilter className="h-9 w-9" />} label="No tickets match the current filters" />

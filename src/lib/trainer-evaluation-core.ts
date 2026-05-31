@@ -75,6 +75,12 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+function normalizeValueText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function keyText(value: unknown): string {
   return normalizeText(value).toLowerCase();
 }
@@ -101,19 +107,18 @@ function firstIdentifier(...values: unknown[]): string {
 
 function stringifyValue(value: unknown): string {
   if (value == null) return '';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return normalizeText(value);
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return normalizeValueText(value);
   if (Array.isArray(value)) return value.map(stringifyValue).filter(Boolean).join(' | ');
   if (typeof value === 'object') {
     const object = value as Record<string, unknown>;
-    return firstString(
-      object.value,
-      object.label,
-      object.name,
-      object.text,
-      object.answer,
-      object.email,
-      object.phone
-    ) || JSON.stringify(value);
+    return stringifyValue(object.value)
+      || stringifyValue(object.label)
+      || stringifyValue(object.name)
+      || stringifyValue(object.text)
+      || stringifyValue(object.answer)
+      || stringifyValue(object.email)
+      || stringifyValue(object.phone)
+      || JSON.stringify(value);
   }
   return '';
 }
@@ -211,6 +216,25 @@ function parseNumber(value: string): number {
   return match ? Number(match[0]) : 0;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function getFilloutSubmissionObject(payload: unknown): Record<string, unknown> {
+  const object = asRecord(payload) || {};
+  const nestedCandidates = [
+    object.submission,
+    object.data,
+    asRecord(object.data)?.submission,
+    Array.isArray(object.responses) ? object.responses[0] : undefined,
+    Array.isArray(asRecord(object.data)?.responses) ? (asRecord(object.data)?.responses as unknown[])[0] : undefined,
+  ];
+  const candidate = nestedCandidates.map(asRecord).find((item) =>
+    Boolean(item && (Array.isArray(item.questions) || item.submissionId || item.submission_id || item.id))
+  );
+  return candidate || object;
+}
+
 export function normalizeScore(value: number, max: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(max, value));
@@ -250,20 +274,63 @@ export function buildTrainerReviewRecord(
 }
 
 export function buildTrainerEvaluationText(input: TrainerEvaluationInput): string {
-  const scoreLines = input.scores
-    .filter((item) => item.score > 0)
-    .map((item) => `- ${item.category}: ${item.score}/${item.weightage}`);
+  const scored = scoreTrainerEvaluation(input.scores);
+  const scorePercent = scored.scorePercent;
+  const priorityBand = scorePercent < 65 ? 'High coaching priority' : scorePercent < 80 ? 'Development watch' : 'On-track performance';
+  const scoreRows = scored.scores
+    .filter((item) => item.weightage > 0)
+    .map((item) => ({
+      ...item,
+      ratio: item.score / item.weightage,
+    }));
+  const scoreLines = scoreRows.map((item) => (
+    `- ${item.category}: ${item.score}/${item.weightage} (${Math.round(item.ratio * 100)}%)`
+  ));
+  const strengths = scoreRows
+    .filter((item) => item.ratio >= 0.8)
+    .sort((a, b) => b.ratio - a.ratio)
+    .slice(0, 3)
+    .map((item) => `- ${item.category} is a current strength at ${item.score}/${item.weightage}.`);
+  const coachingRisks = scoreRows
+    .filter((item) => item.ratio > 0 && item.ratio < 0.7)
+    .sort((a, b) => a.ratio - b.ratio)
+    .slice(0, 3)
+    .map((item) => `- ${item.category} needs focused coaching at ${item.score}/${item.weightage}.`);
+  const actionLines = [
+    input.focusPoints ? `- Primary focus: ${input.focusPoints}` : '',
+    input.goals ? `- Target goal: ${input.goals}` : '',
+    scorePercent < 65 ? '- Schedule instructor coaching review within the high-priority SLA window.' : '',
+    scorePercent >= 65 && scorePercent < 80 ? '- Track the next two Studio Sessions for measurable improvement against focus points.' : '',
+    scorePercent >= 80 ? '- Continue monitoring for consistency and capture practices that can be shared with the instructor team.' : '',
+  ].filter(Boolean);
+
   return [
-    'Instructor evaluation feedback',
-    `Instructor: ${input.trainer}`,
-    `Template: ${input.template}`,
-    input.studio ? `Studio: ${input.studio}` : '',
-    input.classType ? `Class / format observed: ${input.classType}` : '',
-    input.reviewPeriod ? `Review period / class date: ${input.reviewPeriod}` : '',
-    scoreLines.length ? `Scores:\n${scoreLines.join('\n')}` : '',
-    `Evaluator comments: ${input.feedback}`,
-    input.focusPoints ? `Focus points: ${input.focusPoints}` : '',
-    input.goals ? `Goals: ${input.goals}` : '',
+    'Instructor Evaluation Brief',
+    '',
+    'Evaluation Snapshot',
+    `- Instructor: ${input.trainer}`,
+    `- Method template: ${input.template}`,
+    input.studio ? `- Studio Space: ${input.studio}` : '',
+    input.classType ? `- Signature Experience observed: ${input.classType}` : '',
+    input.reviewPeriod ? `- Review period / observed session: ${input.reviewPeriod}` : '',
+    `- Weighted score: ${scored.totalScore}/${scored.totalWeightage} (${scorePercent}%)`,
+    `- Performance band: ${priorityBand}`,
+    '',
+    scoreLines.length ? `Weighted Scorecard\n${scoreLines.join('\n')}` : '',
+    '',
+    strengths.length ? `Demonstrated Strengths\n${strengths.join('\n')}` : 'Demonstrated Strengths\n- No score-based strength threshold was captured in this submission.',
+    '',
+    coachingRisks.length ? `Coaching Attention Areas\n${coachingRisks.join('\n')}` : 'Coaching Attention Areas\n- No urgent score-based coaching risk was captured in this submission.',
+    '',
+    'Evaluator / Training Notes',
+    input.feedback || 'No evaluator notes were provided in the submission.',
+    '',
+    actionLines.length ? `Coaching Plan And Follow-up\n${actionLines.join('\n')}` : '',
+    '',
+    'Routing Context',
+    '- Department owner: Training',
+    '- Recommended owner: Anisha Shah',
+    '- Source: Instructor evaluation submission',
   ].filter(Boolean).join('\n');
 }
 
@@ -293,23 +360,55 @@ export function parseTrainerEvaluationText(text: string, trainer = 'Unspecified 
   };
 }
 
-function scoreFromAnswers(category: string, weightage: number, pairs: Array<{ label: string; value: string }>): number {
+const SCORE_LABEL_ALIASES: Record<string, string[]> = {
+  clientattendance: ['attendance', 'avg attendance', 'average attendance', 'class average', 'fill rate'],
+  clientretention: ['retention', 'repeat', 'check ins with new clients', 'needed modifications'],
+  clientoutreachcommunicationandconnection: ['outreach', 'communication', 'connection', 'welcoming clients', 'fostering connections', 'icebreakers', 'post class sales', 'advertising self'],
+  clientfeedback: ['client feedback', 'member feedback'],
+  mindfulmomentuspintegrationmotivation: ['mindful moment', 'usp', 'motivation', 'whys', 'fun factor'],
+  musicality: ['musical', 'music', 'playlist'],
+  energyandvocals: ['energy', 'vocals', 'vocal', 'command'],
+  choreographyandsequencing: ['choreography', 'sequencing', 'programming'],
+  learningstylesanduseofnames: ['learning styles', 'use of names', 'kinesthetics', 'tactile', 'hands on', 'visual', 'demos', 'imagery', 'auditory', 'cuing', 'setting up clients', 'equipment'],
+  classesworkshopsmeetingsandcorevalues: ['classes', 'workshops', 'meetings', 'core values', 'studio setup', 'vibe check', 'time management', 'sound on'],
+  classattendanceandbikefillrate: ['attendance', 'bike fill', 'fill rate', 'riders'],
+  clientretentionandrepeatriders: ['retention', 'repeat riders', 'repeat'],
+  rideleadinmotivationuspintegration: ['ride motivation', 'usp', 'motivation'],
+  ridemotivationuspintegration: ['ride motivation', 'usp', 'motivation'],
+  musicalityandbeatmatching: ['musical', 'beat matching', 'music', 'playlist'],
+  energyvocalsandcommand: ['energy', 'vocals', 'vocal', 'command'],
+  rideprogrammingandsequencing: ['ride programming', 'sequencing', 'programming'],
+  safetysetupandformcorrections: ['safety', 'setup', 'form corrections', 'equipment'],
+  workethicsmeetingsandcorevalues: ['work ethics', 'meetings', 'core values', 'time management'],
+};
+
+function scoreLabelMatch(category: string, label: string): number {
+  const labelText = keyText(label);
   const categorySlug = slug(category);
-  const categoryWords = keyText(category).split(' ').filter((word) => word.length > 3);
-  const pair = pairs.find((candidate) => {
-    const labelSlug = slug(candidate.label);
-    const labelText = keyText(candidate.label);
-    return labelSlug.includes(categorySlug)
-      || categorySlug.includes(labelSlug)
-      || categoryWords.some((word) => labelText.includes(word));
-  });
+  const labelSlug = slug(label);
+  if (labelSlug.includes(categorySlug) || categorySlug.includes(labelSlug)) return 100;
+  const aliases = SCORE_LABEL_ALIASES[categorySlug] || [];
+  const aliasScore = aliases.reduce((score, alias) => keyText(labelText).includes(keyText(alias)) ? Math.max(score, 30 + keyText(alias).length) : score, 0);
+  if (aliasScore) return aliasScore;
+  const categoryWords = keyText(category)
+    .split(' ')
+    .filter((word) => word.length > 3 && !['client', 'class', 'ride'].includes(word));
+  return categoryWords.reduce((score, word) => labelText.includes(word) ? score + 10 : score, 0);
+}
+
+function scoreFromAnswers(category: string, weightage: number, pairs: Array<{ label: string; value: string }>): number {
+  const candidates = pairs
+    .map((candidate) => ({ candidate, matchScore: scoreLabelMatch(category, candidate.label) }))
+    .filter((item) => item.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore);
+  const pair = candidates[0]?.candidate;
   if (!pair) return 0;
   return normalizeScore(parseNumber(pair.value), weightage);
 }
 
 export function mapFilloutTrainingEvaluation(payload: unknown, now = new Date()): FilloutTrainingEvaluationMapping {
   const object = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-  const submission = (object.submission && typeof object.submission === 'object' ? object.submission : object) as Record<string, unknown>;
+  const submission = getFilloutSubmissionObject(object);
   const answers = uniquePairs(normalizeFilloutPairs(submission, collectAnswerPairs(submission)));
   const allText = answers.map((answer) => `${answer.label}: ${answer.value}`).join('\n');
 
@@ -330,8 +429,24 @@ export function mapFilloutTrainingEvaluation(payload: unknown, now = new Date())
     score: scoreFromAnswers(row.category, row.weightage, answers),
   }));
 
-  const submissionId = firstIdentifier(object.submissionId, object.submission_id, submission.submissionId, submission.submission_id, submission.id);
-  const formId = firstIdentifier(object.formId, object.form_id, submission.formId, submission.form_id);
+  const dataObject = asRecord(object.data) || {};
+  const submissionId = firstIdentifier(
+    object.submissionId,
+    object.submission_id,
+    dataObject.submissionId,
+    dataObject.submission_id,
+    submission.submissionId,
+    submission.submission_id,
+    submission.id
+  );
+  const formId = firstIdentifier(
+    object.formId,
+    object.form_id,
+    dataObject.formId,
+    dataObject.form_id,
+    submission.formId,
+    submission.form_id
+  );
   const receivedAt = now.toISOString();
   const sourceRef = `fillout:${formId || 'unknown-form'}:${submissionId || String(Math.abs(allText.split('').reduce((hash, char) => ((hash * 31 + char.charCodeAt(0)) | 0), 0))).toString(36)}`;
   const input: TrainerEvaluationInput = {
