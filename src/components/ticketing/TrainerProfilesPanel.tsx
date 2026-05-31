@@ -80,6 +80,13 @@ const scoreColor = (score: number) => {
   return 'bg-rose-500';
 };
 
+const scoreTextColor = (score: number) => {
+  if (score >= 90) return 'text-emerald-700';
+  if (score >= 80) return 'text-blue-700';
+  if (score >= 70) return 'text-amber-700';
+  return 'text-rose-700';
+};
+
 function criterionPercent(score: number, weightage: number) {
   return weightage ? Math.max(0, Math.min(100, Math.round((score / weightage) * 100))) : 0;
 }
@@ -359,7 +366,7 @@ const TrainerProfileDetail: React.FC<{
             </div>
 
             <div className="space-y-3">
-              <InsightBlock title="Evaluator Feedback" value={activeReview.feedback} />
+              <EvaluatorFeedbackBrief value={activeReview.feedback} />
               <InsightBlock title="Focus Points" value={activeReview.focusPoints} icon={<Target className="h-4 w-4 text-blue-600" />} />
               <InsightBlock title="Goals" value={activeReview.goals} />
             </div>
@@ -503,17 +510,17 @@ const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: Train
   const scoreDensity = review.totalWeightage ? Math.round((review.totalScore / review.totalWeightage) * 100) : review.scorePercent;
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <DrillMetric label="Selected Score" value={`${review.scorePercent}%`} helper={scoreBand(review.scorePercent)} tone={scoreTone(review.scorePercent)} />
+    <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid items-start gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <DrillMetric label="Selected Score" value={`${review.scorePercent}%`} helper={scoreBand(review.scorePercent)} accent={scoreTextColor(review.scorePercent)} />
         <DrillMetric
           label="Vs Profile Avg"
           value={`${delta > 0 ? '+' : ''}${delta}%`}
           helper={`${profile.averageScorePercent}% profile mean`}
-          tone={delta >= 0 ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-rose-100 bg-rose-50 text-rose-700'}
+          accent={delta >= 0 ? 'text-emerald-700' : 'text-rose-700'}
         />
-        <DrillMetric label="Weighted Yield" value={`${scoreDensity}%`} helper={`${review.totalScore.toFixed(1)} / ${review.totalWeightage}`} tone="border-blue-100 bg-blue-50 text-blue-700" />
-        <DrillMetric label="Risk Weight" value={`${weightedRisk}`} helper="points below 70%" tone={weightedRisk ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'} />
+        <DrillMetric label="Weighted Yield" value={`${scoreDensity}%`} helper={`${review.totalScore.toFixed(1)} / ${review.totalWeightage}`} accent="text-blue-700" />
+        <DrillMetric label="Risk Weight" value={`${weightedRisk}`} helper="points below 70%" accent={weightedRisk ? 'text-amber-700' : 'text-emerald-700'} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -524,11 +531,11 @@ const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: Train
   );
 };
 
-const DrillMetric: React.FC<{ label: string; value: string; helper: string; tone: string }> = ({ label, value, helper, tone }) => (
-  <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
-    <div className="text-[10px] font-bold uppercase tracking-[0.16em] opacity-75">{label}</div>
-    <div className="mt-2 text-2xl font-semibold">{value}</div>
-    <div className="mt-1 text-[11px] font-semibold opacity-80">{helper}</div>
+const DrillMetric: React.FC<{ label: string; value: string; helper: string; accent: string }> = ({ label, value, helper, accent }) => (
+  <div className="h-fit rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
+    <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
+    <div className={`mt-2 text-2xl font-semibold leading-none ${accent}`}>{value}</div>
+    <div className="mt-2 text-[11px] font-semibold text-slate-500">{helper}</div>
   </div>
 );
 
@@ -572,6 +579,53 @@ const RichFeedbackList: React.FC<{ value?: string }> = ({ value }) => (
     ))}
   </ul>
 );
+
+const EvaluatorFeedbackBrief: React.FC<{ value?: string }> = ({ value }) => {
+  const items = richFeedbackItems(value);
+  const summary = items[0]?.text || 'No detail captured.';
+  const detailItems = items.length > 1 ? items.slice(1) : items;
+  const splitIndex = Math.ceil(detailItems.length / 2);
+  const columns = [detailItems.slice(0, splitIndex), detailItems.slice(splitIndex)].filter((column) => column.length > 0);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Evaluator Feedback</div>
+          <div className="mt-1 text-sm font-semibold text-slate-950">Qualitative coaching readout</div>
+        </div>
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+          {items.length} note{items.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Narrative Summary</div>
+          <p className="text-sm leading-relaxed text-slate-700">{summary}</p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          {columns.map((column, columnIndex) => (
+            <ul key={columnIndex} className="space-y-2">
+              {column.map((item, index) => (
+                <li key={`${item.label || item.text}-${columnIndex}-${index}`} className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
+                  <div className="flex gap-2 text-xs leading-relaxed text-slate-600">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                    <span>
+                      {item.label && <span className="font-semibold text-slate-950">{item.label}: </span>}
+                      {item.text}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const InsightBlock: React.FC<{ title: string; value?: string; icon?: React.ReactNode }> = ({ title, value, icon }) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
