@@ -46,6 +46,7 @@ export interface ApprovedTicketDraft {
   tags: string[];
   sentiment?: string;
   conversationSummary?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ManualTicketInput {

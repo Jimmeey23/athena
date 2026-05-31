@@ -64,7 +64,7 @@ export default function InteractiveRobotSpline({
       >
         <Spline scene={scene} onLoad={(spline: SplineAppLike) => { splineRef.current = spline; }} />
       </Suspense>
-      {smile && <span className="pointer-events-none absolute left-1/2 top-[58%] h-2.5 w-5 -translate-x-1/2 rounded-b-full border-b-2 border-rose-500/80" />}
+      {smile && <span className="pointer-events-none absolute left-1/2 top-[58%] h-2.5 w-5 -translate-x-1/2 rounded-b-full border-b-2 border-blue-500/80" />}
     </div>
   );
 }

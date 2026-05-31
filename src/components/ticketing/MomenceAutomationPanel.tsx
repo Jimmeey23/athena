@@ -257,7 +257,7 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
               <Metric label="Last Seen" value={formatDate(data.summary.member.lastSeen)} />
               <div className="flex flex-wrap gap-1">
                 {data.summary.member.tags.map((tag) => (
-                  <span key={tag} className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">{tag}</span>
+                  <span key={tag} className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">{tag}</span>
                 ))}
                 {data.summary.member.tags.length === 0 && <span className="text-[11px] text-slate-400">No tags returned</span>}
               </div>
@@ -495,7 +495,7 @@ const SearchBox = <TOption extends { id: string; label: string; description: str
       value={query}
       onChange={(event) => onQueryChange(event.target.value)}
       placeholder={`Search Momence ${label.toLowerCase()}`}
-      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
     />
     {selectedLabel && <div className="mt-1 text-[11px] font-medium text-emerald-700">Selected: {selectedLabel}</div>}
     {options.length > 0 && (
@@ -505,7 +505,7 @@ const SearchBox = <TOption extends { id: string; label: string; description: str
             key={option.id}
             type="button"
             onClick={() => onSelect(option)}
-            className="block w-full border-b border-slate-100 px-2 py-1.5 text-left text-xs last:border-0 hover:bg-violet-50 dark:border-slate-800 dark:hover:bg-slate-800"
+            className="block w-full border-b border-slate-100 px-2 py-1.5 text-left text-xs last:border-0 hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-slate-800"
           >
             <div className="font-medium text-slate-800 dark:text-slate-100">{option.label}</div>
             <div className="text-[11px] text-slate-500">{option.description}</div>
@@ -554,7 +554,7 @@ const ActionButton: React.FC<{
     className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
       tone === 'danger'
         ? 'bg-red-600 text-white hover:bg-red-700'
-        : 'bg-violet-600 text-white hover:bg-violet-700'
+        : 'bg-blue-600 text-white hover:bg-blue-700'
     }`}
   >
     {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}

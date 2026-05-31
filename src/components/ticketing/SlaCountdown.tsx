@@ -65,6 +65,19 @@ export const SlaCountdown: React.FC<{
       ? 'Past target'
       : 'Remaining';
 
+  if (compact) {
+    return (
+      <div
+        className={`inline-flex h-8 min-w-[104px] max-w-full items-center justify-center gap-1.5 rounded-lg border px-2 font-mono text-[11px] font-bold tabular-nums ${toneClass[tone]} ${className}`}
+        title={`${label}: ${caption}. Target ${dueLabel}`}
+        aria-label={`${label}: ${caption} ${value}. Target ${dueLabel}`}
+      >
+        {diffMs < 0 && !closed ? <TimerReset className="h-3 w-3 shrink-0" /> : <Clock className="h-3 w-3 shrink-0" />}
+        <span className="truncate">{value}</span>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`inline-flex min-w-0 items-center gap-2 rounded-2xl border px-2.5 py-2 ring-4 ${toneClass[tone]} ${className}`}
@@ -75,8 +88,8 @@ export const SlaCountdown: React.FC<{
         {diffMs < 0 && !closed ? <TimerReset className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
       </span>
       <span className="min-w-0">
-        {!compact && <span className="block text-[9px] font-bold uppercase tracking-[0.16em] opacity-70">{caption}</span>}
-        <span className={`${compact ? 'text-[11px]' : 'text-sm'} block font-mono font-bold tabular-nums`}>{value}</span>
+        <span className="block text-[9px] font-bold uppercase tracking-[0.16em] opacity-70">{caption}</span>
+        <span className="block font-mono text-sm font-bold tabular-nums">{value}</span>
       </span>
     </div>
   );

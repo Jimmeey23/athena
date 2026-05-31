@@ -8,6 +8,7 @@ describe('visibleAppTabValues', () => {
       'queue',
       'notifications',
       'tickets',
+      'trainers',
     ]);
   });
 
@@ -17,6 +18,7 @@ describe('visibleAppTabValues', () => {
       'queue',
       'notifications',
       'tickets',
+      'trainers',
       'reports',
       'insights',
       'momence',

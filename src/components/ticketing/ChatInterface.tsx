@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge } from 'lucide-react';
+import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap } from 'lucide-react';
 import InteractiveRobotSpline from '@/components/InteractiveRobotSpline';
 import { ROBOT_SPLINE_URL } from '@/lib/galleryImages';
 import { TicketPreviewCard } from './TicketPreviewCard';
@@ -55,7 +55,25 @@ import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
 import { buildTicketReviewInsights } from '@/lib/ticket-review';
 import { getGreetingQuickActions, isCasualGreeting } from '@/lib/athena-chat-intent';
 import { shouldUseOptionButtons } from '@/lib/intake-option-buttons';
+import { trainerImageUrl, trainerInitials } from '@/lib/trainer-images';
+import {
+  TRAINER_REVIEW_TEMPLATES,
+  TrainerEvaluationInput,
+  TrainerEvaluationScore,
+  TrainerReviewTemplate,
+  buildTrainerEvaluationText,
+  buildTrainerReviewRecord,
+  parseTrainerEvaluationText,
+  saveTrainerReview,
+} from '@/lib/trainer-profiles';
 import { SlaCountdown } from './SlaCountdown';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface SuggestedChip {
   label: string;
@@ -99,6 +117,7 @@ interface DraftTicket {
   tags: string[];
   sentiment?: string;
   conversationSummary?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface PendingAttachment {
@@ -138,6 +157,7 @@ interface Message {
   content: string;
   aiGenerated?: boolean;
   ticket?: DraftTicket | null;
+  trainerEvaluation?: TrainerEvaluationInput;
   suggestedChips?: SuggestedChip[];
   ticketId?: string;
   published?: boolean;
@@ -167,24 +187,24 @@ const GREETING: Message = {
 
 const USER_TONES = [
   {
-    avatar: 'border-rose-200 bg-white text-rose-600 shadow-[0_12px_28px_rgba(190,24,93,0.16)]',
-    bubble: 'rounded-tr-md border border-l-4 border-rose-200 border-l-rose-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(190,24,93,0.14)]',
-    more: 'text-rose-700 hover:text-rose-900',
+    avatar: 'border-blue-200 bg-white text-blue-600 shadow-[0_12px_28px_rgba(37,99,235,0.16)]',
+    bubble: 'rounded-tr-md border border-l-4 border-blue-200 border-l-blue-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(37,99,235,0.14)]',
+    more: 'text-blue-700 hover:text-blue-900',
   },
   {
-    avatar: 'border-red-200 bg-white text-red-600 shadow-[0_12px_28px_rgba(220,38,38,0.14)]',
-    bubble: 'rounded-tr-md border border-l-4 border-red-200 border-l-red-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(220,38,38,0.13)]',
-    more: 'text-red-700 hover:text-red-900',
+    avatar: 'border-cyan-200 bg-white text-cyan-600 shadow-[0_12px_28px_rgba(8,145,178,0.14)]',
+    bubble: 'rounded-tr-md border border-l-4 border-cyan-200 border-l-cyan-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(8,145,178,0.13)]',
+    more: 'text-cyan-700 hover:text-cyan-900',
   },
   {
-    avatar: 'border-emerald-200 bg-white text-emerald-600 shadow-[0_12px_28px_rgba(16,185,129,0.14)]',
-    bubble: 'rounded-tr-md border border-l-4 border-emerald-200 border-l-emerald-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(16,185,129,0.13)]',
-    more: 'text-emerald-700 hover:text-emerald-900',
+    avatar: 'border-indigo-200 bg-white text-indigo-600 shadow-[0_12px_28px_rgba(79,70,229,0.14)]',
+    bubble: 'rounded-tr-md border border-l-4 border-indigo-200 border-l-indigo-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(79,70,229,0.13)]',
+    more: 'text-indigo-700 hover:text-indigo-900',
   },
   {
-    avatar: 'border-violet-200 bg-white text-violet-600 shadow-[0_12px_28px_rgba(124,58,237,0.15)]',
-    bubble: 'rounded-tr-md border border-l-4 border-violet-200 border-l-violet-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(124,58,237,0.14)]',
-    more: 'text-violet-700 hover:text-violet-900',
+    avatar: 'border-sky-200 bg-white text-sky-600 shadow-[0_12px_28px_rgba(2,132,199,0.15)]',
+    bubble: 'rounded-tr-md border border-l-4 border-sky-200 border-l-sky-500 bg-white text-slate-800 shadow-[0_18px_44px_rgba(2,132,199,0.14)]',
+    more: 'text-sky-700 hover:text-sky-900',
   },
 ];
 
@@ -847,6 +867,48 @@ function buildClientDraft(ctx: DetailContext, text: string): DraftTicket {
   };
 }
 
+function scorePercentFromEvaluation(input: TrainerEvaluationInput): number {
+  const totalWeightage = input.scores.reduce((sum, item) => sum + item.weightage, 0);
+  const totalScore = input.scores.reduce((sum, item) => sum + Math.max(0, Math.min(item.weightage, item.score)), 0);
+  return totalWeightage ? Math.round((totalScore / totalWeightage) * 100) : 0;
+}
+
+function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket {
+  const scorePercent = scorePercentFromEvaluation(input);
+  const structuredDescription = buildTrainerEvaluationText({ ...input, rawText: undefined });
+  const trainerReview = buildTrainerReviewRecord(input, {
+    source: 'athena',
+    sourceRef: `athena-trainer-review:${input.trainer}:${input.template}:${input.reviewPeriod || Date.now()}`,
+  });
+  return {
+    title: `Instructor evaluation · ${input.trainer} · ${input.template}`,
+    description: structuredDescription,
+    category: 'Trainer Feedback',
+    subCategory: 'Knowledge and Competence',
+    priority: scorePercent < 65 ? 'High' : scorePercent < 80 ? 'Medium' : 'Low',
+    studio: input.studio || STUDIOS[0],
+    trainer: input.trainer,
+    classType: input.classType || null,
+    classDateTime: input.reviewPeriod || null,
+    memberName: null,
+    memberContact: null,
+    reportedBy: null,
+    assignedTo: 'Anisha Shah',
+    tags: ['trainer-profile', 'instructor-evaluation', input.template.toLowerCase()],
+    sentiment: scorePercent >= 80 ? 'Positive' : scorePercent >= 65 ? 'Neutral' : 'Concern',
+    conversationSummary: [
+      `Instructor: ${input.trainer}`,
+      `Template: ${input.template}`,
+      `Score: ${scorePercent}%`,
+      input.focusPoints ? `Focus points: ${input.focusPoints}` : '',
+      input.goals ? `Goals: ${input.goals}` : '',
+    ].filter(Boolean).join('\n'),
+    metadata: {
+      trainerReview,
+    },
+  };
+}
+
 export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) => void; resetVersion?: number }> = ({ onOpenExistingTicket, resetVersion = 0 }) => {
   const { createApprovedTicket, tickets, setSelectedTicket } = useTickets();
   const { user } = useBackendAuth();
@@ -862,6 +924,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const [voiceLiveText, setVoiceLiveText] = useState('');
   const [voiceHint, setVoiceHint] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [activeDraftReviewMessageId, setActiveDraftReviewMessageId] = useState<string | null>(null);
+  const [instructorEvaluationMode, setInstructorEvaluationMode] = useState(false);
+  const [textToTicketOpen, setTextToTicketOpen] = useState(false);
+  const [textToTicketText, setTextToTicketText] = useState('');
   const [now, setNow] = useState<Date>(new Date());
   const publishingRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -879,6 +945,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     () => [...tickets].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 2),
     [tickets]
   );
+  const activeDraftReviewMessage = useMemo(
+    () => messages.find((message) => message.id === activeDraftReviewMessageId && message.ticket) || null,
+    [activeDraftReviewMessageId, messages]
+  );
 
   useEffect(() => {
     setContext((current) => {
@@ -886,6 +956,16 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       return { ...current, reportedBy: reporterName };
     });
   }, [reporterName]);
+
+  useEffect(() => {
+    const mode = instructorEvaluationMode ? 'trainer' : 'ticket';
+    document.documentElement.dataset.athenaMode = mode;
+    window.dispatchEvent(new CustomEvent('athena-mode-change', { detail: { mode } }));
+    return () => {
+      document.documentElement.dataset.athenaMode = 'ticket';
+      window.dispatchEvent(new CustomEvent('athena-mode-change', { detail: { mode: 'ticket' } }));
+    };
+  }, [instructorEvaluationMode]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -1234,6 +1314,9 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         ...prev,
         assistantMsg,
       ]);
+      if (ticket) {
+        setActiveDraftReviewMessageId(assistantMsg.id);
+      }
 
     } catch (e: unknown) {
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
@@ -1274,6 +1357,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     setPendingSingleField(null);
     setPendingAttachments([]);
     setConversationId(null);
+    setActiveDraftReviewMessageId(null);
+    setInstructorEvaluationMode(false);
     setLoading(false);
   }, [reporterName]);
 
@@ -1314,7 +1399,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     sendMessage(`Here are the missing details:\n${detailLines.join('\n')}`, nextContext);
   };
 
-  const publishDraft = async (messageId: string, draft: DraftTicket) => {
+  const publishDraft = async (messageId: string, draft: DraftTicket, trainerEvaluation?: TrainerEvaluationInput) => {
     if (loading || publishingRef.current.has(messageId)) return;
     const publishableDraft = mergeDraftWithContext(draft, context);
     const explicitlyUsedFields = new Set<string>();
@@ -1328,6 +1413,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     const missingDetailsForm = detailFormForIncompleteDraft(publishableDraft, publishContext);
     if (missingDetailsForm) {
       setPendingSingleField(null);
+      setActiveDraftReviewMessageId(null);
       setMessages((prev) => [
         ...prev,
         {
@@ -1349,6 +1435,9 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         publishContext as Record<string, unknown>,
         pendingAttachments.map((entry) => entry.file)
       );
+      if (trainerEvaluation && !publishableDraft.metadata?.trainerReview) {
+        saveTrainerReview(trainerEvaluation);
+      }
       setMessages((prev) =>
         prev.map((message) =>
           message.id === messageId
@@ -1368,6 +1457,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         },
       ]);
       setPendingAttachments([]);
+      setActiveDraftReviewMessageId(null);
     } catch (e: unknown) {
       const message = getDisplayError(e, 'Ticket creation failed');
       setMessages((prev) => [
@@ -1409,6 +1499,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   };
 
   const discardDraft = (messageId: string) => {
+    setActiveDraftReviewMessageId((current) => current === messageId ? null : current);
     setMessages((prev) =>
       prev.map((message) => (
         message.id === messageId
@@ -1418,15 +1509,178 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     );
   };
 
+  const onConfirmDraftFromMessage = (message: Message) => {
+    if (!message.ticket) return;
+    publishDraft(message.id, mergeDraftWithContext(message.ticket, context), message.trainerEvaluation);
+  };
+
+  const createTrainerEvaluationDraft = (evaluation: TrainerEvaluationInput, source: 'form' | 'text' = 'form') => {
+    const draft = buildTrainerEvaluationDraft(evaluation);
+    const messageId = `trainer-eval-draft-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: messageId,
+        role: 'assistant',
+        aiGenerated: true,
+        content: source === 'text'
+          ? `I extracted the pasted review into a structured instructor evaluation draft for **${evaluation.trainer}**. Please review before publishing.`
+          : `Instructor evaluation draft prepared for **${evaluation.trainer}**. Please review before publishing.`,
+        ticket: draft,
+        trainerEvaluation: evaluation,
+        published: false,
+      },
+    ]);
+    setContext((current) => ({
+      ...current,
+      studio: evaluation.studio || current.studio,
+      trainer: evaluation.trainer || current.trainer,
+      classType: evaluation.classType || current.classType,
+      category: 'Trainer Feedback',
+      subCategory: 'Knowledge and Competence',
+      reportedBy: reporterName,
+    }));
+    setActiveDraftReviewMessageId(messageId);
+  };
+
+  const submitInstructorEvaluation = async (evaluation: TrainerEvaluationInput) => {
+    createTrainerEvaluationDraft(evaluation, 'form');
+    setInstructorEvaluationMode(false);
+  };
+
+  const submitTextToTicket = async () => {
+    const sourceText = textToTicketText.trim();
+    if (!sourceText) return;
+    setLoading(true);
+    try {
+      const aiInstruction = [
+        'TEXT_TO_TICKET_CLASSIFICATION_TASK',
+        'Classify the pasted text as either trainer_evaluation or ticket_submission.',
+        'If it is trainer_evaluation, return a Trainer Feedback draft only; do not treat it as a member complaint.',
+        'If it is ticket_submission, return the normal support ticket draft.',
+        'Use structured fields instead of placing all pasted text into description.',
+        '',
+        sourceText,
+      ].join('\n');
+      const { data } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
+        body: buildAthenaDraftRequestBody({
+          aiProvider: import.meta.env.VITE_AI_PROVIDER || 'deepseek',
+          messages: [{ id: `text-to-ticket-${Date.now()}`, role: 'user', content: aiInstruction }],
+          preamble: buildContextPreamble({ ...context, reportedBy: reporterName }),
+          conversationId,
+          context: {
+            ...context,
+            reportedBy: reporterName,
+            textToTicketMode: true,
+            classificationOptions: ['trainer_evaluation', 'ticket_submission'],
+          },
+        }),
+      });
+
+      const aiTicket = data?.ticket || null;
+      const aiSaysTrainer = aiTicket?.category === 'Trainer Feedback' ||
+        /trainer[_\s-]?evaluation|instructor evaluation|performance review|weighted scoring|focus points/i.test(`${data?.reply || ''}\n${aiTicket?.title || ''}\n${aiTicket?.description || ''}`);
+      const localTrainerSignal = /client feedback|internal feedback|focus points|avg attendance|conversion rate|certification|trainer|instructor|barre classes|power\s?cycle/i.test(sourceText);
+
+      if (aiSaysTrainer || (!aiTicket && localTrainerSignal)) {
+        const evaluation = parseTrainerEvaluationText(sourceText, context.trainer || 'Unspecified Instructor');
+        createTrainerEvaluationDraft({
+          ...evaluation,
+          studio: context.studio || evaluation.studio,
+          classType: context.classType || evaluation.classType,
+          reviewPeriod: context.classDateTime || evaluation.reviewPeriod,
+        }, 'text');
+      } else {
+        const inferredContext = normalizeInferredContext(data?.inferredContext);
+        const draft = aiTicket || buildClientDraft(mergeInferredContext({ ...context, reportedBy: reporterName }, inferredContext), sourceText);
+        const messageId = `text-ticket-draft-${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: messageId,
+            role: 'assistant',
+            aiGenerated: true,
+            content: 'I classified the pasted text as a support ticket and prepared a draft for review.',
+            ticket: draft,
+            published: false,
+          },
+        ]);
+        setActiveDraftReviewMessageId(messageId);
+      }
+      setTextToTicketText('');
+      setTextToTicketOpen(false);
+    } catch (error) {
+      const localTrainerSignal = /client feedback|internal feedback|focus points|avg attendance|conversion rate|certification|trainer|instructor|barre classes|power\s?cycle/i.test(sourceText);
+      if (localTrainerSignal) {
+        const evaluation = parseTrainerEvaluationText(sourceText, context.trainer || 'Unspecified Instructor');
+        createTrainerEvaluationDraft({
+          ...evaluation,
+          studio: context.studio || evaluation.studio,
+          classType: context.classType || evaluation.classType,
+          reviewPeriod: context.classDateTime || evaluation.reviewPeriod,
+        }, 'text');
+      } else {
+        const messageId = `text-ticket-draft-${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: messageId,
+            role: 'assistant',
+            aiGenerated: true,
+            content: 'AI classification was unavailable, so I prepared a support-ticket draft using the pasted text.',
+            ticket: buildClientDraft({ ...context, reportedBy: reporterName }, sourceText),
+            published: false,
+          },
+        ]);
+        setActiveDraftReviewMessageId(messageId);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-full w-full overflow-hidden bg-slate-200/60 font-['Plus_Jakarta_Sans',Inter,sans-serif]">
-      <div className="relative hidden h-full w-[32%] overflow-hidden border-r border-slate-200 bg-gradient-to-br from-slate-100 via-white to-violet-50 lg:block">
-        <div className="absolute -left-12 top-16 h-56 w-56 rounded-full bg-violet-400/20 blur-3xl" />
-        <div className="absolute -right-12 bottom-10 h-64 w-64 rounded-full bg-fuchsia-400/20 blur-3xl" />
+      <div className="relative hidden h-full w-[32%] overflow-hidden border-r border-slate-200 bg-gradient-to-br from-slate-100 via-white to-blue-50 lg:block">
+        <div className="absolute -left-12 top-16 h-56 w-56 rounded-full bg-blue-400/20 blur-3xl" />
+        <div className="absolute -right-12 bottom-10 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(100,116,139,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(100,116,139,0.08)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_78%_56%_at_50%_50%,#000_68%,transparent_110%)]" />
-        <InteractiveRobotSpline scene={ROBOT_SPLINE_URL} className="athena-bot-tint absolute inset-0 h-full w-full" smile />
+        <InteractiveRobotSpline
+          key={instructorEvaluationMode ? 'athena-trainer-blue' : 'athena-ticket-blue'}
+          scene={ROBOT_SPLINE_URL}
+          className="athena-bot-tint-blue absolute inset-0 h-full w-full transition duration-500"
+          smile
+        />
+        <div className="absolute left-3 right-3 top-3 z-10">
+          <div className="flex items-center justify-between rounded-2xl border border-white/50 bg-white/40 px-3 py-2 shadow-[0_18px_54px_rgba(15,23,42,0.12)] backdrop-blur-2xl">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Athena mode</div>
+              <div className="truncate text-xs font-semibold text-blue-950">
+                {instructorEvaluationMode ? 'Instructor evaluation' : 'Ticket intake'}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={instructorEvaluationMode}
+              onClick={() => setInstructorEvaluationMode((current) => !current)}
+              className={`relative h-7 w-12 rounded-full border transition ${
+                instructorEvaluationMode
+                  ? 'border-blue-500 bg-blue-600'
+                  : 'border-blue-200 bg-blue-100'
+              }`}
+              title="Toggle instructor evaluation mode"
+            >
+              <span
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition ${
+                  instructorEvaluationMode ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
         <div className="absolute bottom-2 left-2 right-2">
-          <div className="rounded-2xl border border-white/55 bg-white/30 p-2 shadow-[0_24px_80px_-30px_rgba(15,23,42,0.35)] backdrop-blur-2xl">
+          <div className="rounded-2xl border border-white/50 bg-white/30 p-2 shadow-[0_24px_80px_-30px_rgba(15,23,42,0.35)] backdrop-blur-2xl">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-black">
               Recent tickets
             </div>
@@ -1443,7 +1697,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                       setSelectedTicket(ticket);
                       onOpenExistingTicket?.(ticket);
                     }}
-                    className="animate-ticket-chip-in max-w-[220px] rounded-full border border-slate-200/80 bg-white/85 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:bg-rose-50 hover:text-slate-900"
+                    className="animate-ticket-chip-in max-w-[220px] rounded-full border border-slate-200/80 bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-slate-900"
                     style={{ animationDelay: `${index * 90}ms` }}
                     title={`${ticket.id} - ${ticket.title}`}
                   >
@@ -1451,7 +1705,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   </button>
                 );
               }) : (
-                <span className="rounded-full border border-slate-200/80 bg-white/85 px-3 py-1.5 text-[11px] font-medium text-slate-500 shadow-sm">
+                <span className="rounded-full border border-slate-200/80 bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-500 shadow-sm">
                   No recent tickets
                 </span>
               )}
@@ -1461,16 +1715,31 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col bg-background lg:w-[68%]">
-        <div className="animate-chat-header-in flex items-center justify-between border-b border-border bg-[#f0f2f5] px-4 py-2.5 shadow-sm">
+        <div className={`animate-chat-header-in flex items-center justify-between border-b px-4 py-2.5 shadow-sm ${
+          instructorEvaluationMode
+            ? 'border-blue-100 bg-blue-50/70'
+            : 'border-blue-100 bg-blue-50/70'
+        }`}>
           <div className="flex min-w-0 items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-emerald-300/70 bg-gradient-to-br from-emerald-100 to-rose-100 shadow-sm">
-              <img src="/download-1.png" alt="Athena" className="-scale-x-100 h-10 w-10 rounded-full object-cover" />
+            <div className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-sm ${
+              instructorEvaluationMode
+                ? 'border-blue-300/80 bg-gradient-to-br from-blue-100 to-cyan-100'
+                : 'border-blue-300/80 bg-gradient-to-br from-blue-100 to-cyan-100'
+            }`}>
+              <img
+                src="/download-1.png"
+                alt="Athena"
+                className="-scale-x-100 h-10 w-10 rounded-full object-cover transition duration-500"
+                style={{ filter: 'hue-rotate(225deg) saturate(1.45) contrast(1.08)' }}
+              />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-lg font-semibold text-slate-950">Athena</h1>
-                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-emerald-700 shadow-sm">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className={`inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold shadow-sm ${
+                  instructorEvaluationMode ? 'text-blue-700' : 'text-blue-700'
+                }`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                   Online
                 </span>
               </div>
@@ -1480,45 +1749,132 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
           <div />
         </div>
 
-        <div
-          ref={scrollRef}
-          className="chat-scrollbar mx-auto w-full max-w-7xl flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 lg:py-5"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg width='180' height='180' viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Ctext x='24' y='42' font-size='11' font-family='Inter,Arial,sans-serif' fill='%231e293b' fill-opacity='0.05'%3EP57%3C/text%3E%3Ccircle cx='124' cy='54' r='9' stroke='%231e293b' stroke-opacity='0.045' stroke-width='1.2'/%3E%3Cpath d='M35 122h22M46 111v22' stroke='%231e293b' stroke-opacity='0.045' stroke-width='1.8' stroke-linecap='round'/%3E%3C/g%3E%3C/svg%3E")`,
-            backgroundColor: '#fbfaf7',
+        {instructorEvaluationMode ? (
+          <div className="chat-scrollbar flex-1 overflow-y-auto bg-blue-50/60 px-4 py-4 shadow-inner sm:px-6">
+            <div className="mx-auto flex min-h-full max-w-7xl items-stretch">
+              <InstructorEvaluationChatbox
+                onSubmit={submitInstructorEvaluation}
+                disabled={loading}
+              />
+            </div>
+          </div>
+        ) : (
+          <div
+            ref={scrollRef}
+            className="chat-scrollbar mx-auto w-full max-w-7xl flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 lg:py-5"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg width='180' height='180' viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Ctext x='24' y='42' font-size='11' font-family='Inter,Arial,sans-serif' fill='%231e293b' fill-opacity='0.05'%3EP57%3C/text%3E%3Ccircle cx='124' cy='54' r='9' stroke='%231e293b' stroke-opacity='0.045' stroke-width='1.2'/%3E%3Cpath d='M35 122h22M46 111v22' stroke='%231e293b' stroke-opacity='0.045' stroke-width='1.8' stroke-linecap='round'/%3E%3C/g%3E%3C/svg%3E")`,
+              backgroundColor: '#f3f4f6',
+            }}
+          >
+            {messages.map((m, index) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                index={index}
+                onChipClick={handleChipClick}
+                onDetailFormSubmit={submitDetailForm}
+                onOpenDraftReview={(messageId) => setActiveDraftReviewMessageId(messageId)}
+                context={context}
+              />
+            ))}
+            {loading && <TypingIndicator />}
+          </div>
+        )}
+
+        <Dialog
+          open={Boolean(activeDraftReviewMessage)}
+          onOpenChange={(open) => {
+            if (!open) setActiveDraftReviewMessageId(null);
           }}
         >
-          {messages.map((m, index) => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              index={index}
-              tickets={tickets}
-              onChipClick={handleChipClick}
-              onConfirm={publishDraft}
-              onEdit={refineDraft}
-              onDiscard={discardDraft}
-              onSaveEdit={saveEditedDraft}
-              onDetailFormSubmit={submitDetailForm}
-              publishing={publishingRef.current.has(m.id)}
-              context={context}
-            />
-          ))}
-          {loading && <TypingIndicator />}
-        </div>
+          <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto border-slate-200 bg-slate-50/95 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.28)] data-[state=open]:zoom-in-90 sm:rounded-3xl sm:p-5">
+            <DialogHeader className="pr-8">
+              <DialogTitle className="text-base text-slate-950">Review Athena ticket draft</DialogTitle>
+              <DialogDescription>
+                Check the context, routing, and Momence signals before publishing.
+              </DialogDescription>
+            </DialogHeader>
+            {activeDraftReviewMessage?.ticket && (
+              <DraftTicketReviewPreview
+                draft={mergeDraftWithContext(activeDraftReviewMessage.ticket, context)}
+                context={context}
+                tickets={tickets}
+                onConfirm={() => onConfirmDraftFromMessage(activeDraftReviewMessage)}
+                onEdit={() => refineDraft()}
+                onDiscard={() => discardDraft(activeDraftReviewMessage.id)}
+                onSaveEdit={(draft) => saveEditedDraft(activeDraftReviewMessage.id, draft)}
+                confirmed={activeDraftReviewMessage.published}
+                ticketId={activeDraftReviewMessage.ticketId}
+                confirmedTicket={activeDraftReviewMessage.publishedTicket}
+                publishing={publishingRef.current.has(activeDraftReviewMessage.id)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
 
+        <Dialog open={textToTicketOpen} onOpenChange={setTextToTicketOpen}>
+          <DialogContent className="max-w-2xl border-slate-200 bg-white p-5 shadow-[0_30px_100px_rgba(15,23,42,0.25)] sm:rounded-3xl">
+            <DialogHeader>
+              <DialogTitle className="text-base text-slate-950">Text to ticket</DialogTitle>
+              <DialogDescription>
+                Paste review notes or performance text. Athena will extract a structured ticket draft for review.
+              </DialogDescription>
+            </DialogHeader>
+            <textarea
+              value={textToTicketText}
+              onChange={(event) => setTextToTicketText(event.target.value)}
+              rows={9}
+              placeholder="Paste the source text here..."
+              className="mt-3 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-relaxed text-slate-950 outline-none placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTextToTicketOpen(false)}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitTextToTicket}
+                disabled={!textToTicketText.trim()}
+                className="h-9 rounded-xl bg-blue-600 px-3 text-xs font-semibold text-white shadow-[0_12px_26px_rgba(37,99,235,0.22)] transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Generate draft
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {!instructorEvaluationMode && (
+        <>
         <div className="z-10 flex-shrink-0 border-t border-border/50 bg-[#f0f2f5] px-4 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.04)] sm:px-6">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
             <div className="flex shrink-0 items-center gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-rose-700">
+              <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700">
                 Context
               </span>
               <div className="hidden h-5 w-px bg-slate-200 sm:block" />
             </div>
+            <button
+              type="button"
+              onClick={() => setTextToTicketOpen(true)}
+              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-semibold shadow-sm transition ${
+                instructorEvaluationMode
+                  ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              Text to ticket
+            </button>
             <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
               <ContextPicker
                 context={context}
                 attachmentCount={pendingAttachments.length}
+                accent="blue"
                 onChange={(next) => setContext((current) => ({ ...current, ...next }))}
               />
             </div>
@@ -1536,7 +1892,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                       className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] text-slate-700"
                       title={`${entry.file.name} (${Math.max(1, Math.round(entry.file.size / 1024))} KB)`}
                     >
-                      <Paperclip className="h-3 w-3 shrink-0 text-rose-600" />
+                      <Paperclip className="h-3 w-3 shrink-0 text-blue-600" />
                       <span className="truncate">{entry.file.name}</span>
                       <button
                         type="button"
@@ -1562,11 +1918,13 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   }
                 }}
                 placeholder="Describe the incident, feedback or complaint…"
-              className="max-h-28 w-full resize-none rounded-full border border-slate-200 bg-white px-4 py-3 pr-4 text-sm text-slate-950 shadow-[0_12px_34px_rgba(15,23,42,0.07)] outline-none transition duration-200 placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15"
+              className={`max-h-28 w-full resize-none rounded-full border border-slate-200 bg-white px-4 py-3 pr-4 text-sm text-slate-950 shadow-[0_12px_34px_rgba(15,23,42,0.07)] outline-none transition duration-200 placeholder:text-slate-400 focus:ring-4 ${
+                instructorEvaluationMode ? 'focus:border-blue-400 focus:ring-blue-500/15' : 'focus:border-blue-400 focus:ring-blue-500/15'
+              }`}
                 style={{ minHeight: '48px' }}
               />
               {listening && (
-                <div className="mt-1 text-[10px] font-medium text-rose-700">
+                <div className="mt-1 text-[10px] font-medium text-blue-700">
                   {voiceHint || (voiceLiveText ? 'Listening… capturing your description' : 'Listening… start speaking')}
                 </div>
               )}
@@ -1585,7 +1943,9 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:text-rose-700"
+                className={`flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:-translate-y-0.5 ${
+                  instructorEvaluationMode ? 'hover:border-blue-200 hover:text-blue-700' : 'hover:border-blue-200 hover:text-blue-700'
+                }`}
               title="Attach files"
               aria-label="Attach files"
             >
@@ -1598,8 +1958,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                 disabled={loading}
                 className={`flex h-11 w-11 items-center justify-center rounded-full border shadow-sm transition ${
                   listening
-                    ? 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
-                    : 'border-slate-200 bg-white text-slate-600 hover:-translate-y-0.5 hover:border-rose-200 hover:text-rose-700'
+                    ? instructorEvaluationMode
+                      ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : `border-slate-200 bg-white text-slate-600 hover:-translate-y-0.5 ${instructorEvaluationMode ? 'hover:border-blue-200 hover:text-blue-700' : 'hover:border-blue-200 hover:text-blue-700'}`
                 } disabled:cursor-not-allowed disabled:opacity-45`}
                 title={listening ? 'Stop voice input' : 'Start voice input'}
                 aria-label={listening ? 'Stop voice input' : 'Start voice input'}
@@ -1610,7 +1972,11 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             <button
               onClick={() => sendMessage(input)}
               disabled={!input.trim() || loading}
-              className="gradient-primary flex h-11 w-11 items-center justify-center rounded-full text-primary-foreground shadow-lg shadow-primary/20 transition duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-35"
+              className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-lg transition duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-35 ${
+                instructorEvaluationMode
+                  ? 'bg-blue-600 shadow-blue-600/20 hover:bg-blue-700'
+                  : 'bg-blue-600 shadow-blue-600/20 hover:bg-blue-700'
+              }`}
             >
               <Send className="w-4 h-4" />
             </button>
@@ -1619,6 +1985,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             Enter to send · Shift+Enter for new line · Attachments are optional and can help with faster resolution
           </p>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
@@ -1627,16 +1995,11 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 const MessageBubble: React.FC<{
   message: Message;
   index: number;
-  tickets: Ticket[];
   onChipClick: (chip: SuggestedChip) => void;
-  onConfirm: (messageId: string, draft: DraftTicket) => void;
-  onEdit: (draft: DraftTicket) => void;
-  onDiscard: (messageId: string) => void;
-  onSaveEdit: (messageId: string, draft: DraftTicket) => void;
   onDetailFormSubmit: (values: Record<string, string>, form?: DetailForm) => void;
-  publishing: boolean;
+  onOpenDraftReview: (messageId: string) => void;
   context: DetailContext;
-}> = ({ message, index, tickets, onChipClick, onConfirm, onEdit, onDiscard, onSaveEdit, onDetailFormSubmit, publishing, context }) => {
+}> = ({ message, index, onChipClick, onDetailFormSubmit, onOpenDraftReview, context }) => {
   const isUser = message.role === 'user';
   const userTone = USER_TONES[index % USER_TONES.length];
   const visibleChips = (message.suggestedChips || []).filter((chip) => !context[chip.field]);
@@ -1696,7 +2059,7 @@ const MessageBubble: React.FC<{
     >
       {!isUser && message.aiGenerated && (
         <div
-          className="mb-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700"
+          className="mb-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700"
           title="AI generated"
           aria-label="AI generated"
         >
@@ -1730,7 +2093,7 @@ const MessageBubble: React.FC<{
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 className={`mt-2 block text-xs font-semibold underline-offset-4 hover:underline ${
-                  isUser ? userTone.more : 'text-rose-700 hover:text-rose-900'
+                  isUser ? userTone.more : 'text-blue-700 hover:text-blue-900'
                 }`}
               >
                 {expanded ? 'Show less' : 'Show more'}
@@ -1746,7 +2109,7 @@ const MessageBubble: React.FC<{
             <button
               key={i}
               onClick={() => onChipClick(c)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-rose-200 hover:bg-rose-50 hover:text-slate-950"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-slate-950"
             >
               {c.label}
             </button>
@@ -1760,19 +2123,26 @@ const MessageBubble: React.FC<{
 
       {message.ticket && (
         <div className="mt-2 w-full">
-          <DraftTicketReviewPreview
-            draft={mergeDraftWithContext(message.ticket, context)}
-            context={context}
-            tickets={tickets}
-            onConfirm={() => onConfirm(message.id, mergeDraftWithContext(message.ticket as DraftTicket, context))}
-            onEdit={() => onEdit(mergeDraftWithContext(message.ticket as DraftTicket, context))}
-            onDiscard={() => onDiscard(message.id)}
-            onSaveEdit={(draft) => onSaveEdit(message.id, draft)}
-            confirmed={message.published}
-            ticketId={message.ticketId}
-            confirmedTicket={message.publishedTicket}
-            publishing={publishing}
-          />
+          {message.published && message.ticketId ? (
+            <PublishedTicketSummary ticketId={message.ticketId} ticket={message.publishedTicket} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenDraftReview(message.id)}
+              className="animate-draft-popout-cue flex w-full max-w-md items-center gap-3 rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-[0_18px_48px_rgba(37,99,235,0.12)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
+                <ClipboardCheck className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-950">Ticket draft ready for review</span>
+                <span className="block truncate text-xs text-slate-500">{message.ticket.title}</span>
+              </span>
+              <span className="rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white">
+                Open
+              </span>
+            </button>
+          )}
         </div>
       )}
       {message.published && !message.ticket && message.ticketId && (
@@ -1878,6 +2248,281 @@ const TypingIndicator: React.FC = () => (
     </div>
   </div>
 );
+
+const TrainerAvatar: React.FC<{ name: string; src?: string; size?: 'sm' | 'lg' }> = ({ name, src, size = 'sm' }) => {
+  const dimension = size === 'lg' ? 'h-16 w-16 text-sm' : 'h-6 w-6 text-[9px]';
+  return (
+    <span className={`${dimension} flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-blue-100 bg-blue-50 font-bold text-blue-700`}>
+      {src ? (
+        <img src={src} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        trainerInitials(name)
+      )}
+    </span>
+  );
+};
+
+const InstructorEvaluationChatbox: React.FC<{
+  onSubmit: (evaluation: TrainerEvaluationInput) => void | Promise<void>;
+  disabled?: boolean;
+}> = ({ onSubmit, disabled }) => {
+  const [template, setTemplate] = useState<TrainerReviewTemplate>('Barre');
+  const [instructor, setInstructor] = useState('');
+  const [studio, setStudio] = useState('');
+  const [classType, setClassType] = useState('');
+  const [reviewPeriod, setReviewPeriod] = useState('');
+  const [scores, setScores] = useState<TrainerEvaluationScore[]>(
+    TRAINER_REVIEW_TEMPLATES.Barre.map((item) => ({ ...item, score: 0 }))
+  );
+  const [feedback, setFeedback] = useState('');
+  const [focusPoints, setFocusPoints] = useState('');
+  const [goals, setGoals] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [showScoring, setShowScoring] = useState(false);
+  const [trainerMenuOpen, setTrainerMenuOpen] = useState(false);
+  const selectedTrainerImage = trainerImageUrl(instructor);
+
+  const classOptions = useMemo(() => {
+    const matcher = template === 'PowerCycle'
+      ? /cycle|power/i
+      : /barre|mat|amped|signature|foundations|sculpt|stretch|recovery/i;
+    const filtered = CLASS_TYPES.filter((item) => matcher.test(item));
+    return filtered.length ? filtered : CLASS_TYPES;
+  }, [template]);
+
+  const totalScore = scores.reduce((sum, item) => sum + item.score, 0);
+  const totalWeightage = scores.reduce((sum, item) => sum + item.weightage, 0);
+  const scorePercent = totalWeightage ? Math.round((totalScore / totalWeightage) * 100) : 0;
+
+  const athenaPrompts = [
+    !instructor ? 'Instructor name helps Athena update the right profile.' : '',
+    !studio ? 'Studio context improves trend reporting.' : '',
+    !scores.some((item) => item.score > 0) ? 'Use sliders when score weightage is available.' : '',
+    !feedback.trim() ? 'Evaluator comments will make the ticket richer.' : '',
+  ].filter(Boolean);
+
+  const applyTemplate = (nextTemplate: TrainerReviewTemplate) => {
+    setTemplate(nextTemplate);
+    setScores(TRAINER_REVIEW_TEMPLATES[nextTemplate].map((item) => ({ ...item, score: 0 })));
+    setClassType('');
+  };
+
+  const setScore = (category: string, score: number) => {
+    setScores((current) => current.map((item) => (
+      item.category === category
+        ? { ...item, score: Math.max(0, Math.min(item.weightage, score)) }
+        : item
+    )));
+  };
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        trainer: instructor.trim() || 'Unspecified Instructor',
+        template,
+        studio,
+        classType,
+        reviewPeriod,
+        scores,
+        feedback: feedback.trim() || 'Instructor evaluation submitted without evaluator notes.',
+        focusPoints,
+        goals,
+      });
+      setFeedback('');
+      setFocusPoints('');
+      setGoals('');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="w-full rounded-2xl border border-blue-100 bg-white/95 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
+          <GraduationCap className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-950">Instructor evaluation</div>
+          <div className="truncate text-[11px] text-slate-500">Optional fields · preview draft before publishing.</div>
+        </div>
+        </div>
+        <div className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
+          {scorePercent}% · {totalScore.toFixed(1)}/{totalWeightage}
+        </div>
+      </div>
+
+      <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+        {(['Barre', 'PowerCycle'] as TrainerReviewTemplate[]).map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => applyTemplate(item)}
+            className={`h-9 rounded-lg text-[11px] font-semibold transition ${
+              template === item
+                ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100'
+                : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+            }`}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setTrainerMenuOpen((current) => !current)}
+            className="flex h-9 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 text-left text-[11px] font-semibold text-slate-900 outline-none transition hover:border-blue-200 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+          >
+            <TrainerAvatar name={instructor || 'Instructor'} src={selectedTrainerImage} size="sm" />
+            <span className="min-w-0 flex-1 truncate">{instructor || 'Instructor'}</span>
+            <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${trainerMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {trainerMenuOpen && (
+            <div className="absolute left-0 right-0 top-10 z-30 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_20px_60px_rgba(15,23,42,0.16)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setInstructor('');
+                  setTrainerMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
+              >
+                <TrainerAvatar name="Instructor" size="sm" />
+                <span>Instructor</span>
+              </button>
+              {TRAINERS.map((trainer) => (
+                <button
+                  key={trainer}
+                  type="button"
+                  onClick={() => {
+                    setInstructor(trainer);
+                    setTrainerMenuOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold transition ${
+                    instructor === trainer ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <TrainerAvatar name={trainer} src={trainerImageUrl(trainer)} size="sm" />
+                  <span className="min-w-0 flex-1 truncate">{trainer}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <select
+          value={studio}
+          onChange={(event) => setStudio(event.target.value)}
+          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-900 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+        >
+          <option value="">Studio</option>
+          {STUDIOS.map((item) => <option key={item}>{item}</option>)}
+        </select>
+        <select
+          value={classType}
+          onChange={(event) => setClassType(event.target.value)}
+          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-900 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100 md:col-span-1"
+        >
+          <option value="">Class / format</option>
+          {classOptions.map((item) => <option key={item}>{item}</option>)}
+        </select>
+        <input
+          value={reviewPeriod}
+          onChange={(event) => setReviewPeriod(event.target.value)}
+          placeholder="Review period or class date"
+          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+        />
+      </div>
+
+      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2">
+        <button
+          type="button"
+          onClick={() => setShowScoring((current) => !current)}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span>
+            <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Weighted scoring</span>
+            <span className="mt-0.5 block text-[10px] text-slate-500">{showScoring ? 'Hide scales' : 'Show scales and weightage'}</span>
+          </span>
+          <span className="rounded-full border border-blue-100 bg-white px-2 py-1 text-[10px] font-semibold text-blue-700">
+            {scorePercent}% · {totalScore.toFixed(1)}/{totalWeightage}
+          </span>
+        </button>
+        {showScoring && (
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {scores.map((item) => (
+              <label key={item.category} className="block rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold leading-snug text-slate-700">{item.category}</span>
+                  <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{item.score.toFixed(1)} / {item.weightage}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={item.weightage}
+                  step={0.5}
+                  value={item.score}
+                  onChange={(event) => setScore(item.category, Number(event.target.value))}
+                  className="h-2 w-full accent-blue-600"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+        <textarea
+          value={feedback}
+          onChange={(event) => setFeedback(event.target.value)}
+          placeholder="Evaluator comments: client connection, cues, musicality, energy, choreography, hands-on corrections..."
+          rows={4}
+          className="min-h-24 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+        />
+        <div className="grid gap-2">
+          <textarea
+            value={focusPoints}
+            onChange={(event) => setFocusPoints(event.target.value)}
+            placeholder="Focus points"
+            rows={2}
+            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+          />
+          <textarea
+            value={goals}
+            onChange={(event) => setGoals(event.target.value)}
+            placeholder="Goals or next commitments"
+            rows={2}
+            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+          />
+        </div>
+      </div>
+
+      {athenaPrompts.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {athenaPrompts.slice(0, 3).map((question) => (
+            <span key={question} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-500">
+              {question}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={submit}
+        disabled={disabled || submitting}
+        className="mt-3 flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 text-xs font-semibold text-white shadow-[0_14px_30px_rgba(37,99,235,0.22)] transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0"
+      >
+        <Send className="h-3.5 w-3.5" />
+        {submitting ? 'Preparing draft...' : 'Preview evaluation draft'}
+      </button>
+    </div>
+  );
+};
 
 const PublishedTicketSummary: React.FC<{ ticketId: string; ticket?: Ticket }> = ({ ticketId, ticket }) => (
   <div className="mt-2 w-full max-w-xl overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.1)]">
@@ -2020,10 +2665,10 @@ const DetailCaptureForm: React.FC<{
         if (canSubmit) onSubmit(values, form);
       }}
     >
-      <div className="border-b border-slate-200 bg-gradient-to-br from-slate-50 via-white to-rose-50/45 px-5 py-4">
+      <div className="border-b border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/45 px-5 py-4">
         <div className="grid gap-4 md:grid-cols-[1fr_220px] md:items-center">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-rose-700 text-white shadow-[0_14px_30px_rgba(190,18,60,0.22)]">
+            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-700 text-white shadow-[0_14px_30px_rgba(37,99,235,0.22)]">
               <ClipboardCheck className="h-4 w-4" />
             </div>
             <div>
@@ -2031,17 +2676,17 @@ const DetailCaptureForm: React.FC<{
               {form.description && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-stone-500">{form.description}</p>}
             </div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-white/85 p-3 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm">
             <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold text-slate-600">
               <span className="inline-flex items-center gap-1.5">
-                <Gauge className="h-3.5 w-3.5 text-rose-700" />
+                <Gauge className="h-3.5 w-3.5 text-blue-700" />
                 Required complete
               </span>
               <span className="font-mono tabular-nums text-slate-900">{completedRequired}/{requiredFields.length || 0}</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
               <div
-                className="h-full rounded-full bg-rose-700 transition-all duration-300"
+                className="h-full rounded-full bg-blue-700 transition-all duration-300"
                 style={{ width: `${completionPercent}%` }}
               />
             </div>
@@ -2110,24 +2755,24 @@ const DetailCaptureForm: React.FC<{
           return (
             <div
               key={id}
-              className={`group relative rounded-2xl border bg-white p-3 shadow-sm transition duration-200 focus-within:border-rose-500 focus-within:ring-4 focus-within:ring-rose-500/10 ${
-                complete ? 'border-slate-200' : 'border-rose-200'
+              className={`group relative rounded-2xl border bg-white p-3 shadow-sm transition duration-200 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 ${
+                complete ? 'border-slate-200' : 'border-blue-200'
               } ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}
             >
               <div className="mb-2 flex items-start justify-between gap-3">
                 <label htmlFor={`detail-${id}`} className="flex min-w-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
                   <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] ${
-                    complete ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                    complete ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
                   }`}>
                     {fieldIndex + 1}
                   </span>
                   <span className="min-w-0 truncate">
                     {field.label}
-                    {field.required ? <span className="text-rose-600"> *</span> : ''}
+                    {field.required ? <span className="text-blue-600"> *</span> : ''}
                   </span>
                 </label>
                 <span className="group/help relative inline-flex shrink-0">
-                  <HelpCircle className="h-4 w-4 text-slate-400 transition group-hover/help:text-rose-700" />
+                  <HelpCircle className="h-4 w-4 text-slate-400 transition group-hover/help:text-blue-700" />
                   <span className="pointer-events-none absolute right-0 top-6 z-20 w-64 rounded-2xl border border-slate-200 bg-stone-950 px-3 py-2 text-[11px] font-medium leading-relaxed text-white opacity-0 shadow-2xl transition group-hover/help:opacity-100">
                     {helpText}
                   </span>
@@ -2163,7 +2808,7 @@ const DetailCaptureForm: React.FC<{
                   value={values[id] || ''}
                   onChange={(event) => setValue(id, event.target.value)}
                   disabled={disabledSelect}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-500/10 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
                 >
                   <option value="">
                     {field.id === 'subCategory' && !values.category
@@ -2182,7 +2827,7 @@ const DetailCaptureForm: React.FC<{
                   value={values[id] || ''}
                   onChange={(event) => setValue(id, event.target.value)}
                   rows={4}
-                  className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-500/10"
+                  className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
                   placeholder="Describe the issue and relevant details..."
                 />
               ) : (
@@ -2191,7 +2836,7 @@ const DetailCaptureForm: React.FC<{
                   type={field.type === 'date' || field.type === 'datetime-local' || field.type === 'number' ? field.type : 'text'}
                   value={values[id] || ''}
                   onChange={(event) => setValue(id, event.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-rose-500 focus:bg-white focus:ring-4 focus:ring-rose-500/10"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
                   placeholder={field.label}
                 />
               )}
@@ -2206,7 +2851,7 @@ const DetailCaptureForm: React.FC<{
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded-xl bg-rose-700 px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-rose-800 focus:outline-none focus:ring-4 focus:ring-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-xl bg-blue-700 px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {form.submitLabel || 'Continue'}
         </button>
@@ -2230,10 +2875,10 @@ const OptionButtonGroup: React.FC<{
           key={option}
           type="button"
           onClick={() => onChange(option)}
-          className={`min-h-10 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-rose-500/15 ${
+          className={`min-h-10 rounded-xl border px-3 py-2 text-left text-xs font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-500/15 ${
             selected
-              ? 'border-rose-700 bg-rose-700 text-white shadow-sm'
-              : 'border-slate-200 bg-slate-50 text-stone-700 hover:border-rose-200 hover:bg-white'
+              ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
+              : 'border-slate-200 bg-slate-50 text-stone-700 hover:border-blue-200 hover:bg-white'
           }`}
           aria-pressed={selected}
         >
@@ -2293,13 +2938,13 @@ const MultiSelectDropdown: React.FC<{
         type="button"
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
-        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-stone-900 outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
+        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
       >
         <span className="flex min-w-0 flex-1 flex-wrap gap-1.5">
           {selectedValues.length ? selectedValues.slice(0, 3).map((item) => (
             <span
               key={item}
-              className="max-w-[180px] truncate rounded-full border border-rose-100 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-800"
+              className="max-w-[180px] truncate rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-800"
             >
               {item}
             </span>
@@ -2325,12 +2970,12 @@ const MultiSelectDropdown: React.FC<{
                 type="button"
                 onClick={() => toggleOption(option)}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition ${
-                  selected ? 'bg-rose-50 text-rose-900' : 'text-stone-700 hover:bg-slate-50'
+                  selected ? 'bg-blue-50 text-blue-900' : 'text-stone-700 hover:bg-slate-50'
                 }`}
               >
                 <span
                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                    selected ? 'border-rose-600 bg-rose-600 text-white' : 'border-slate-300 bg-white'
+                    selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
                   }`}
                 >
                   {selected && <Check className="h-3 w-3" />}
@@ -2401,14 +3046,14 @@ const MomenceMemberFormField: React.FC<{
   }, [query, selectedMemberId, values.memberName]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-rose-500 focus-within:ring-4 focus-within:ring-rose-500/10 md:col-span-2">
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
       <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
         {isAffectedClientSelection ? 'Affected Momence Clients' : 'Momence Member'} *
       </span>
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
         placeholder="Search Momence by client name, email, or phone"
       />
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
@@ -2483,7 +3128,7 @@ const MomenceSessionFormField: React.FC<{
   }, [query, values.classType]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-rose-500 focus-within:ring-4 focus-within:ring-rose-500/10 md:col-span-2">
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
       <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
         Momence Class / Session *
       </span>
@@ -2493,7 +3138,7 @@ const MomenceSessionFormField: React.FC<{
           setQuery(event.target.value);
           if (values.classType && event.target.value !== values.classType) setOptions([]);
         }}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
         placeholder="Search Momence sessions by class, instructor, studio, or date"
       />
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}

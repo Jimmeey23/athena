@@ -69,7 +69,7 @@ interface TicketEventRow {
   created_at: string;
 }
 
-const CHART_COLORS = ['#0f766e', '#2563eb', '#be123c', '#7c3aed', '#ca8a04', '#475569', '#0891b2', '#16a34a'];
+const CHART_COLORS = ['#2563eb', '#1d4ed8', '#0ea5e9', '#334155', '#64748b', '#475569', '#0891b2', '#0284c7'];
 const REPORT_GROUPS: ReportDefinition['group'][] = ['Leadership', 'Operations', 'Client Feedback', 'Revenue', 'Quality'];
 const PRIORITIES: Ticket['priority'][] = ['Critical', 'High', 'Medium', 'Low'];
 const SLA_STATES = ['Breached', 'At Risk', 'On Track', 'Closed'];
@@ -334,7 +334,7 @@ export const AiReportsPanel: React.FC = () => {
               value={filters.tag}
               onChange={(event) => setFilter('tag', event.target.value)}
               placeholder="Tag"
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
             />
           </div>
         </div>
@@ -381,7 +381,7 @@ export const AiReportsPanel: React.FC = () => {
             <div className="border-b border-slate-100 px-5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-rose-700">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">
                     <BarChart3 className="h-4 w-4" />
                     {report.definition.group}
                   </div>
@@ -504,7 +504,7 @@ const FilterSelect: React.FC<{
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+      className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
       aria-label={label}
     >
       {values.map((item) => {
@@ -523,7 +523,7 @@ const DateInput: React.FC<{ label: string; value: string; onChange: (value: stri
       type="date"
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+      className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
       aria-label={label}
     />
   </label>
@@ -536,7 +536,7 @@ const TextFilter: React.FC<{ value: string; onChange: (value: string) => void }>
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder="Search"
-      className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+      className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
     />
   </div>
 );
@@ -585,7 +585,7 @@ const ReportSectionPanel: React.FC<{ section: ReportSection }> = ({ section }) =
           <XAxis dataKey="name" tickLine={false} axisLine={false} />
           <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
           <Tooltip />
-          <Line type="monotone" dataKey="value" stroke="#be123c" strokeWidth={2.5} dot={false} />
+          <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2.5} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     ) : section.kind === 'donut' ? (
@@ -615,7 +615,7 @@ const ReportSectionPanel: React.FC<{ section: ReportSection }> = ({ section }) =
             </>
           )}
           <Tooltip />
-          <Bar dataKey="value" radius={section.rows.length > 5 ? [0, 8, 8, 0] : [8, 8, 0, 0]} fill="#0f766e" />
+          <Bar dataKey="value" radius={section.rows.length > 5 ? [0, 8, 8, 0] : [8, 8, 0, 0]} fill="#2563eb" />
         </BarChart>
       </ResponsiveContainer>
     ) : (
@@ -636,7 +636,7 @@ const RankedRows: React.FC<{ rows: ReportSection['rows'] }> = ({ rows }) => {
           </div>
           {row.secondaryValue && <div className="mt-1 truncate text-[11px] text-slate-500">{row.secondaryValue}</div>}
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
-            <div className="h-full rounded-full bg-rose-700" style={{ width: `${Math.max(6, (row.value / max) * 100)}%` }} />
+            <div className="h-full rounded-full bg-blue-700" style={{ width: `${Math.max(6, (row.value / max) * 100)}%` }} />
           </div>
         </div>
       ))}
@@ -760,7 +760,7 @@ const SourceRowsTable: React.FC<{
               setPageSize(Number(event.target.value));
               setPage(1);
             }}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
             aria-label="Rows per page"
           >
             {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size} rows</option>)}

@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   Circle,
   Columns3,
   Flame,
@@ -101,7 +102,7 @@ const GROUP_OPTIONS: Array<{ value: GroupBy; label: string }> = [
   { value: 'member', label: 'Member' },
 ];
 
-const CHART_COLORS = ['#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1'];
+const CHART_COLORS = ['#111827', '#64748b', '#2563eb', '#334155', '#1d4ed8', '#94a3b8'];
 
 export const TicketDashboard: React.FC = () => {
   const { tickets, setSelectedTicket, loading, error, refresh, createManualTicket } = useTickets();
@@ -110,6 +111,9 @@ export const TicketDashboard: React.FC = () => {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [viewsOpen, setViewsOpen] = useState(false);
 
   const options = useMemo(() => {
     const unique = (values: Array<string | undefined>) =>
@@ -122,7 +126,7 @@ export const TicketDashboard: React.FC = () => {
     };
   }, [tickets]);
 
-  const filtered = useMemo(() => filterTickets(tickets, filters), [tickets, filters]);
+  const filtered = useMemo(() => sortNewestFirst(filterTickets(tickets, filters)), [tickets, filters]);
   const stats = useMemo(() => buildStats(filtered, tickets.length), [filtered, tickets.length]);
   const groups = useMemo(() => groupTickets(filtered, groupBy), [filtered, groupBy]);
   const analytics = useMemo(() => buildAnalytics(filtered), [filtered]);
@@ -141,29 +145,48 @@ export const TicketDashboard: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full flex-col bg-transparent">
-      <div className="flex-shrink-0 border-b border-slate-200/80 bg-white/86 px-5 py-4 shadow-[0_12px_42px_rgba(15,23,42,0.05)] backdrop-blur-xl">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight text-stone-950">
+    <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(219,234,254,0.72),transparent_34%),linear-gradient(180deg,#f8fafc_0%,#f1f5f9_46%,#f8fafc_100%)]">
+      <div className="flex-shrink-0 border-b border-stone-200/80 bg-white/86 px-4 py-2 shadow-[0_12px_42px_rgba(17,24,39,0.05)] backdrop-blur-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-400">Operations ledger</div>
+            <h2 className="truncate font-serif text-lg font-semibold tracking-tight text-stone-950">
               Submitted Tickets
             </h2>
-            <p className="text-sm text-stone-500">
-              Newest tickets appear first across client feedback, SLA risk, assignments and trends.
-            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-2.5 text-[11px] font-semibold text-emerald-700 shadow-sm">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
               Live
             </div>
+            <CollapseButton
+              open={metricsOpen}
+              onClick={() => setMetricsOpen((current) => !current)}
+              icon={<BarChart3 className="h-3.5 w-3.5" />}
+              label="Metrics"
+              value={`${stats.visible}/${stats.total}`}
+            />
+            <CollapseButton
+              open={filtersOpen}
+              onClick={() => setFiltersOpen((current) => !current)}
+              icon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+              label="Filters"
+              value={activeFilterCount(filters)}
+            />
+            <CollapseButton
+              open={viewsOpen}
+              onClick={() => setViewsOpen((current) => !current)}
+              icon={<LayoutList className="h-3.5 w-3.5" />}
+              label="Views"
+              value={VIEWS.find((item) => item.id === view)?.label || 'List'}
+            />
             <button
               type="button"
               onClick={() => setCreating(true)}
-              className="inline-flex h-9 items-center gap-2 rounded-full border border-blue-200 bg-blue-600 px-3 text-xs font-semibold text-white shadow-[0_12px_26px_rgba(37,99,235,0.18)] transition hover:-translate-y-0.5 hover:bg-blue-700"
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-stone-950 bg-stone-950 px-3 text-[11px] font-semibold text-white shadow-[0_12px_26px_rgba(17,24,39,0.16)] transition hover:-translate-y-0.5 hover:bg-stone-800"
             >
               <Plus className="h-3.5 w-3.5" />
               Add ticket
@@ -172,7 +195,7 @@ export const TicketDashboard: React.FC = () => {
               type="button"
               onClick={refreshTickets}
               disabled={refreshing || loading}
-              className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
@@ -180,35 +203,46 @@ export const TicketDashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-5">
-          <StatTile label="Open" value={stats.open} icon={<Circle className="h-4 w-4" />} />
-          <StatTile label="Critical" value={stats.critical} icon={<Flame className="h-4 w-4" />} />
-          <StatTile label="Breached" value={stats.breached} icon={<AlertTriangle className="h-4 w-4" />} />
-          <StatTile label="Resolved" value={stats.resolved} icon={<CheckCircle2 className="h-4 w-4" />} />
-          <StatTile label="Visible" value={`${stats.visible}/${stats.total}`} icon={<ListFilter className="h-4 w-4" />} />
-        </div>
+        {metricsOpen && (
+          <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-5">
+            <StatTile label="Open" value={stats.open} icon={<Circle className="h-4 w-4" />} tone="default" />
+            <StatTile label="Critical" value={stats.critical} icon={<Flame className="h-4 w-4" />} tone="danger" />
+            <StatTile label="Breached" value={stats.breached} icon={<AlertTriangle className="h-4 w-4" />} tone="warning" />
+            <StatTile label="Resolved" value={stats.resolved} icon={<CheckCircle2 className="h-4 w-4" />} tone="success" />
+            <StatTile label="Visible" value={`${stats.visible}/${stats.total}`} icon={<ListFilter className="h-4 w-4" />} tone="neutral" />
+          </div>
+        )}
 
-        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-          {VIEWS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setView(item.id)}
-              className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-all duration-200 ${
-                view === item.id
-                  ? 'border-blue-200 bg-blue-600 text-white shadow-[0_12px_26px_rgba(37,99,235,0.18)]'
-                  : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-slate-950'
-              }`}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
+        {viewsOpen && (
+          <div className="mt-2 flex gap-1 overflow-x-auto rounded-full border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/60">
+            {VIEWS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setView(item.id);
+                  setViewsOpen(false);
+                }}
+                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-all duration-200 ${
+                  view === item.id
+                    ? 'border-slate-950 bg-slate-950 text-white shadow-[0_12px_28px_rgba(17,24,39,0.16)]'
+                    : 'border-transparent bg-transparent text-slate-500 hover:bg-white hover:text-slate-950'
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        <FilterBar filters={filters} options={options} onChange={updateFilter} onReset={() => setFilters(EMPTY_FILTERS)} />
+        {filtersOpen && (
+          <div className="mt-2">
+            <FilterBar filters={filters} options={options} onChange={updateFilter} onReset={() => setFilters(EMPTY_FILTERS)} />
+          </div>
+        )}
 
         {view === 'grouped' && (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-stone-400" />
             <select
               value={groupBy}
@@ -223,7 +257,7 @@ export const TicketDashboard: React.FC = () => {
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-5">
+      <div className="min-h-0 flex-1 overflow-auto p-4">
         {error && (
           <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
@@ -304,6 +338,43 @@ function filterTickets(tickets: Ticket[], filters: Filters): Ticket[] {
     return true;
   });
 }
+
+function sortNewestFirst(tickets: Ticket[]): Ticket[] {
+  return [...tickets].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function activeFilterCount(filters: Filters): string {
+  const count = Object.entries(filters).filter(([key, value]) => {
+    const emptyValue = EMPTY_FILTERS[key as keyof Filters];
+    return value !== emptyValue && String(value).trim() !== '';
+  }).length;
+  return count === 0 ? 'None' : String(count);
+}
+
+const CollapseButton: React.FC<{
+  open: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}> = ({ open, onClick, icon, label, value }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold shadow-sm transition ${
+      open
+        ? 'border-slate-950 bg-slate-950 text-white'
+        : 'border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50'
+    }`}
+  >
+    {icon}
+    {label}
+    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${open ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'}`}>
+      {value}
+    </span>
+    <ChevronDown className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
+  </button>
+);
 
 const ManualTicketModal: React.FC<{
   onClose: () => void;
@@ -473,15 +544,15 @@ const FilterBar: React.FC<{
   onChange: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
   onReset: () => void;
 }> = ({ filters, options, onChange, onReset }) => (
-  <div className="grid gap-2 md:grid-cols-12">
+  <div className="grid gap-2 rounded-2xl border border-stone-200 bg-white/72 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_14px_36px_rgba(17,24,39,0.05)] md:grid-cols-12">
     <div className="relative md:col-span-3">
-      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-700/45" />
       <input
         type="text"
         placeholder="Search title, member, owner, tag..."
         value={filters.query}
         onChange={(event) => onChange('query', event.target.value)}
-        className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+        className="h-10 w-full rounded-xl border border-stone-200 bg-white/90 pl-9 pr-3 text-sm text-stone-900 shadow-sm outline-none transition placeholder:text-stone-400 focus:border-sky-300 focus:ring-4 focus:ring-sky-900/5"
       />
     </div>
     <FilterSelect label="Status" value={filters.status} values={['All', ...STATUSES]} onChange={(value) => onChange('status', value)} />
@@ -495,14 +566,14 @@ const FilterBar: React.FC<{
       type="date"
       value={filters.from}
       onChange={(event) => onChange('from', event.target.value)}
-      className="h-10 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+      className="h-10 rounded-xl border border-stone-200 bg-white/90 px-2 text-xs text-stone-700 shadow-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-900/5"
       aria-label="Created from"
     />
     <input
       type="date"
       value={filters.to}
       onChange={(event) => onChange('to', event.target.value)}
-      className="h-10 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+      className="h-10 rounded-xl border border-stone-200 bg-white/90 px-2 text-xs text-stone-700 shadow-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-900/5"
       aria-label="Created to"
     />
     <input
@@ -510,11 +581,11 @@ const FilterBar: React.FC<{
       placeholder="Tag"
       value={filters.tag}
       onChange={(event) => onChange('tag', event.target.value)}
-      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+      className="h-10 rounded-xl border border-stone-200 bg-white/90 px-3 text-xs text-stone-700 shadow-sm outline-none transition placeholder:text-stone-400 focus:border-sky-300 focus:ring-4 focus:ring-sky-900/5"
     />
     <button
       onClick={onReset}
-      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-slate-950"
+      className="h-10 rounded-xl border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-stone-950"
     >
       Reset
     </button>
@@ -531,7 +602,7 @@ const FilterSelect: React.FC<{ label: string; value: string; values: readonly st
     aria-label={label}
     value={value}
     onChange={(event) => onChange(event.target.value)}
-    className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+    className="h-10 min-w-0 rounded-xl border border-stone-200 bg-white/90 px-2 text-xs font-medium text-stone-700 shadow-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-900/5"
   >
     {values.map((item) => (
       <option key={item}>{item}</option>
@@ -540,29 +611,33 @@ const FilterSelect: React.FC<{ label: string; value: string; values: readonly st
 );
 
 const ListView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }> = ({ tickets, onOpen }) => (
-  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-    {tickets.map((ticket) => (
-      <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
-    ))}
-  </div>
+  <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white/60 shadow-[0_18px_54px_rgba(17,24,39,0.06)] backdrop-blur">
+    <ViewHeader title="Recent Tickets" count={tickets.length} />
+    <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-2 2xl:grid-cols-3">
+      {tickets.map((ticket) => (
+        <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
+      ))}
+    </div>
+  </section>
 );
 
 const TableView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }> = ({ tickets, onOpen }) => (
-  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/10 dark:border-stone-800 dark:bg-stone-900">
+  <div className="overflow-hidden rounded-lg border border-stone-200 bg-white/88 shadow-[0_24px_70px_rgba(17,24,39,0.08)] backdrop-blur dark:border-stone-800 dark:bg-stone-900">
+    <ViewHeader title="Table Ledger" count={tickets.length} />
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-xs">
         <colgroup>
-          <col className="w-[300px]" />
+          <col className="w-[320px]" />
           <col className="w-[132px]" />
           <col className="w-[112px]" />
-          <col className="w-[118px]" />
+          <col className="w-[144px]" />
           <col className="w-[170px]" />
           <col className="w-[170px]" />
-          <col className="w-[260px]" />
+          <col className="w-[240px]" />
           <col className="w-[170px]" />
           <col className="w-[118px]" />
         </colgroup>
-        <thead className="bg-slate-950 text-[10px] uppercase tracking-[0.16em] text-white dark:bg-stone-950 dark:text-blue-100">
+        <thead className="border-b border-slate-200 bg-slate-800 text-[10px] uppercase tracking-[0.18em] text-white dark:bg-stone-950 dark:text-stone-300">
           <tr>
             <Th>Ticket</Th>
             <Th>Status</Th>
@@ -575,14 +650,14 @@ const TableView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void 
             <Th>Created</Th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-stone-800">
+        <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
           {tickets.map((ticket) => {
             const sla = getSlaState(ticket);
             return (
               <tr
                 key={ticket.id}
                 onClick={() => onOpen(ticket)}
-                className="cursor-pointer transition hover:text-slate-950 dark:hover:text-white"
+                className="h-[70px] cursor-pointer transition hover:bg-sky-50/70 hover:text-stone-950 dark:hover:text-white"
               >
                 <Td>
                   <div className="min-w-0">
@@ -593,9 +668,9 @@ const TableView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void 
                 <Td><PlainTableValue value={ticket.status} /></Td>
                 <Td><PlainTableValue value={ticket.priority} /></Td>
                 <Td>
-                  <div className="space-y-1">
-                    <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="w-full justify-start ring-0" />
-                    <PlainTableValue value={sla} />
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="shrink-0 ring-0" />
+                    <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-400">{sla}</span>
                   </div>
                 </Td>
                 <Td><Truncate value={ticket.memberName || '-'} /></Td>
@@ -622,7 +697,7 @@ const Th: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 const Td: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <td className="min-w-0 overflow-hidden px-4 py-3 align-top text-stone-700 dark:text-stone-300">{children}</td>
+  <td className="min-w-0 overflow-hidden px-4 py-3 align-middle text-stone-700 dark:text-stone-300">{children}</td>
 );
 
 const Truncate: React.FC<{ value: string }> = ({ value }) => (
@@ -659,17 +734,26 @@ const SlaPill: React.FC<{ state: string }> = ({ state }) => {
   return <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[11px] font-semibold ${className}`}>{state}</span>;
 };
 
+const ViewHeader: React.FC<{ title: string; count: number }> = ({ title, count }) => (
+  <div className="flex items-center justify-between bg-slate-800 px-4 py-2.5 text-white">
+    <h3 className="font-serif text-base font-semibold tracking-tight">{title}</h3>
+    <span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-xs font-semibold">
+      {count} ticket{count === 1 ? '' : 's'}
+    </span>
+  </div>
+);
+
 const KanbanView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }> = ({ tickets, onOpen }) => (
   <div className="grid min-w-[980px] grid-cols-5 gap-3">
     {STATUSES.map((status) => {
       const items = tickets.filter((ticket) => ticket.status === status);
       return (
-        <section key={status} className="rounded-2xl border border-stone-200 bg-white/75 p-3 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">{status}</h3>
-            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">{items.length}</span>
+        <section key={status} className="overflow-hidden rounded-lg border border-stone-200 bg-white/76 shadow-[0_16px_46px_rgba(17,24,39,0.06)] backdrop-blur dark:border-stone-800 dark:bg-stone-900/70">
+          <div className="flex items-center justify-between bg-slate-800 px-3 py-2 text-white">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.16em]">{status}</h3>
+            <span className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs font-semibold">{items.length}</span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-3 p-3">
             {items.map((ticket) => (
               <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
             ))}
@@ -683,12 +767,12 @@ const KanbanView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void
 const GroupedView: React.FC<{ groups: Record<string, Ticket[]>; onOpen: (ticket: Ticket) => void }> = ({ groups, onOpen }) => (
   <div className="space-y-4">
     {Object.entries(groups).map(([group, tickets]) => (
-      <section key={group} className="rounded-2xl border border-stone-200 bg-white/75 p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-stone-950 dark:text-stone-50">{group}</h3>
-          <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">{tickets.length} tickets</span>
+      <section key={group} className="overflow-hidden rounded-lg border border-stone-200 bg-white/76 shadow-[0_16px_46px_rgba(17,24,39,0.06)] backdrop-blur dark:border-stone-800 dark:bg-stone-900/70">
+        <div className="flex items-center justify-between bg-slate-800 px-4 py-2.5 text-white">
+          <h3 className="font-serif text-base font-semibold">{group}</h3>
+          <span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-xs font-semibold">{tickets.length} tickets</span>
         </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3">
           {tickets.map((ticket) => (
             <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
           ))}
@@ -699,20 +783,23 @@ const GroupedView: React.FC<{ groups: Record<string, Ticket[]>; onOpen: (ticket:
 );
 
 const SlaView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }> = ({ tickets, onOpen }) => {
-  const sorted = [...tickets].sort((a, b) => new Date(a.slaDueAt).getTime() - new Date(b.slaDueAt).getTime());
+  const sorted = sortNewestFirst(tickets);
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {sorted.map((ticket) => (
-          <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
-        ))}
-      </div>
-      <aside className="rounded-2xl border border-stone-200 bg-white/80 p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-50">
+      <section className="overflow-hidden rounded-2xl border border-stone-200 bg-white/60 shadow-[0_18px_54px_rgba(17,24,39,0.06)] backdrop-blur">
+        <ViewHeader title="SLA Queue" count={sorted.length} />
+        <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-2">
+          {sorted.map((ticket) => (
+            <TicketCard key={ticket.id} ticket={ticket} onClick={() => onOpen(ticket)} />
+          ))}
+        </div>
+      </section>
+      <aside className="overflow-hidden rounded-lg border border-stone-200 bg-white/80 shadow-[0_16px_46px_rgba(17,24,39,0.06)] backdrop-blur dark:border-stone-800 dark:bg-stone-900/70">
+        <div className="flex items-center gap-2 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white">
           <Users className="h-4 w-4" />
           Escalation routing
-        </h3>
-        <div className="space-y-2">
+        </div>
+        <div className="space-y-2 p-4">
           {sorted.filter((ticket) => getSlaState(ticket) !== 'Closed').slice(0, 12).map((ticket) => {
             const state = getSlaState(ticket);
             const target = getEscalationTarget(ticket.assignedTo);
@@ -720,7 +807,7 @@ const SlaView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }>
               <button
                 key={ticket.id}
                 onClick={() => onOpen(ticket)}
-                className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-left transition hover:border-stone-400 dark:border-stone-800 dark:bg-stone-950/60"
+                className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-left transition hover:border-sky-200 hover:bg-sky-50/70 dark:border-stone-800 dark:bg-stone-950/60"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-semibold text-stone-900 dark:text-stone-100">{ticket.title}</span>
@@ -747,10 +834,10 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
   <div className="grid gap-4 xl:grid-cols-2">
     <section className="grid gap-3 xl:col-span-2 md:grid-cols-4">
       <DrilldownCard title="Top Category" items={analytics.drilldowns.topCategories} tone="blue" />
-      <DrilldownCard title="Studio Load" items={analytics.drilldowns.studioLoad} tone="violet" />
-      <DrilldownCard title="Owner Load" items={analytics.drilldowns.ownerLoad} tone="emerald" />
-      <div className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_18px_54px_rgba(15,23,42,0.18)]">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-200">Risk Drilldown</div>
+      <DrilldownCard title="Studio Load" items={analytics.drilldowns.studioLoad} tone="blue" />
+      <DrilldownCard title="Owner Load" items={analytics.drilldowns.ownerLoad} tone="blue" />
+      <div className="rounded-lg border border-stone-900 bg-stone-950 p-4 text-white shadow-[0_18px_54px_rgba(15,23,42,0.18)]">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-200">Risk Drilldown</div>
         <div className="mt-2 text-3xl font-semibold">{analytics.drilldowns.riskRows.length}</div>
         <div className="mt-1 text-xs text-slate-300">High priority or breached tickets currently visible</div>
       </div>
@@ -760,7 +847,7 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
         {analytics.drilldowns.riskRows.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">No high-risk tickets in the current view.</div>
         ) : analytics.drilldowns.riskRows.map((ticket) => (
-          <div key={ticket.id} className="grid gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm md:grid-cols-[1fr_110px_150px] md:items-center">
+          <div key={ticket.id} className="grid gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs shadow-sm md:grid-cols-[1fr_110px_150px] md:items-center">
             <div className="min-w-0">
               <div className="truncate font-semibold text-slate-950">{ticket.title}</div>
               <div className="truncate text-slate-500">{ticket.category} / {ticket.subCategory}</div>
@@ -815,7 +902,7 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
           <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-15} textAnchor="end" height={70} />
           <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
           <Tooltip />
-          <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#0f766e" />
+          <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#2563eb" />
         </BarChart>
       </ResponsiveContainer>
     </ChartPanel>
@@ -837,7 +924,7 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
           <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
           <YAxis type="category" dataKey="name" width={120} tickLine={false} axisLine={false} />
           <Tooltip />
-          <Bar dataKey="value" radius={[0, 8, 8, 0]} fill="#7c3aed" />
+          <Bar dataKey="value" radius={[0, 8, 8, 0]} fill="#2563eb" />
         </BarChart>
       </ResponsiveContainer>
     </ChartPanel>
@@ -845,21 +932,19 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
 );
 
 const ChartPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <section className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-[0_18px_54px_rgba(15,23,42,0.07)] dark:border-stone-800 dark:bg-stone-900/70">
-    <h3 className="mb-3 text-sm font-semibold text-slate-950 dark:text-stone-50">{title}</h3>
+  <section className="rounded-lg border border-stone-200 bg-white/88 p-4 shadow-[0_18px_54px_rgba(15,23,42,0.07)] backdrop-blur dark:border-stone-800 dark:bg-stone-900/70">
+    <h3 className="mb-3 font-serif text-base font-semibold text-stone-950 dark:text-stone-50">{title}</h3>
     {children}
   </section>
 );
 
-const DrilldownCard: React.FC<{ title: string; items: Array<{ name: string; value: number }>; tone: 'blue' | 'violet' | 'emerald' }> = ({ title, items, tone }) => {
+const DrilldownCard: React.FC<{ title: string; items: Array<{ name: string; value: number }>; tone: 'blue' }> = ({ title, items, tone }) => {
   const color = {
     blue: 'bg-blue-600',
-    violet: 'bg-violet-600',
-    emerald: 'bg-emerald-600',
   }[tone];
   const max = Math.max(1, ...items.map((item) => item.value));
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_18px_54px_rgba(15,23,42,0.07)]">
+    <div className="rounded-lg border border-stone-200 bg-white/88 p-4 shadow-[0_18px_54px_rgba(15,23,42,0.07)] backdrop-blur">
       <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{title}</div>
       <div className="mt-3 space-y-2">
         {items.slice(0, 4).map((item) => (
@@ -868,7 +953,7 @@ const DrilldownCard: React.FC<{ title: string; items: Array<{ name: string; valu
               <span className="truncate font-semibold text-slate-700">{item.name}</span>
               <span className="font-mono text-slate-500">{item.value}</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1.5 overflow-hidden rounded-full bg-stone-100">
               <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(8, (item.value / max) * 100)}%` }} />
             </div>
           </div>
@@ -878,20 +963,28 @@ const DrilldownCard: React.FC<{ title: string; items: Array<{ name: string; valu
   );
 };
 
-const StatTile: React.FC<{ label: string; value: number | string; icon: React.ReactNode; tone?: 'default' | 'danger' | 'warning' | 'success' }> = ({
+const StatTile: React.FC<{ label: string; value: number | string; icon: React.ReactNode; tone?: 'default' | 'danger' | 'warning' | 'success' | 'neutral' }> = ({
   label,
   value,
   icon,
+  tone = 'default',
 }) => {
+  const toneClass = {
+    default: 'text-stone-700 bg-stone-100',
+    danger: 'text-slate-700 bg-slate-100',
+    warning: 'text-amber-800 bg-amber-50',
+    success: 'text-emerald-700 bg-emerald-50',
+    neutral: 'text-indigo-700 bg-indigo-50',
+  }[tone];
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_rgba(15,23,42,0.09)]">
+    <div className="group relative overflow-hidden rounded-lg border border-stone-200 bg-white/82 px-4 py-3 text-stone-900 shadow-[0_14px_34px_rgba(17,24,39,0.055)] backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_rgba(17,24,39,0.08)]">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</span>
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${toneClass}`}>
           {icon}
         </span>
       </div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-2 font-serif text-3xl font-semibold tracking-tight">{value}</div>
     </div>
   );
 };

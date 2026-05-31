@@ -5,6 +5,7 @@ export const APP_TAB_VALUES = [
   'queue',
   'notifications',
   'tickets',
+  'trainers',
   'reports',
   'insights',
   'momence',

@@ -110,18 +110,22 @@
 
 @layer components {
   .athena-bot-tint canvas {
-    filter: hue-rotate(128deg) saturate(1.22) contrast(1.05);
+    filter: saturate(1.22) contrast(1.08) brightness(1.02);
+  }
+
+  .athena-bot-tint-blue canvas {
+    filter: saturate(1.22) contrast(1.08) brightness(1.02);
   }
 
   .athena-logo-spline canvas {
     transform: scale(1.55) translateY(9%);
     transform-origin: center;
-    filter: hue-rotate(128deg) saturate(1.18) contrast(1.06);
+    filter: saturate(1.18) contrast(1.06) brightness(1.02);
   }
 
   .ai-kinetic {
     display: inline-block;
-    background-image: linear-gradient(110deg, #7c3aed 0%, #a855f7 35%, #6366f1 55%, #7c3aed 100%);
+    background-image: linear-gradient(110deg, #1d4ed8 0%, #2563eb 35%, #0ea5e9 55%, #1d4ed8 100%);
     background-size: 220% auto;
     color: transparent;
     -webkit-background-clip: text;
@@ -250,6 +254,20 @@
     }
   }
 
+  @keyframes draft-popout-cue {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.96);
+    }
+    70% {
+      transform: translateY(-1px) scale(1.01);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
   @keyframes ai-shift {
     0% {
       background-position: 0% 50%;
@@ -320,6 +338,9 @@
     animation: ticket-chip-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
+  .animate-draft-popout-cue {
+    animation: draft-popout-cue 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
 
   .animate-p57-soft-pulse {
     animation: p57-soft-pulse 1.8s ease-in-out infinite;
@@ -347,6 +368,7 @@
   .animate-chat-header-in,
   .animate-chat-message-in,
   .animate-ticket-chip-in,
+  .animate-draft-popout-cue,
   .animate-p57-soft-pulse,
   .animate-p57-send-ready,
   .animate-p57-float,
@@ -483,7 +505,7 @@
   }
 
   .report-print-brand-label {
-    color: #be123c;
+    color: #2563eb;
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.18em;

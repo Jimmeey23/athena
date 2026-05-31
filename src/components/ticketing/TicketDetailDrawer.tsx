@@ -453,7 +453,7 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
                     .catch((error) => setEditError(error instanceof Error ? error.message : 'Unable to update assignment.'));
                 }
               }}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 text-slate-900 dark:text-slate-100"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100"
             >
               {ASSOCIATES.map((a) => (
                 <option key={a.name} value={a.name}>
@@ -551,10 +551,10 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
                     href={(attachment.path && attachmentUrls[attachment.path]) || attachment.publicUrl || '#'}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 transition hover:border-rose-200 hover:bg-rose-50"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
                   >
                     <span className="inline-flex min-w-0 items-center gap-2">
-                      <Link2 className="h-3.5 w-3.5 shrink-0 text-rose-700" />
+                      <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-700" />
                       <span className="truncate">{attachment.fileName || `Attachment ${index + 1}`}</span>
                     </span>
                     <span className="shrink-0 text-[10px] text-slate-500">
@@ -571,7 +571,7 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 block">Tags</label>
               <div className="flex flex-wrap gap-1.5">
                 {ticket.tags.map((tag) => (
-                  <span key={tag} className="text-xs px-2 py-0.5 bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300 rounded-md">
+                  <span key={tag} className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 rounded-md">
                     #{tag}
                   </span>
                 ))}

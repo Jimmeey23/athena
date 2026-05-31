@@ -32,6 +32,7 @@ interface Props {
   context: Context;
   onChange: (ctx: Context) => void;
   attachmentCount?: number;
+  accent?: 'blue';
 }
 
 interface MomenceSearchOption {
@@ -61,14 +62,15 @@ function multiDisplay(value?: string, fallback = ''): string {
   return `${items[0]} +${items.length - 1}`;
 }
 
-export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCount = 0 }) => {
+export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCount = 0, accent = 'blue' }) => {
+  const activeTone = 'border-blue-500 bg-blue-50 text-blue-700 shadow-[0_10px_22px_rgba(37,99,235,0.14)]';
   return (
     <div className="flex w-max flex-nowrap items-center gap-2">
       <button
         type="button"
         className={`inline-flex h-8 min-w-0 max-w-[180px] items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-sm transition duration-200 ${
           attachmentCount > 0
-            ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-[0_10px_22px_rgba(190,24,93,0.14)]'
+            ? activeTone
             : 'border-slate-200 bg-white/90 text-stone-600'
         }`}
         title={attachmentCount > 0 ? `${attachmentCount} attachment(s) queued` : 'No attachments queued'}
@@ -99,6 +101,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
             memberContact: undefined,
           })
         }
+        accent={accent}
       />
       <AsyncPicker
         icon={<Calendar className="w-3 h-3" />}
@@ -123,6 +126,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
             classDateTime: undefined,
           })
         }
+        accent={accent}
       />
       <Picker
         icon={<MapPin className="w-3 h-3" />}
@@ -131,6 +135,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={STUDIOS}
         onSelect={(v) => onChange({ ...context, studio: v })}
         onClear={() => onChange({ ...context, studio: undefined })}
+        accent={accent}
       />
       <Picker
         icon={<User className="w-3 h-3" />}
@@ -139,6 +144,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={TRAINERS}
         onSelect={(v) => onChange({ ...context, trainer: v })}
         onClear={() => onChange({ ...context, trainer: undefined })}
+        accent={accent}
       />
       <Picker
         icon={<Calendar className="w-3 h-3" />}
@@ -147,6 +153,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={CLASS_TYPES}
         onSelect={(v) => onChange({ ...context, classType: v })}
         onClear={() => onChange({ ...context, classType: undefined })}
+        accent={accent}
       />
       <Picker
         icon={<BadgeCheck className="w-3 h-3" />}
@@ -155,6 +162,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={MEMBERSHIPS}
         onSelect={(v) => onChange({ ...context, membership: v })}
         onClear={() => onChange({ ...context, membership: undefined })}
+        accent={accent}
       />
       <Picker
         icon={<Route className="w-3 h-3" />}
@@ -163,6 +171,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={INTAKE_ROUTES}
         onSelect={(v) => onChange({ ...context, intakeRoute: v })}
         onClear={() => onChange({ ...context, intakeRoute: undefined })}
+        accent={accent}
       />
       <Picker
         icon={<Tag className="w-3 h-3" />}
@@ -171,6 +180,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={Object.keys(CATEGORIES)}
         onSelect={(v) => onChange({ ...context, category: v, subCategory: undefined })}
         onClear={() => onChange({ ...context, category: undefined, subCategory: undefined })}
+        accent={accent}
       />
       {context.category && (
         <Picker
@@ -180,6 +190,7 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
           options={CATEGORIES[context.category] || []}
           onSelect={(v) => onChange({ ...context, subCategory: v })}
           onClear={() => onChange({ ...context, subCategory: undefined })}
+          accent={accent}
         />
       )}
       <Picker
@@ -189,12 +200,15 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
         options={Object.keys(PRIORITY_SLA)}
         onSelect={(v) => onChange({ ...context, priority: v })}
         onClear={() => onChange({ ...context, priority: undefined })}
+        accent={accent}
       />
       <input
         value={context.urgencyReason || ''}
         onChange={(event) => onChange({ ...context, urgencyReason: event.target.value })}
         placeholder="Urgency reason"
-        className="h-8 min-w-[200px] rounded-full border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-stone-700 shadow-sm outline-none transition duration-200 placeholder:text-stone-400 hover:border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15"
+        className={`h-8 min-w-[200px] rounded-full border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-stone-700 shadow-sm outline-none transition duration-200 placeholder:text-stone-400 focus:ring-4 ${
+          'hover:border-blue-200 focus:border-blue-500 focus:ring-blue-500/15'
+        }`}
       />
     </div>
   );
@@ -207,6 +221,7 @@ interface AsyncPickerProps<TOption extends MomenceSearchOption> {
   loadOptions: (query: string) => Promise<TOption[]>;
   onSelect: (option: TOption) => void;
   onClear: () => void;
+  accent?: 'blue';
 }
 
 const AsyncPicker = <TOption extends MomenceSearchOption,>({
@@ -216,6 +231,7 @@ const AsyncPicker = <TOption extends MomenceSearchOption,>({
   loadOptions,
   onSelect,
   onClear,
+  accent = 'blue',
 }: AsyncPickerProps<TOption>) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -250,7 +266,7 @@ const AsyncPicker = <TOption extends MomenceSearchOption,>({
           className={`inline-flex h-8 min-w-0 max-w-[210px] items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-sm transition duration-200 ${
             value
               ? 'border-stone-950 bg-stone-950 text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)]'
-              : 'border-slate-200 bg-white/90 text-stone-600 hover:-translate-y-0.5 hover:border-rose-200 hover:bg-rose-50 hover:text-stone-950'
+              : 'border-slate-200 bg-white/90 text-stone-600 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-stone-950'
           }`}
         >
           <span className="flex-shrink-0">{icon}</span>
@@ -326,7 +342,8 @@ const Picker: React.FC<{
   options: string[];
   onSelect: (v: string) => void;
   onClear: () => void;
-}> = ({ icon, label, value, options, onSelect, onClear }) => {
+  accent?: 'blue';
+}> = ({ icon, label, value, options, onSelect, onClear, accent = 'blue' }) => {
   const [open, setOpen] = useState(false);
 
   return (
@@ -336,8 +353,8 @@ const Picker: React.FC<{
           type="button"
           className={`inline-flex h-8 min-w-0 max-w-[180px] items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-sm transition duration-200 ${
             value
-              ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-[0_10px_22px_rgba(190,24,93,0.14)]'
-              : 'border-slate-200 bg-white/90 text-stone-600 hover:-translate-y-0.5 hover:border-rose-200 hover:bg-rose-50 hover:text-stone-950'
+              ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-[0_10px_22px_rgba(37,99,235,0.14)]'
+              : 'border-slate-200 bg-white/90 text-stone-600 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-stone-950'
           }`}
         >
           <span className="flex-shrink-0">{icon}</span>

@@ -48,12 +48,16 @@ const TicketDashboard = lazy(() =>
 const AiReportsPanel = lazy(() =>
   import('./ticketing/AiReportsPanel').then((module) => ({ default: module.AiReportsPanel }))
 );
+const TrainerProfilesPanel = lazy(() =>
+  import('./ticketing/TrainerProfilesPanel').then((module) => ({ default: module.TrainerProfilesPanel }))
+);
 
 const sideTabs = [
   { value: 'chat', label: 'Chat Intake', icon: MessageSquareText },
   { value: 'queue', label: 'Triage Queue', icon: Gauge },
   { value: 'notifications', label: 'Notifications', icon: Bell },
   { value: 'tickets', label: 'Submitted Tickets', icon: Tickets },
+  { value: 'trainers', label: 'Trainer Profiles', icon: Users },
   { value: 'reports', label: 'Reports', icon: BarChart3 },
   { value: 'insights', label: 'Insights', icon: BarChart3 },
   { value: 'momence', label: 'Momence Ops', icon: Workflow },
@@ -81,6 +85,7 @@ const SupportShell: React.FC = () => {
   const [chatResetVersion, setChatResetVersion] = useState(0);
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [athenaTrainerMode, setAthenaTrainerMode] = useState(false);
   const [now, setNow] = useState<Date>(new Date());
   const userDisplayName = (
     profile?.full_name ||
@@ -104,6 +109,15 @@ const SupportShell: React.FC = () => {
   useEffect(() => {
     const handle = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(handle);
+  }, []);
+
+  useEffect(() => {
+    const syncAthenaMode = () => {
+      setAthenaTrainerMode(document.documentElement.dataset.athenaMode === 'trainer');
+    };
+    syncAthenaMode();
+    window.addEventListener('athena-mode-change', syncAthenaMode);
+    return () => window.removeEventListener('athena-mode-change', syncAthenaMode);
   }, []);
 
   const openEmptyIntake = () => {
@@ -134,30 +148,49 @@ const SupportShell: React.FC = () => {
 
   return (
       <div className="p57-app-bg flex h-screen w-screen flex-col overflow-hidden text-stone-950">
-        <header className="z-20 flex-shrink-0 border-b border-slate-200/80 bg-white/88 px-5 py-2 shadow-[0_10px_40px_rgba(15,23,42,0.05)] backdrop-blur-xl">
+        <header className={`z-20 flex-shrink-0 border-b px-5 py-2 shadow-[0_10px_40px_rgba(15,23,42,0.05)] backdrop-blur-xl transition duration-500 ${
+          athenaTrainerMode
+            ? 'border-blue-100 bg-blue-50/80'
+            : 'border-blue-100 bg-white/90'
+        }`}>
           <div className="mx-auto flex max-w-[1500px] items-center gap-3">
             <button
               type="button"
               onClick={goHome}
               aria-label="Go to Chat Intake home"
-              className="group relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-blue-200 bg-slate-950 text-white shadow-[0_14px_30px_rgba(37,99,235,0.24)] transition duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-4 focus:ring-blue-500/20"
+              className={`group relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border bg-slate-950 text-white transition duration-300 hover:-translate-y-0.5 focus:outline-none focus:ring-4 ${
+                athenaTrainerMode
+                  ? 'border-blue-200 shadow-[0_14px_30px_rgba(37,99,235,0.24)] focus:ring-blue-500/20'
+                  : 'border-blue-200 shadow-[0_14px_30px_rgba(37,99,235,0.24)] focus:ring-blue-500/20'
+              }`}
             >
-              <img src="/download-1.png" alt="Athena bot face" className="-scale-x-100 h-full w-full rounded-full object-cover" />
+              <img
+                src="/download-1.png"
+                alt="Athena bot face"
+                className="-scale-x-100 h-full w-full rounded-full object-cover transition duration-500"
+                style={{ filter: 'hue-rotate(225deg) saturate(1.45) contrast(1.08)' }}
+              />
             </button>
             <div className="min-w-0">
               <div className="flex items-end gap-0 leading-none">
                 <h1 className="text-[28px] font-black uppercase tracking-[0.28em] text-stone-900 ml-2">
                   Athena
                 </h1>
-                <span className="ai-kinetic mb-[16px] text-[13px] font-semibold">
+                <span className="ai-kinetic mb-[16px] text-[13px] font-semibold text-blue-600">
                   Ai
                 </span>
               </div>
-              <div className="ml-2 mt-1 h-px w-[308px] bg-gradient-to-r from-rose-500 via-violet-500 to-indigo-500/10" />
+              <div className={`ml-2 mt-1 h-px w-[308px] bg-gradient-to-r ${
+                athenaTrainerMode
+                  ? 'from-blue-500 via-cyan-400 to-blue-500/10'
+                  : 'from-blue-500 via-cyan-400 to-blue-500/10'
+              }`} />
               <div className="mt-1 flex items-center gap-2">
-                <div className="h-px w-0 bg-gradient-to-r from-violet-500 to-transparent" />
-                <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-stone-500">
-                  Intelligent Member Support
+                <div className="h-px w-0 bg-gradient-to-r from-blue-500 to-transparent" />
+                <p className={`text-[10px] font-medium uppercase tracking-[0.24em] ${
+                  athenaTrainerMode ? 'text-blue-700/70' : 'text-stone-500'
+                }`}>
+                  {athenaTrainerMode ? 'Instructor Intelligence' : 'Intelligent Member Support'}
                 </p>
               </div>
             </div>
@@ -194,6 +227,13 @@ const SupportShell: React.FC = () => {
                 {(activeTab === 'tickets' || hasOpenedTickets) && (
                   <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading submitted tickets...</div>}>
                     <TicketDashboard />
+                  </Suspense>
+                )}
+              </TabsContent>
+              <TabsContent value="trainers" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
+                {activeTab === 'trainers' && (
+                  <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading trainer profiles...</div>}>
+                    <TrainerProfilesPanel />
                   </Suspense>
                 )}
               </TabsContent>
@@ -248,7 +288,11 @@ const SupportShell: React.FC = () => {
               <button
                 type="button"
                 onClick={startNewChat}
-                className={`mb-2 flex h-11 w-full items-center rounded-xl border border-slate-700 bg-slate-950 text-xs font-semibold text-white shadow-[0_16px_36px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:bg-black focus:outline-none focus:ring-4 focus:ring-slate-500/20 ${
+                className={`mb-2 flex h-11 min-h-11 w-full items-center rounded-xl border text-xs font-semibold text-white transition duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-4 ${
+                  athenaTrainerMode
+                    ? 'border-blue-700 bg-blue-700 shadow-[0_16px_36px_rgba(37,99,235,0.28)] hover:bg-blue-800 focus:ring-blue-500/20'
+                    : 'border-slate-700 bg-slate-950 shadow-[0_16px_36px_rgba(15,23,42,0.35)] hover:bg-black focus:ring-slate-500/20'
+                } ${
                   sidebarExpanded ? 'justify-start px-3' : 'justify-center px-0'
                 }`}
               >
@@ -262,12 +306,16 @@ const SupportShell: React.FC = () => {
                     value={value}
                     className={`h-11 w-full rounded-xl text-xs font-semibold transition duration-200 ${
                       sidebarExpanded ? 'justify-between px-3' : 'justify-center px-0'
-                    } text-slate-500 hover:bg-white/80 hover:text-slate-700 data-[state=active]:bg-rose-700 data-[state=active]:text-white data-[state=active]:shadow-[0_8px_20px_rgba(190,24,93,0.28)]`}
+                    } text-slate-500 hover:bg-white/80 hover:text-slate-700 data-[state=active]:text-white ${
+                      athenaTrainerMode
+                    ? 'data-[state=active]:bg-blue-700 data-[state=active]:shadow-[0_8px_20px_rgba(37,99,235,0.28)]'
+                        : 'data-[state=active]:bg-blue-700 data-[state=active]:shadow-[0_8px_20px_rgba(37,99,235,0.28)]'
+                    }`}
                   >
                     <span className={`relative inline-flex items-center ${sidebarExpanded ? 'mr-2' : ''}`}>
                       <Icon className="h-4 w-4" />
                       {value === 'notifications' && notifications.length > 0 && (
-                        <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold leading-none text-white">
+                        <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold leading-none text-white">
                           {notifications.length > 9 ? '9+' : notifications.length}
                         </span>
                       )}
@@ -300,13 +348,20 @@ const SupportShell: React.FC = () => {
             </aside>
 
             <div className="fixed bottom-3 right-3 z-30 md:hidden">
-              <TabsList className="h-11 rounded-2xl border border-slate-200 bg-white/92 p-1 shadow-[0_18px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+              <TabsList className="h-11 rounded-2xl border border-slate-200 bg-white/90 p-1 shadow-[0_18px_44px_rgba(15,23,42,0.16)] backdrop-blur-xl">
                 {visibleTabs.slice(0, 5).map(({ value, label, icon: Icon }) => (
-                  <TabsTrigger key={value} value={value} aria-label={label} className="h-9 rounded-xl px-2.5 text-slate-500 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    aria-label={label}
+                    className={`h-9 rounded-xl px-2.5 text-slate-500 data-[state=active]:text-white ${
+                      athenaTrainerMode ? 'data-[state=active]:bg-blue-600' : 'data-[state=active]:bg-blue-600'
+                    }`}
+                  >
                     <span className="relative">
                       <Icon className="h-4 w-4" />
                       {value === 'notifications' && notifications.length > 0 && (
-                        <span className="absolute -right-2 -top-2 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+                        <span className="absolute -right-2 -top-2 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white" />
                       )}
                     </span>
                   </TabsTrigger>
@@ -351,7 +406,7 @@ const TriageQueuePanel: React.FC = () => {
   const avgAgeHours = averageAgeHours(openTickets);
   const queues = [
     { title: 'SLA Breached', description: 'Past due and still open', tickets: sortByDueDate(breached), tone: 'red' as const },
-    { title: 'At Risk', description: 'Due in the next 2 hours', tickets: sortByDueDate(atRisk), tone: 'violet' as const },
+    { title: 'At Risk', description: 'Due in the next 2 hours', tickets: sortByDueDate(atRisk), tone: 'blue' as const },
     { title: 'Critical / High', description: 'Priority-led triage queue', tickets: sortByRisk(critical), tone: 'blue' as const },
     { title: 'Awaiting Member', description: 'Blocked on member response', tickets: newestByDate(awaiting), tone: 'emerald' as const },
   ];
@@ -382,7 +437,7 @@ const TriageQueuePanel: React.FC = () => {
           <SignalRow label="Unassigned tickets" value={unassigned.length} tone={unassigned.length ? 'red' : 'green'} />
           <SignalRow label="Breached requiring escalation" value={breached.filter((ticket) => ticket.assignedTo !== getEscalationTarget(ticket.assignedTo)).length} tone={breached.length ? 'red' : 'green'} />
           <SignalRow label="Open with member linked" value={openTickets.filter((ticket) => ticket.memberName).length} tone="blue" />
-          <SignalRow label="Open without member context" value={openTickets.filter((ticket) => !ticket.memberName).length} tone="violet" />
+          <SignalRow label="Open without member context" value={openTickets.filter((ticket) => !ticket.memberName).length} tone="blue" />
         </div>
       </div>
     </WorkspacePanel>
@@ -427,7 +482,7 @@ const NotificationsPanel: React.FC<{ onOpen: (ticket: Ticket) => void }> = ({ on
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <StatusPill value={notification.level === 'critical' ? 'Breached' : 'At Risk'} tone={notification.level === 'critical' ? 'red' : 'violet'} />
+                  <StatusPill value={notification.level === 'critical' ? 'Breached' : 'At Risk'} tone={notification.level === 'critical' ? 'red' : 'blue'} />
                   <span className="text-[11px] font-mono text-slate-400">{notification.ticketId}</span>
                 </div>
                 <div className="mt-2 truncate text-sm font-semibold text-slate-950">{notification.title}</div>
@@ -477,7 +532,7 @@ const InsightsPanel: React.FC = () => {
 
       <div className="mt-5 grid gap-4 xl:grid-cols-3">
         <BreakdownCard title="Category Drivers" items={topCategories} total={tickets.length} color="bg-blue-600" />
-        <BreakdownCard title="Recurring Subcategories" items={topSubCategories} total={tickets.length} color="bg-violet-600" />
+        <BreakdownCard title="Recurring Subcategories" items={topSubCategories} total={tickets.length} color="bg-blue-600" />
         <BreakdownCard title="SLA Health" items={bySla} total={tickets.length} color="bg-emerald-600" />
       </div>
 
@@ -556,12 +611,11 @@ const QueuePanel: React.FC<{
   title: string;
   description: string;
   tickets: Ticket[];
-  tone: 'red' | 'violet' | 'blue' | 'emerald';
+  tone: 'red' | 'blue' | 'emerald';
   onOpen: (ticket: Ticket) => void;
 }> = ({ title, description, tickets, tone, onOpen }) => {
   const toneClass = {
     red: 'border-red-200 bg-red-50 text-red-700',
-    violet: 'border-violet-200 bg-violet-50 text-violet-700',
     blue: 'border-blue-200 bg-blue-50 text-blue-700',
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   }[tone];
@@ -596,7 +650,7 @@ const TicketMiniRow: React.FC<{ ticket: Ticket; onOpen: (ticket: Ticket) => void
     </div>
     <div className="flex items-center gap-1.5">
       <StatusPill value={ticket.priority} tone={ticket.priority === 'Critical' || ticket.priority === 'High' ? 'red' : 'blue'} />
-      <StatusPill value={getSlaState(ticket)} tone={getSlaState(ticket) === 'Breached' ? 'red' : getSlaState(ticket) === 'At Risk' ? 'violet' : 'green'} />
+      <StatusPill value={getSlaState(ticket)} tone={getSlaState(ticket) === 'Breached' ? 'red' : getSlaState(ticket) === 'At Risk' ? 'blue' : 'green'} />
     </div>
   </button>
 );
@@ -629,11 +683,10 @@ const TriageTable: React.FC<{ title: string; tickets: Ticket[]; onOpen: (ticket:
   </section>
 );
 
-const StatusPill: React.FC<{ value: string; tone: 'red' | 'blue' | 'violet' | 'green' }> = ({ value, tone }) => {
+const StatusPill: React.FC<{ value: string; tone: 'red' | 'blue' | 'green' }> = ({ value, tone }) => {
   const className = {
     red: 'border-red-200 bg-red-50 text-red-700',
     blue: 'border-blue-200 bg-blue-50 text-blue-700',
-    violet: 'border-violet-200 bg-violet-50 text-violet-700',
     green: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   }[tone];
   return <span className={`inline-flex w-fit rounded-full border px-2 py-0.5 text-[11px] font-semibold ${className}`}>{value}</span>;
@@ -643,7 +696,7 @@ const PlainDataValue: React.FC<{ value: string }> = ({ value }) => (
   <span className="truncate text-xs font-medium text-slate-700">{value}</span>
 );
 
-const SignalRow: React.FC<{ label: string; value: number; tone: 'red' | 'blue' | 'violet' | 'green' }> = ({ label, value }) => (
+const SignalRow: React.FC<{ label: string; value: number; tone: 'red' | 'blue' | 'green' }> = ({ label, value }) => (
   <div className="flex items-center justify-between gap-3 border-b border-slate-100 py-3 last:border-0">
     <span className="text-sm font-medium text-slate-600">{label}</span>
     <span className="text-sm font-semibold tabular-nums text-slate-950">{value}</span>
@@ -1336,7 +1389,7 @@ const SmallButton: React.FC<{ onClick: () => void; children: React.ReactNode; di
   const classes = {
     primary: 'bg-blue-600 text-white hover:bg-blue-700',
     outline: 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-100',
-    danger: 'bg-rose-600 text-white hover:bg-rose-700',
+    danger: 'bg-blue-700 text-white hover:bg-blue-800',
     success: 'bg-emerald-600 text-white hover:bg-emerald-700',
   }[variant];
 
