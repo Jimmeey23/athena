@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap } from 'lucide-react';
+import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap, LayoutTemplate } from 'lucide-react';
 import InteractiveRobotSpline from '@/components/InteractiveRobotSpline';
 import { ROBOT_SPLINE_URL } from '@/lib/galleryImages';
 import { TicketPreviewCard } from './TicketPreviewCard';
@@ -8,10 +8,12 @@ import { useTickets } from './useTickets';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import {
   getMomenceMemberMemberships,
+  getMomenceSessionBookings,
   loadMomenceTicketContext,
   MomenceInsightSummary,
   MomenceMemberOption,
   MomenceMembership,
+  MomenceSessionBooking,
   MomenceSessionOption,
   searchMomenceMembers,
   searchMomenceSessions,
@@ -55,6 +57,16 @@ import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
 import { buildTicketReviewInsights } from '@/lib/ticket-review';
 import { getGreetingQuickActions, isCasualGreeting } from '@/lib/athena-chat-intent';
 import { shouldUseOptionButtons } from '@/lib/intake-option-buttons';
+import {
+  CONTEXT_TEMPLATES,
+  ContextTemplate,
+  ContextTemplateField,
+  HostedClassAttendeeFeedback,
+  HostedClassFeedbackInput,
+  HostedClassSessionSummary,
+  buildContextTemplateText,
+  buildHostedClassFeedbackText,
+} from '@/lib/intake-templates';
 import { trainerImageUrl, trainerInitials } from '@/lib/trainer-images';
 import {
   TRAINER_REVIEW_TEMPLATES,
@@ -75,6 +87,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface SuggestedChip {
   label: string;
@@ -945,6 +958,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const [instructorEvaluationMode, setInstructorEvaluationMode] = useState(false);
   const [textToTicketOpen, setTextToTicketOpen] = useState(false);
   const [textToTicketText, setTextToTicketText] = useState('');
+  const [activeTemplate, setActiveTemplate] = useState<ContextTemplate | null>(null);
   const [now, setNow] = useState<Date>(new Date());
   const publishingRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1362,6 +1376,19 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     sendMessage(`${getDetailField(chip.field)?.label || chip.field}: ${chip.value}`, next);
   };
 
+  const applyTemplate = (template: ContextTemplate) => {
+    setPendingSingleField(null);
+    setActiveTemplate(template);
+    setContext((current) => ({
+      ...current,
+      intakeRoute: template.intakeRoute,
+      category: template.category,
+      subCategory: template.subCategory,
+      priority: template.priority,
+      reportedBy: reporterName,
+    }));
+  };
+
   const resetChat = useCallback(() => {
     activeChatEpochRef.current += 1;
     requestNonceRef.current += 1;
@@ -1379,6 +1406,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     setConversationId(null);
     setActiveDraftReviewMessageId(null);
     setInstructorEvaluationMode(false);
+    setActiveTemplate(null);
     setLoading(false);
   }, [reporterName]);
 
@@ -1868,6 +1896,73 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={!instructorEvaluationMode && Boolean(activeTemplate)}
+          onOpenChange={(open) => {
+            if (!open) setActiveTemplate(null);
+          }}
+        >
+          <DialogContent className="fixed left-[50%] top-[50%] z-[100] flex max-h-[90vh] !w-[min(1800px,calc(100vw-2rem))] !max-w-[min(1800px,calc(100vw-2rem))] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-3xl border-slate-200 bg-slate-50/98 p-0 shadow-[0_30px_100px_rgba(15,23,42,0.30)] data-[state=open]:zoom-in-95">
+            {activeTemplate && (
+              <>
+                <DialogHeader className="shrink-0 border-b border-slate-200 bg-white/95 px-6 py-4 pr-12 text-left">
+                  <DialogTitle className="text-base text-slate-950">{activeTemplate.label}</DialogTitle>
+                  <DialogDescription>{activeTemplate.description}</DialogDescription>
+                </DialogHeader>
+                <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
+                  {activeTemplate.id === 'hosted-class-feedback' ? (
+                    <HostedClassTemplateForm
+                      template={activeTemplate}
+                      disabled={loading}
+                      onCancel={() => setActiveTemplate(null)}
+                      onSubmit={(payload) => {
+                        const nextContext: DetailContext = {
+                          ...context,
+                          intakeRoute: activeTemplate.intakeRoute,
+                          category: activeTemplate.category,
+                          subCategory: activeTemplate.subCategory,
+                          priority: activeTemplate.priority,
+                          sessionId: payload.session.id,
+                          classType: payload.session.classType,
+                          classDateTime: payload.session.startsAt,
+                          trainer: payload.session.trainer,
+                          studio: payload.session.studio,
+                          reportedBy: reporterName,
+                          partnerName: payload.partnerName,
+                          description: payload.classFeedback,
+                        };
+                        setContext(nextContext);
+                        setActiveTemplate(null);
+                        sendMessage(buildHostedClassFeedbackText(payload), nextContext);
+                      }}
+                    />
+                  ) : (
+                    <GenericTemplateForm
+                      template={activeTemplate}
+                      disabled={loading}
+                      onCancel={() => setActiveTemplate(null)}
+                      onSubmit={(values) => {
+                        const nextContext: DetailContext = {
+                          ...context,
+                          intakeRoute: activeTemplate.intakeRoute,
+                          category: activeTemplate.category,
+                          subCategory: activeTemplate.subCategory,
+                          priority: activeTemplate.priority,
+                          reportedBy: reporterName,
+                          description: Object.values(values).filter(Boolean).join('\n'),
+                        };
+                        setContext(nextContext);
+                        setActiveTemplate(null);
+                        sendMessage(buildContextTemplateText(activeTemplate, values), nextContext);
+                      }}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
         {!instructorEvaluationMode && (
         <>
         <div className="z-10 flex-shrink-0 border-t border-border/50 bg-[#f0f2f5] px-4 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.04)] sm:px-6">
@@ -1890,6 +1985,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
               <ClipboardCheck className="h-3.5 w-3.5" />
               Text to ticket
             </button>
+            <TemplatePicker onSelect={applyTemplate} />
             <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
               <ContextPicker
                 context={context}
@@ -2011,6 +2107,386 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     </div>
   );
 };
+
+const TemplatePicker: React.FC<{ onSelect: (template: ContextTemplate) => void }> = ({ onSelect }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" />
+          Templates
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-[420px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border-slate-200 bg-white/96 p-0 shadow-[0_24px_70px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+      >
+        <div className="border-b border-slate-100 px-4 py-3">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Ready templates</div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+            Select a common context template, complete the blanks, then send to Athena.
+          </p>
+        </div>
+        <div className="max-h-[360px] overflow-y-auto p-2">
+          {CONTEXT_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              onClick={() => {
+                onSelect(template);
+                setOpen(false);
+              }}
+              className="block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-blue-50"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-950">{template.label}</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-slate-500">{template.description}</div>
+                </div>
+                <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                  {template.priority}
+                </span>
+              </div>
+              <div className="mt-2 truncate text-[11px] font-medium text-blue-700">
+                {template.category} · {template.subCategory}
+              </div>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+const HOSTED_ATTENDEE_STATUS_OPTIONS = [
+  'Attended',
+  'Late arrival',
+  'No-show',
+  'Interested in continuing',
+  'Needs follow-up',
+  'Converted / package sold',
+  'Concern raised',
+  'Not a fit',
+];
+
+function momenceBookingMemberName(booking: MomenceSessionBooking): string {
+  const name = [booking.member?.firstName, booking.member?.lastName].filter(Boolean).join(' ').trim();
+  return name || `Momence member #${booking.member?.id || booking.id}`;
+}
+
+function momenceBookingContact(booking: MomenceSessionBooking): string {
+  return [booking.member?.email, booking.member?.phoneNumber].filter(Boolean).join(' · ');
+}
+
+function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSessionSummary {
+  return {
+    id: session.id,
+    classType: session.classType,
+    trainer: session.trainer,
+    studio: session.studio,
+    startsAt: session.startsAt,
+  };
+}
+
+const GenericTemplateForm: React.FC<{
+  template: ContextTemplate;
+  disabled?: boolean;
+  onCancel: () => void;
+  onSubmit: (values: Record<string, string>) => void;
+}> = ({ template, disabled = false, onCancel, onSubmit }) => {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const fields = template.fields || template.prompts.map((prompt): ContextTemplateField => ({
+    id: prompt,
+    label: prompt.replace(/:\s*$/, ''),
+    type: /feedback|concern|impact|action|notes|comment|resolution/i.test(prompt) ? 'textarea' : 'text',
+    required: true,
+  }));
+  const requiredFields = fields.filter((field) => field.required);
+  const canSubmit = requiredFields.every((field) => values[field.id]?.trim());
+
+  return (
+    <form
+      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.08)]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSubmit && !disabled) onSubmit(values);
+      }}
+    >
+      <div className="flex flex-col gap-2 border-b border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Template form</div>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">{template.label}</h3>
+          <p className="mt-1 text-xs text-slate-500">{template.description}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          Close
+        </button>
+      </div>
+      <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+        {fields.map((field, index) => {
+          const isLong = field.type === 'textarea';
+          return (
+            <label key={field.id} className={`${isLong ? 'md:col-span-2 xl:col-span-3' : ''} block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100`}>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                {index + 1}. {field.label}
+                {field.required ? <span className="text-blue-700"> *</span> : null}
+              </span>
+              {field.type === 'select' ? (
+                <select
+                  value={values[field.id] || ''}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                >
+                  <option value="">Select {field.label.toLowerCase()}</option>
+                  {(field.options || []).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              ) : field.type === 'textarea' ? (
+                <textarea
+                  value={values[field.id] || ''}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                  rows={3}
+                  className="mt-2 min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder={field.placeholder || field.label}
+                />
+              ) : (
+                <input
+                  type={field.type}
+                  value={values[field.id] || ''}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder={field.placeholder || field.label}
+                />
+              )}
+            </label>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <span className="text-[11px] font-medium text-slate-500">
+          {requiredFields.filter((field) => values[field.id]?.trim()).length}/{requiredFields.length} required complete
+        </span>
+        <button
+          type="submit"
+          disabled={!canSubmit || disabled}
+          className="h-9 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Generate ticket draft
+        </button>
+      </div>
+    </form>
+  );
+};
+
+const HostedClassTemplateForm: React.FC<{
+  template: ContextTemplate;
+  disabled?: boolean;
+  onCancel: () => void;
+  onSubmit: (payload: HostedClassFeedbackInput) => void;
+}> = ({ template, disabled = false, onCancel, onSubmit }) => {
+  const [sessionValues, setSessionValues] = useState<Record<string, string>>({});
+  const [selectedSession, setSelectedSession] = useState<HostedClassSessionSummary | null>(null);
+  const [attendees, setAttendees] = useState<HostedClassAttendeeFeedback[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [partnerName, setPartnerName] = useState('');
+  const [classFeedback, setClassFeedback] = useState('');
+  const [hostFeedback, setHostFeedback] = useState('');
+  const [lateComerFeedback, setLateComerFeedback] = useState('');
+  const [otherFeedback, setOtherFeedback] = useState('');
+  const [followUpPlan, setFollowUpPlan] = useState('');
+  const canSubmit = Boolean(selectedSession && classFeedback.trim()) && !disabled;
+
+  const selectSession = async (session: MomenceSessionOption) => {
+    const summary = sessionSummaryFromOption(session);
+    setSelectedSession(summary);
+    setSessionValues({
+      sessionId: summary.id,
+      classType: summary.classType,
+      classDateTime: summary.startsAt || '',
+      trainer: summary.trainer || '',
+      studio: summary.studio || '',
+    });
+    setLoadingBookings(true);
+    setBookingError(null);
+    try {
+      const bookings = await getMomenceSessionBookings(session.id);
+      setAttendees(bookings.map((booking) => ({
+        bookingId: String(booking.id),
+        memberName: momenceBookingMemberName(booking),
+        memberContact: momenceBookingContact(booking),
+        status: booking.cancelledAt ? 'Cancelled' : booking.checkedIn ? 'Attended' : 'Booked / not checked in',
+        comment: '',
+      })));
+    } catch (error) {
+      setAttendees([]);
+      setBookingError(error instanceof Error ? error.message : 'Could not load class attendees.');
+    } finally {
+      setLoadingBookings(false);
+    }
+  };
+
+  const updateAttendee = (bookingId: string, patch: Partial<HostedClassAttendeeFeedback>) => {
+    setAttendees((current) => current.map((attendee) => (
+      attendee.bookingId === bookingId ? { ...attendee, ...patch } : attendee
+    )));
+  };
+
+  return (
+    <form
+      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.08)]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!selectedSession || !canSubmit) return;
+        onSubmit({
+          partnerName,
+          session: selectedSession,
+          attendees,
+          classFeedback,
+          hostFeedback,
+          lateComerFeedback,
+          otherFeedback,
+          followUpPlan,
+        });
+      }}
+    >
+      <div className="flex flex-col gap-2 border-b border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Hosted class template</div>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">{template.label}</h3>
+          <p className="mt-1 text-xs text-slate-500">Select a Momence class, review attendees, then capture class, host, late-comer, and follow-up intelligence.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="space-y-4 p-5">
+        <MomenceSessionFormField
+          values={sessionValues}
+          onSelect={selectSession}
+          onRemove={() => {
+            setSelectedSession(null);
+            setSessionValues({});
+            setAttendees([]);
+          }}
+        />
+        {bookingError && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{bookingError}</div>}
+        {loadingBookings && <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading class attendees from Momence...</div>}
+
+        <div className="grid gap-4 2xl:grid-cols-[minmax(520px,1.15fr)_minmax(460px,0.85fr)]">
+          <div className="space-y-3">
+            {selectedSession && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Attendees</div>
+                <div className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">{attendees.length} loaded</div>
+              </div>
+              <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
+                {attendees.length ? attendees.map((attendee) => (
+                  <div key={attendee.bookingId} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_210px]">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold text-slate-950">{attendee.memberName}</div>
+                      {attendee.memberContact && <div className="mt-0.5 truncate text-[11px] text-slate-500">{attendee.memberContact}</div>}
+                      <textarea
+                        value={attendee.comment || ''}
+                        onChange={(event) => updateAttendee(attendee.bookingId, { comment: event.target.value })}
+                        rows={2}
+                        placeholder="Member comment, conversion signal, or follow-up note"
+                        className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <select
+                      value={attendee.status}
+                      onChange={(event) => updateAttendee(attendee.bookingId, { status: event.target.value })}
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    >
+                      {Array.from(new Set([attendee.status, ...HOSTED_ATTENDEE_STATUS_OPTIONS])).map((status) => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                )) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">
+                    No attendees returned for this Momence class.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+            {!selectedSession && (
+              <div className="hidden rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-10 text-center text-sm leading-relaxed text-slate-500 2xl:block">
+                Select a Momence class to load attendees.
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Partner / host</span>
+              <input
+                value={partnerName}
+                onChange={(event) => setPartnerName(event.target.value)}
+                className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              />
+            </label>
+            <TemplateTextarea label="Class feedback" required value={classFeedback} onChange={setClassFeedback} />
+            <TemplateTextarea label="Host feedback" value={hostFeedback} onChange={setHostFeedback} />
+            <TemplateTextarea label="Late-comer feedback" value={lateComerFeedback} onChange={setLateComerFeedback} />
+            <TemplateTextarea label="Other feedback" value={otherFeedback} onChange={setOtherFeedback} />
+            <TemplateTextarea label="Follow-up plan" value={followUpPlan} onChange={setFollowUpPlan} />
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="h-9 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Generate ticket draft
+        </button>
+      </div>
+    </form>
+  );
+};
+
+const TemplateTextarea: React.FC<{
+  label: string;
+  value: string;
+  required?: boolean;
+  onChange: (value: string) => void;
+}> = ({ label, value, required = false, onChange }) => (
+  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+      {label}
+      {required ? <span className="text-blue-700"> *</span> : null}
+    </span>
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      rows={3}
+      className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+    />
+  </label>
+);
 
 const MessageBubble: React.FC<{
   message: Message;
@@ -3066,7 +3542,7 @@ const MomenceMemberFormField: React.FC<{
   }, [query, selectedMemberId, values.memberName]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
+    <div className="w-full rounded-2xl border border-slate-200 bg-white p-3.5 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
       <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
         {isAffectedClientSelection ? 'Affected Momence Clients' : 'Momence Member'} *
       </span>
@@ -3148,7 +3624,7 @@ const MomenceSessionFormField: React.FC<{
   }, [query, values.classType]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
+    <div className="w-full rounded-2xl border border-slate-200 bg-white p-3.5 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
       <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
         Momence Class / Session *
       </span>
