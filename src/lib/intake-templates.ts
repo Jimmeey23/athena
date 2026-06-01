@@ -35,16 +35,23 @@ export interface HostedClassAttendeeFeedback {
   memberContact?: string;
   status: string;
   comment?: string;
+  followUpPreference?: string;
+  conversionSignal?: string;
 }
 
 export interface HostedClassFeedbackInput {
   partnerName?: string;
+  partnerType?: string;
+  acquisitionSource?: string;
+  audienceFit?: string;
   session: HostedClassSessionSummary;
   attendees: HostedClassAttendeeFeedback[];
   classFeedback: string;
   hostFeedback?: string;
   lateComerFeedback?: string;
   otherFeedback?: string;
+  conversionSummary?: string;
+  socialAmplification?: string;
   followUpPlan?: string;
 }
 
@@ -231,6 +238,8 @@ export function buildHostedClassFeedbackText(input: HostedClassFeedbackInput): s
         `${index + 1}. ${attendee.memberName}`,
         attendee.memberContact ? `Contact: ${attendee.memberContact}` : '',
         attendee.status ? `Status: ${attendee.status}` : '',
+        attendee.followUpPreference ? `Follow-up preference: ${attendee.followUpPreference}` : '',
+        attendee.conversionSignal ? `Conversion signal: ${attendee.conversionSignal}` : '',
         attendee.comment ? `Comment: ${attendee.comment}` : '',
       ].filter(Boolean).join(' | '))
     : ['No attendee-level feedback captured.'];
@@ -247,6 +256,9 @@ export function buildHostedClassFeedbackText(input: HostedClassFeedbackInput): s
     input.session.studio ? `Studio space: ${input.session.studio}` : '',
     input.session.trainer ? `Instructor: ${input.session.trainer}` : '',
     input.partnerName ? `Partner / host name: ${input.partnerName}` : '',
+    input.partnerType ? `Partner type: ${input.partnerType}` : '',
+    input.acquisitionSource ? `Attendance source: ${input.acquisitionSource}` : '',
+    input.audienceFit ? `Audience alignment: ${input.audienceFit}` : '',
     '',
     'Attendee intelligence:',
     ...attendeeLines,
@@ -254,6 +266,8 @@ export function buildHostedClassFeedbackText(input: HostedClassFeedbackInput): s
     `Class feedback: ${input.classFeedback}`,
     input.hostFeedback ? `Host feedback: ${input.hostFeedback}` : '',
     input.lateComerFeedback ? `Late-comer feedback: ${input.lateComerFeedback}` : '',
+    input.conversionSummary ? `Conversion summary: ${input.conversionSummary}` : '',
+    input.socialAmplification ? `Social/content amplification: ${input.socialAmplification}` : '',
     input.otherFeedback ? `Other feedback: ${input.otherFeedback}` : '',
     input.followUpPlan ? `Follow-up plan: ${input.followUpPlan}` : '',
   ].filter((line) => line !== '').join('\n');

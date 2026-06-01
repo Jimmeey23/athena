@@ -2167,14 +2167,52 @@ const TemplatePicker: React.FC<{ onSelect: (template: ContextTemplate) => void }
 };
 
 const HOSTED_ATTENDEE_STATUS_OPTIONS = [
-  'Attended',
-  'Late arrival',
-  'No-show',
+  'Booked / not checked in',
+  'Checked in / attended',
+  'Cancelled before class',
+  'Late arrival noted',
+  'No-show / absent',
   'Interested in continuing',
   'Needs follow-up',
   'Converted / package sold',
   'Concern raised',
   'Not a fit',
+];
+
+const HOSTED_FOLLOW_UP_OPTIONS = [
+  'No follow-up needed',
+  'WhatsApp same day',
+  'Phone call',
+  'Email package details',
+  'Invite to intro offer',
+  'Client success follow-up',
+  'Partner follow-up',
+];
+
+const HOSTED_PARTNER_TYPE_OPTIONS = [
+  'Influencer / creator',
+  'Wellness partner',
+  'Corporate / brand partner',
+  'Community builder',
+  'Member-hosted group',
+  'Other',
+];
+
+const HOSTED_SOURCE_OPTIONS = [
+  'Partner referral',
+  'Instagram / social',
+  'Existing member guest',
+  'Corporate community',
+  'Walk-in / studio invite',
+  'Other',
+];
+
+const HOSTED_AUDIENCE_FIT_OPTIONS = [
+  'Strong P57 fit',
+  'Good fit with nurturing',
+  'Mixed audience fit',
+  'Low conversion fit',
+  'Unable to determine',
 ];
 
 function momenceBookingMemberName(booking: MomenceSessionBooking): string {
@@ -2184,6 +2222,12 @@ function momenceBookingMemberName(booking: MomenceSessionBooking): string {
 
 function momenceBookingContact(booking: MomenceSessionBooking): string {
   return [booking.member?.email, booking.member?.phoneNumber].filter(Boolean).join(' · ');
+}
+
+function hostedBookingStatus(booking: MomenceSessionBooking): string {
+  if (booking.cancelledAt) return 'Cancelled before class';
+  if (booking.checkedIn) return 'Checked in / attended';
+  return 'Booked / not checked in';
 }
 
 function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSessionSummary {
@@ -2303,10 +2347,15 @@ const HostedClassTemplateForm: React.FC<{
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState('');
+  const [partnerType, setPartnerType] = useState('');
+  const [acquisitionSource, setAcquisitionSource] = useState('');
+  const [audienceFit, setAudienceFit] = useState('');
   const [classFeedback, setClassFeedback] = useState('');
   const [hostFeedback, setHostFeedback] = useState('');
   const [lateComerFeedback, setLateComerFeedback] = useState('');
   const [otherFeedback, setOtherFeedback] = useState('');
+  const [conversionSummary, setConversionSummary] = useState('');
+  const [socialAmplification, setSocialAmplification] = useState('');
   const [followUpPlan, setFollowUpPlan] = useState('');
   const canSubmit = Boolean(selectedSession && classFeedback.trim()) && !disabled;
 
@@ -2328,7 +2377,9 @@ const HostedClassTemplateForm: React.FC<{
         bookingId: String(booking.id),
         memberName: momenceBookingMemberName(booking),
         memberContact: momenceBookingContact(booking),
-        status: booking.cancelledAt ? 'Cancelled' : booking.checkedIn ? 'Attended' : 'Booked / not checked in',
+        status: hostedBookingStatus(booking),
+        followUpPreference: 'No follow-up needed',
+        conversionSignal: '',
         comment: '',
       })));
     } catch (error) {
@@ -2353,12 +2404,17 @@ const HostedClassTemplateForm: React.FC<{
         if (!selectedSession || !canSubmit) return;
         onSubmit({
           partnerName,
+          partnerType,
+          acquisitionSource,
+          audienceFit,
           session: selectedSession,
           attendees,
           classFeedback,
           hostFeedback,
           lateComerFeedback,
           otherFeedback,
+          conversionSummary,
+          socialAmplification,
           followUpPlan,
         });
       }}
