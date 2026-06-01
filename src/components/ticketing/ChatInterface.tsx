@@ -1902,7 +1902,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             if (!open) setActiveTemplate(null);
           }}
         >
-          <DialogContent className="fixed left-[50%] top-[50%] z-[100] flex max-h-[90vh] !w-[min(1800px,calc(100vw-2rem))] !max-w-[min(1800px,calc(100vw-2rem))] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-3xl border-slate-200 bg-slate-50/98 p-0 shadow-[0_30px_100px_rgba(15,23,42,0.30)] data-[state=open]:zoom-in-95">
+          <DialogContent className="fixed left-[50%] top-[50%] z-[100] flex max-h-[90vh] !w-[min(1440px,calc(100vw-2rem))] !max-w-[min(1440px,calc(100vw-2rem))] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-3xl border-slate-200 bg-slate-50/98 p-0 shadow-[0_30px_100px_rgba(15,23,42,0.30)] data-[state=open]:zoom-in-95">
             {activeTemplate && (
               <>
                 <DialogHeader className="shrink-0 border-b border-slate-200 bg-white/95 px-6 py-4 pr-12 text-left">
@@ -2215,6 +2215,48 @@ const HOSTED_AUDIENCE_FIT_OPTIONS = [
   'Unable to determine',
 ];
 
+const HOSTED_PARTNER_RESPONSE_OPTIONS = [
+  'Partner expressed strong satisfaction',
+  'Partner expressed mixed feedback',
+  'Partner requested another collaboration',
+  'Partner requested changes before repeating',
+  'No partner feedback captured',
+];
+
+const HOSTED_ARRIVAL_PATTERN_OPTIONS = [
+  'No late arrivals noted',
+  '1-2 late arrivals',
+  '3+ late arrivals',
+  'Late arrivals affected class flow',
+  'Unable to determine',
+];
+
+const HOSTED_CONVERSION_OPTIONS = [
+  'Strong package interest',
+  'Intro offer interest',
+  'Needs nurturing',
+  'Low purchase intent',
+  'Package sold',
+  'Unable to determine',
+];
+
+const HOSTED_SOCIAL_OPTIONS = [
+  'Partner will post',
+  'P57 content opportunity',
+  'Testimonials captured',
+  'No content opportunity',
+  'Follow up for assets',
+];
+
+const HOSTED_FOLLOW_UP_PLAN_OPTIONS = [
+  'No follow-up needed',
+  'WhatsApp interested guests today',
+  'Call high-intent guests',
+  'Email intro package details',
+  'Schedule partner debrief',
+  'Escalate to sales lead',
+];
+
 function momenceBookingMemberName(booking: MomenceSessionBooking): string {
   const name = [booking.member?.firstName, booking.member?.lastName].filter(Boolean).join(' ').trim();
   return name || `Momence member #${booking.member?.id || booking.id}`;
@@ -2228,6 +2270,14 @@ function hostedBookingStatus(booking: MomenceSessionBooking): string {
   if (booking.cancelledAt) return 'Cancelled before class';
   if (booking.checkedIn) return 'Checked in / attended';
   return 'Booked / not checked in';
+}
+
+function hostedStatusTone(status: string): string {
+  if (/converted|package sold/i.test(status)) return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (/checked in|attended|interested/i.test(status)) return 'border-blue-200 bg-blue-50 text-blue-800';
+  if (/cancelled|no-show|absent|not a fit/i.test(status)) return 'border-slate-200 bg-slate-100 text-slate-700';
+  if (/concern|late/i.test(status)) return 'border-amber-200 bg-amber-50 text-amber-800';
+  return 'border-slate-200 bg-white text-slate-700';
 }
 
 function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSessionSummary {
@@ -2351,12 +2401,12 @@ const HostedClassTemplateForm: React.FC<{
   const [acquisitionSource, setAcquisitionSource] = useState('');
   const [audienceFit, setAudienceFit] = useState('');
   const [classFeedback, setClassFeedback] = useState('');
-  const [hostFeedback, setHostFeedback] = useState('');
-  const [lateComerFeedback, setLateComerFeedback] = useState('');
+  const [hostFeedback, setHostFeedback] = useState(HOSTED_PARTNER_RESPONSE_OPTIONS[0]);
+  const [lateComerFeedback, setLateComerFeedback] = useState(HOSTED_ARRIVAL_PATTERN_OPTIONS[0]);
   const [otherFeedback, setOtherFeedback] = useState('');
-  const [conversionSummary, setConversionSummary] = useState('');
-  const [socialAmplification, setSocialAmplification] = useState('');
-  const [followUpPlan, setFollowUpPlan] = useState('');
+  const [conversionSummary, setConversionSummary] = useState(HOSTED_CONVERSION_OPTIONS[0]);
+  const [socialAmplification, setSocialAmplification] = useState(HOSTED_SOCIAL_OPTIONS[0]);
+  const [followUpPlan, setFollowUpPlan] = useState(HOSTED_FOLLOW_UP_PLAN_OPTIONS[1]);
   const canSubmit = Boolean(selectedSession && classFeedback.trim()) && !disabled;
 
   const selectSession = async (session: MomenceSessionOption) => {
@@ -2435,19 +2485,25 @@ const HostedClassTemplateForm: React.FC<{
       </div>
 
       <div className="space-y-4 p-5">
-        <MomenceSessionFormField
-          values={sessionValues}
-          onSelect={selectSession}
-          onRemove={() => {
-            setSelectedSession(null);
-            setSessionValues({});
-            setAttendees([]);
-          }}
-        />
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+          <MomenceSessionFormField
+            values={sessionValues}
+            onSelect={selectSession}
+            onRemove={() => {
+              setSelectedSession(null);
+              setSessionValues({});
+              setAttendees([]);
+            }}
+          />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <TemplateSelect label="Partner type" value={partnerType} options={HOSTED_PARTNER_TYPE_OPTIONS} onChange={setPartnerType} />
+            <TemplateSelect label="Attendance source" value={acquisitionSource} options={HOSTED_SOURCE_OPTIONS} onChange={setAcquisitionSource} />
+          </div>
+        </div>
         {bookingError && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{bookingError}</div>}
         {loadingBookings && <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading class attendees from Momence...</div>}
 
-        <div className="grid gap-4 2xl:grid-cols-[minmax(520px,1.15fr)_minmax(460px,0.85fr)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(520px,1.1fr)_minmax(420px,0.9fr)]">
           <div className="space-y-3">
             {selectedSession && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
@@ -2457,25 +2513,33 @@ const HostedClassTemplateForm: React.FC<{
               </div>
               <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
                 {attendees.length ? attendees.map((attendee) => (
-                  <div key={attendee.bookingId} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_210px]">
+                  <div key={attendee.bookingId} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 lg:grid-cols-[minmax(0,1fr)_190px_190px]">
                     <div className="min-w-0">
                       <div className="truncate text-xs font-semibold text-slate-950">{attendee.memberName}</div>
                       {attendee.memberContact && <div className="mt-0.5 truncate text-[11px] text-slate-500">{attendee.memberContact}</div>}
-                      <textarea
+                      <input
                         value={attendee.comment || ''}
                         onChange={(event) => updateAttendee(attendee.bookingId, { comment: event.target.value })}
-                        rows={2}
-                        placeholder="Member comment, conversion signal, or follow-up note"
-                        className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                        placeholder="Optional member voice note"
+                        className="mt-2 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                       />
                     </div>
                     <select
                       value={attendee.status}
                       onChange={(event) => updateAttendee(attendee.bookingId, { status: event.target.value })}
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      className={`h-10 rounded-lg border px-2 text-xs font-semibold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${hostedStatusTone(attendee.status)}`}
                     >
                       {Array.from(new Set([attendee.status, ...HOSTED_ATTENDEE_STATUS_OPTIONS])).map((status) => (
                         <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={attendee.followUpPreference || HOSTED_FOLLOW_UP_OPTIONS[0]}
+                      onChange={(event) => updateAttendee(attendee.bookingId, { followUpPreference: event.target.value })}
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    >
+                      {HOSTED_FOLLOW_UP_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
                       ))}
                     </select>
                   </div>
@@ -2488,26 +2552,22 @@ const HostedClassTemplateForm: React.FC<{
             </div>
           )}
             {!selectedSession && (
-              <div className="hidden rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-10 text-center text-sm leading-relaxed text-slate-500 2xl:block">
-                Select a Momence class to load attendees.
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-10 text-center text-sm leading-relaxed text-slate-500">
+                Select a Momence class above to load attendee status and follow-up fields.
               </div>
             )}
           </div>
 
-          <div className="space-y-3">
-            <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Partner / host</span>
-              <input
-                value={partnerName}
-                onChange={(event) => setPartnerName(event.target.value)}
-                className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-              />
-            </label>
-            <TemplateTextarea label="Class feedback" required value={classFeedback} onChange={setClassFeedback} />
-            <TemplateTextarea label="Host feedback" value={hostFeedback} onChange={setHostFeedback} />
-            <TemplateTextarea label="Late-comer feedback" value={lateComerFeedback} onChange={setLateComerFeedback} />
-            <TemplateTextarea label="Other feedback" value={otherFeedback} onChange={setOtherFeedback} />
-            <TemplateTextarea label="Follow-up plan" value={followUpPlan} onChange={setFollowUpPlan} />
+          <div className="grid content-start gap-3 sm:grid-cols-2">
+            <TemplateTextInput label="Partner / host" value={partnerName} onChange={setPartnerName} />
+            <TemplateSelect label="Audience fit" value={audienceFit} options={HOSTED_AUDIENCE_FIT_OPTIONS} onChange={setAudienceFit} />
+            <TemplateSelect label="Partner response" value={hostFeedback} options={HOSTED_PARTNER_RESPONSE_OPTIONS} onChange={setHostFeedback} />
+            <TemplateSelect label="Arrival pattern" value={lateComerFeedback} options={HOSTED_ARRIVAL_PATTERN_OPTIONS} onChange={setLateComerFeedback} />
+            <TemplateSelect label="Conversion signal" value={conversionSummary} options={HOSTED_CONVERSION_OPTIONS} onChange={setConversionSummary} />
+            <TemplateSelect label="Social opportunity" value={socialAmplification} options={HOSTED_SOCIAL_OPTIONS} onChange={setSocialAmplification} />
+            <TemplateSelect label="Follow-up plan" value={followUpPlan} options={HOSTED_FOLLOW_UP_PLAN_OPTIONS} onChange={setFollowUpPlan} />
+            <TemplateTextarea label="Member voice highlights" required value={classFeedback} onChange={setClassFeedback} />
+            <TemplateTextarea label="Additional context" value={otherFeedback} onChange={setOtherFeedback} />
           </div>
         </div>
       </div>
@@ -2530,7 +2590,7 @@ const TemplateTextarea: React.FC<{
   required?: boolean;
   onChange: (value: string) => void;
 }> = ({ label, value, required = false, onChange }) => (
-  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100 sm:col-span-2">
     <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
       {label}
       {required ? <span className="text-blue-700"> *</span> : null}
@@ -2541,6 +2601,50 @@ const TemplateTextarea: React.FC<{
       rows={3}
       className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
     />
+  </label>
+);
+
+const TemplateTextInput: React.FC<{
+  label: string;
+  value: string;
+  required?: boolean;
+  onChange: (value: string) => void;
+}> = ({ label, value, required = false, onChange }) => (
+  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+      {label}
+      {required ? <span className="text-blue-700"> *</span> : null}
+    </span>
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+    />
+  </label>
+);
+
+const TemplateSelect: React.FC<{
+  label: string;
+  value: string;
+  options: string[];
+  required?: boolean;
+  onChange: (value: string) => void;
+}> = ({ label, value, options, required = false, onChange }) => (
+  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+      {label}
+      {required ? <span className="text-blue-700"> *</span> : null}
+    </span>
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+    >
+      <option value="">Select {label.toLowerCase()}</option>
+      {options.map((option) => (
+        <option key={option} value={option}>{option}</option>
+      ))}
+    </select>
   </label>
 );
 
@@ -3658,6 +3762,7 @@ const MomenceSessionFormField: React.FC<{
   const [query, setQuery] = useState(values.classType || '');
   const [options, setOptions] = useState<MomenceSessionOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     const handle = window.setTimeout(async () => {
@@ -3665,7 +3770,8 @@ const MomenceSessionFormField: React.FC<{
         .split('|')
         .map((sessionName) => sessionName.trim().toLowerCase())
         .filter(Boolean);
-      if (selectedSessions.includes(query.trim().toLowerCase()) || query.trim().length < 2) {
+      const normalizedQuery = query.trim().toLowerCase();
+      if (selectedSessions.includes(normalizedQuery) || (!focused && query.trim().length < 2)) {
         setOptions([]);
         return;
       }
@@ -3677,7 +3783,7 @@ const MomenceSessionFormField: React.FC<{
       }
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [query, values.classType]);
+  }, [focused, query, values.classType]);
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white p-3.5 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
@@ -3686,6 +3792,8 @@ const MomenceSessionFormField: React.FC<{
       </span>
       <input
         value={query}
+        onFocus={() => setFocused(true)}
+        onBlur={() => window.setTimeout(() => setFocused(false), 150)}
         onChange={(event) => {
           setQuery(event.target.value);
           if (values.classType && event.target.value !== values.classType) setOptions([]);
