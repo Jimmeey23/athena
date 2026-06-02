@@ -68,19 +68,19 @@ YOUR GOAL: Turn a staff member's initial report into a complete, actionable tick
 HOW TO DECIDE WHAT TO ASK:
 Read the initial report and ask yourself: what would the person assigned this ticket need to know to act?
 Think through the incident from their perspective — what is the specific fault or situation, where exactly, when did it start, what is the current impact, what constraints exist right now, and what outcome is expected?
-Identify what is missing from the initial report and collect only that — in a single structured form.
+Identify what is missing from the initial report and collect only that. Plan the full conversational flow first, then ask the next 1-2 highest-value questions.
 
 Do not use a fixed list of fields. Reason about the specific incident being described and decide what gaps exist.
 For example: a broken door at a studio entrance raises different questions than a broken door in a locker room — one has overnight security implications, the other does not. A washing machine not draining needs different questions than one that won't turn on. A trainer arriving late to a 7am class raises different urgency questions than a 7pm class. Think contextually.
 
 IMPORTANT — for physical, maintenance, or facility issues:
-Never use 'description' as a field ID. Generate specific, targeted field IDs that describe exactly what you're asking (e.g. latch_fault_type, door_access_status, water_source, machine_symptom, security_concern, resolution_approach). The first form must collect the full operational picture — fault specifics, current access or safety implications, and the expected resolution — all in one go. Do not produce a generic description box; produce questions whose answers would let the assigned owner act immediately.
+Never use 'description' as a field ID. Generate specific, targeted field IDs that describe exactly what you're asking (e.g. latch_fault_type, door_access_status, water_source, machine_symptom, security_concern, resolution_approach). The conversational plan must collect the full operational picture — fault specifics, current access or safety implications, and the expected resolution — over short 1-2 question turns. Do not produce a generic description box; produce questions whose answers would let the assigned owner act immediately.
 
 FORM DESIGN RULES:
 - Sound like a helpful internal AI assistant. If the user only greets you or uses small talk, reply naturally and ask what they want to log. Do not open a ticket form from a greeting.
 - Use plain operational labels in user-facing copy: member, client, studio, class/session, instructor, category, issue type. Avoid heavy brand lingo like "Member Voice", "Studio Space", "Signature Experience", or "Community Member" unless quoting source data.
-- Collect all missing information in ONE detailForm — do not spread it across multiple rounds when the gaps are knowable upfront
-- Keep the first intake lightweight: prefer 2-3 grouped, high-signal questions. Add extra required fields only when the owner could not act without them.
+- Keep the chat conversational: ask 1-2 questions at a time. For a single select question, write it as a chat message with option buttons instead of describing a form.
+- Keep each intake turn lightweight: prefer 1-2 grouped, high-signal questions. Add extra required fields only when the owner could not act without them.
 - Field labels must describe exactly what you're asking, specific to this incident — not generic
 - For bounded answer spaces, use select with options tailored to the situation
 - For open descriptions, use textarea with a placeholder hint that reflects the item being reported
@@ -119,18 +119,27 @@ ROUTING AND MASTER DATA:
 - Member and class/session fields must use Momence-powered UI pickers, not plain text inputs
 
 CLIENT IMPACT CHECK:
-- Treat clientsAffected as a pre-publish check, not a first-turn intake question. Do not ask it before the ticket draft unless the user already raised client impact and the answer is needed to identify affected clients.
-- Ask whether clients were affected ONLY when the report plausibly involves members/clients, a class/session, booking, billing/membership, sales/lead activity, safety/security, front desk/customer service, or the user explicitly mentions members, clients, guests, attendees, prospects, discomfort, complaints, or class impact.
-- Do NOT ask for clientsAffected for purely internal operational/facility issues when no client impact is mentioned, such as "AC not cooling in Bandra studio", "door lock broken", "light not working", or "washing machine not draining".
+- Always confirm clientsAffected before drafting or publishing any ticket. Ask it as a lightweight conversational button question by itself when unanswered.
+- This is required even for internal operational/facility issues, because the staff member must confirm whether members were directly or indirectly affected.
 - Use field ID clientsAffected with select options: Yes - directly affected, Yes - indirectly affected, Yes - directly and indirectly affected, No clients affected, Not confirmed yet.
-- Do not draft or publish when clientsAffected is required but unanswered.
+- Do not draft or publish when clientsAffected is unanswered.
 - If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search. Staff may select one or multiple affected clients from Momence.
 - This client-impact rule is the exception to the usual physical/ops entity-field restriction: even an operational issue needs memberName when affected clients are confirmed.
+- If the report or selected context says a class/session/schedule was affected, require classType, classImpactType, and classImpactDetails after client impact is confirmed. The owner needs the exact Momence session plus whether the class was delayed, paused, moved, cancelled, disrupted, or otherwise affected.
 - If clientsAffected is "No clients affected" or "Not confirmed yet", do not ask for memberName unless the user later confirms affected clients.
+
+CONVERSATION PLAN MEMORY:
+- When context.conversationPlan exists, treat it as the durable plan for this conversation, not as a recent-message summary.
+- Follow that plan to choose the next unanswered question. Do not rely only on the last few messages.
+- Ask one natural question at a time when only one field is missing. Do not describe it as a form.
+- Personalize briefly with context.reporterFirstName when available, but do not overuse the name in every message.
 
 TICKET QUALITY:
 - Title: specific operational summary — name the exact item, area, studio, or person. Not "Maintenance issue" or "Member complaint"
 - Description: factual, third-person internal language. What was reported, what the impact is, what resolution is expected
+- Never paste the user's raw message or email into the description. Remove salutations/sign-offs and summarize the operational facts.
+- Use "Internal report summary" for Internal Reporting. Use "Member feedback summary" only when a member/client actually gave feedback.
+- Do not include unrelated or stale multi-value context such as multiple studios, instructors, or sessions unless the user explicitly selected multiple affected records.
 - Priority: Critical for safety or access risk, High for service failure affecting classes, Medium for operational issues, Low for cosmetic or deferred items
 - Ticket creation happens only after explicit user approval of the displayed draft
 `.trim();
@@ -182,6 +191,8 @@ type DetailFieldId =
   | 'incidentDateTime'
   | 'memberSentiment'
   | 'momencePurchaseContext'
+  | 'classImpactType'
+  | 'classImpactDetails'
   | 'freezeStartDate'
   | 'freezeEndDate'
   | 'freezeReason'
@@ -225,6 +236,16 @@ const CLIENTS_AFFECTED_OPTIONS = [
   'No clients affected',
   'Not confirmed yet',
 ];
+const CLASS_IMPACT_TYPE_OPTIONS = [
+  'Delayed start',
+  'Paused during session',
+  'Cancelled',
+  'Moved to another space',
+  'Shortened session',
+  'Capacity or comfort issue',
+  'Member left early',
+  'Other impact',
+];
 
 const ASSIGNMENT_RULES: Record<string, { assignedTo: string; team: string }> = {
   Scheduling: { assignedTo: 'Akshay Rane', team: 'Sales & Client Servicing' },
@@ -265,6 +286,7 @@ const SERVER_MASTER_DATA = {
   categories: Object.keys(ASSIGNMENT_RULES),
   priorities: Object.keys(PRIORITY_SLA_HOURS),
   clientsAffectedOptions: CLIENTS_AFFECTED_OPTIONS,
+  classImpactTypeOptions: CLASS_IMPACT_TYPE_OPTIONS,
 };
 
 function isBengaluruStudio(studio?: string | null): boolean {
@@ -355,52 +377,6 @@ function hasConfirmedAffectedClients(value: unknown): boolean {
   return /^yes\b/i.test(cleanString(value));
 }
 
-function shouldRequireClientImpactCheck(
-  text: string,
-  context: Record<string, unknown>,
-  category: string,
-): boolean {
-  if (cleanString(context.clientsAffected)) return false;
-
-  const route = cleanString(context.intakeRoute).toLowerCase();
-  const lower = [
-    text,
-    cleanString(context.initialReport),
-    cleanString(context.requestType),
-    cleanString(context.category),
-    cleanString(context.subCategory),
-    cleanString(context.description),
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  if (
-    /\b(member|client|customer|guest|prospect|attendee|lead|class|session|booking|waitlist|refund|billing|payment|membership|package|freeze|roll\s?over|extension|complain|complaint|said|reported|requested|felt|uncomfortable|walked out|injury|medical|theft|harass)\b/.test(lower)
-  ) {
-    return true;
-  }
-
-  if (['Repair and Maintenance', 'Studio Amenities and Facilities', 'Facility & Equipment', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
-    return false;
-  }
-
-  return [
-    'Customer Service and Communication',
-    'Pricing and Memberships',
-    'Billing & Membership',
-    'Sales & Consultation',
-    'Hosted Class & Partnerships',
-    'Trainer Feedback',
-    'Class Experience',
-    'Scheduling',
-    'Booking & Schedule',
-    'Front Desk & Service',
-    'Instructor & Class Quality',
-    'Safety and Security',
-    'Safety & Medical',
-    'Theft and Lost Items',
-    'Member Progress & Transformation',
-  ].includes(category) || route === 'complaint';
-}
-
 function shouldRequireNamedMemberContext(
   text: string,
   context: Record<string, unknown>,
@@ -485,6 +461,22 @@ function shouldRequireClassAccessVerification(
 
   return /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower) &&
     /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+}
+
+function hasAffectedClassSignal(text: string, context: Record<string, unknown>): boolean {
+  const lower = [
+    text,
+    cleanString(context.initialReport),
+    cleanString(context.description),
+    cleanString(context.operationalImpact),
+    cleanString(context.currentWorkaround),
+    cleanString(context.classImpactType),
+    cleanString(context.classImpactDetails),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /\b(?:classes?|sessions?|schedule)\b.{0,36}\b(?:affected|impacted|delayed|paused|cancelled|canceled|moved|disrupted)\b/.test(lower) ||
+    /\b(?:affected|impacted|delayed|paused|cancelled|canceled|moved|disrupted)\b.{0,36}\b(?:classes?|sessions?|schedule)\b/.test(lower) ||
+    /\bclass flow\b|\bfull class\b|\bhad to pause\b|\bmembers?\s+stepped out\b|\bwalked out\b/.test(lower);
 }
 
 function shouldRequireComplaintResolution(
@@ -767,15 +759,15 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       instructions,
       '',
       'Return JSON only using this schema:',
-      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
+      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
       '',
-      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext.',
+      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails.',
       'Do not ask for reportedBy; the frontend supplies it from the signed-in user.',
       'For issue-specific fields, create clear snake_case IDs prefixed by the category or subcategory, and include options for select fields.',
       'Infer category and subCategory from the report whenever possible. Ask for category or subCategory only when the text is genuinely ambiguous after using the approved master data.',
-      `Use clientsAffected as a required select only for the pre-publish client-impact check or when the user has explicitly raised client impact; valid values are: ${CLIENTS_AFFECTED_OPTIONS.join(', ')}.`,
-      'Do not include clientsAffected in the first intake form for pure internal ops/facility reports.',
+      `Always use clientsAffected as a required select before drafting or publishing; valid values are: ${CLIENTS_AFFECTED_OPTIONS.join(', ')}.`,
       'If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search for the affected clients.',
+      `If a class/session/schedule was affected, require classType, classImpactType, and classImpactDetails. classImpactType options: ${CLASS_IMPACT_TYPE_OPTIONS.join(', ')}.`,
       'If memberName/memberContact is needed, use memberName so the frontend renders Momence member search.',
       'If class/session details are needed, use classType so the frontend renders Momence session search.',
       'Do not include memberName, memberContact, classType, sessionId, classDateTime, or trainer in detailForm or ticket unless those fields are necessary for the described incident.',
@@ -1050,7 +1042,11 @@ function requiredFieldsForIssue(
   const classAccessVerification = shouldRequireClassAccessVerification(text, context, category);
   const hostedSpecific = /hosted|partner|influencer|partnership/.test(lower) || category === 'Hosted Class & Partnerships';
   const prioritySpecific = route !== 'feedback' || /safety|security|theft|repair|maintenance|tech|operating|pricing|membership|customer service|complaint|urgent|injury|hazard/.test(`${category} ${subCategory} ${lower}`.toLowerCase());
-  const includeClientImpact = options.includeClientImpact ?? false;
+  const includeClientImpact = options.includeClientImpact ?? true;
+
+  if (includeClientImpact) {
+    add('clientsAffected', context.clientsAffected);
+  }
 
   // Always require studio for any physical in-studio category — no keyword guard needed
   if (physicalStudioCategories.has(category)) add('studio', context.studio);
@@ -1111,11 +1107,13 @@ function requiredFieldsForIssue(
       add('classType', context.sessionId || context.classType);
     }
   }
-  if (includeClientImpact && shouldRequireClientImpactCheck(lower, context, category)) {
-    add('clientsAffected', context.clientsAffected);
-  }
   if (hasConfirmedAffectedClients(context.clientsAffected)) {
     add('memberName', context.memberId || context.memberName);
+    if (hasAffectedClassSignal(text, context)) {
+      add('classType', context.sessionId || context.classType);
+      add('classImpactType', context.classImpactType);
+      add('classImpactDetails', context.classImpactDetails);
+    }
   }
   if (membershipSpecific && /select active membership|which membership|membership record|package record/.test(lower)) {
     add('membership', context.membership);

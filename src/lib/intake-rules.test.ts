@@ -45,7 +45,8 @@ describe('intake publishability rules', () => {
       resolutionRequirement: 'Vendor inspection and repair needed today.',
     };
 
-    expect(getMissingIntakeFields(context)).toEqual([]);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([]);
   });
 
   it('treats placeholder values as missing while accepting a real studio', () => {
@@ -66,9 +67,9 @@ describe('intake publishability rules', () => {
     expect(isMissingIntakeValue('Member-reported issue')).toBe(true);
     expect(isMissingIntakeValue('AI Intake')).toBe(true);
     expect(isMissingIntakeValue('Bandra')).toBe(false);
-    expect(getMissingIntakeFields(context)).toEqual(['studio', 'incidentDateTime', 'clientsAffected', 'reportedBy']);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'studio', 'incidentDateTime', 'reportedBy']);
 
-    expect(getMissingIntakeFields({ ...context, studio: 'Bandra' })).toEqual(['incidentDateTime', 'clientsAffected', 'reportedBy']);
+    expect(getMissingIntakeFields({ ...context, studio: 'Bandra' })).toEqual(['clientsAffected', 'incidentDateTime', 'reportedBy']);
   });
 
   it('marks a complete member-facing complaint context publishable', () => {
@@ -359,6 +360,57 @@ describe('intake publishability rules', () => {
     })).toEqual([]);
   });
 
+  it('requires affected class selection and impact details when a class was affected', () => {
+    const text = 'AC not cooling in Bandra studio and the evening classes were affected.';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      reportedBy: 'ops@physique57india.com',
+      incidentDateTime: '2026-05-23T09:30',
+      hvacSymptom: 'Not cooling',
+      affectedArea: 'Main studio',
+      operationalImpact: 'The 6:30 PM class had to pause twice because the room was too warm.',
+      currentWorkaround: 'Fans are running until the technician arrives.',
+      resolutionRequirement: 'Vendor inspection and repair needed today.',
+      clientsAffected: 'Yes - directly affected',
+    };
+
+    expect(getMissingIntakeFields(context)).toEqual(expect.arrayContaining([
+      'memberName',
+      'classType',
+      'classImpactType',
+      'classImpactDetails',
+    ]));
+
+    expect(getMissingIntakeFields({
+      ...context,
+      memberId: 'mom_456',
+      memberName: 'Asha Mehta',
+      sessionId: 'session_123',
+      classType: 'Barre 57',
+      classImpactType: 'Paused during session',
+      classImpactDetails: 'Class paused twice and two members stepped out for water.',
+    })).toEqual([]);
+  });
+
+  it('always asks the client impact check before publish when unanswered', () => {
+    const context: IntakeContext = {
+      intakeRoute: 'Internal Reporting',
+      category: 'Repair and Maintenance',
+      subCategory: 'Door Lock Issues',
+      studio: 'Kwality House, Kemps Corner',
+      reportedBy: 'ops@physique57india.com',
+      priority: 'Medium',
+      incidentDateTime: '2026-05-23T09:30',
+      lockFaultType: 'Latch not catching',
+      accessStatus: 'Access restricted but workaround available',
+      securityRisk: 'No immediate risk',
+      resolutionRequirement: 'Vendor needs to repair the latch today.',
+    };
+
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
+  });
+
   it('asks washing machine operational questions without member or class fields', () => {
     const text = 'washing machine not working';
     const context: IntakeContext = {
@@ -374,6 +426,7 @@ describe('intake publishability rules', () => {
     });
 
     expect(getMissingIntakeFields(context)).toEqual([
+      'clientsAffected',
       'studio',
       'incidentDateTime',
       'machineSymptom',
@@ -419,6 +472,7 @@ describe('intake publishability rules', () => {
     });
 
     expect(getMissingIntakeFields(context)).toEqual([
+      'clientsAffected',
       'incidentDateTime',
       'lockFaultType',
       'accessStatus',
@@ -444,6 +498,7 @@ describe('intake publishability rules', () => {
     });
 
     expect(getMissingIntakeFields(context)).toEqual([
+      'clientsAffected',
       'incidentDateTime',
       'hvacSymptom',
       'affectedArea',

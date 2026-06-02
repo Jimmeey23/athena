@@ -19,6 +19,7 @@ import {
   searchMomenceSessions,
 } from '@/lib/momence-api';
 import {
+  CLASS_IMPACT_TYPE_OPTIONS,
   CLIENTS_AFFECTED_OPTIONS,
   captureMemberVoiceFromText,
   getIntakeFieldDefinition,
@@ -52,11 +53,24 @@ import {
   resolveTicketDepartment,
 } from '@/lib/ticketing-data';
 import { findExistingSubmittedTicket } from '@/lib/ticket-duplicate-matching';
-import { invokeTicketingFunction } from '@/lib/ticketing-functions';
+import { invokeTicketingFunction, withTimeout } from '@/lib/ticketing-functions';
 import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
+import {
+  buildOperationalTicketDescription,
+  draftDescriptionNeedsRewrite,
+  normalizeDraftContextForSource,
+  summarizeOperationalReport,
+} from '@/lib/ticket-draft-formatting';
 import { buildTicketReviewInsights } from '@/lib/ticket-review';
 import { getGreetingQuickActions, isCasualGreeting } from '@/lib/athena-chat-intent';
 import { shouldUseOptionButtons } from '@/lib/intake-option-buttons';
+import {
+  buildIntakeConversationPlan,
+  buildNaturalSingleFieldPrompt,
+  getReporterFirstName,
+  limitConversationalFieldBatch,
+  serializeConversationPlan,
+} from '@/lib/intake-conversation-plan';
 import {
   CONTEXT_TEMPLATES,
   ContextTemplate,
@@ -195,9 +209,30 @@ interface AiIntakeResponse {
 const GREETING: Message = {
   id: 'greet',
   role: 'assistant',
-  content:
-    "Hi, I'm **Athena** 🤖, your ticket intake assistant.\n\nPlease describe the issue, request, feedback, or escalation in as much detail as possible.\n\nFor accurate routing and priority 🎯, please include the member name, location, booking details, staff involved, screenshots 📸, dates 📅, and any other relevant context.",
+  content: "Hi, happy to help. What should we log today?",
 };
+
+function buildGreetingMessage(reporterName?: string): Message {
+  const firstName = getReporterFirstName(reporterName);
+  return {
+    ...GREETING,
+    content: firstName
+      ? `Hi ${firstName}, happy to help. What should we log today?`
+      : "Hi, happy to help. What should we log today?",
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function writingPauseMs(content: string): number {
+  const length = content.trim().length;
+  return Math.min(1150, Math.max(420, 300 + length * 4));
+}
+
+const ATHENA_CHAT_RESPONSE_TIMEOUT_MS = 12_000;
+const ATHENA_CHAT_TIMEOUT_MESSAGE = 'Athena chat response timed out';
 
 const USER_TONES = [
   {
@@ -353,6 +388,19 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
     label: 'Member Sentiment',
     type: 'select',
     options: MEMBER_SENTIMENT_OPTIONS,
+  },
+  classImpactType: {
+    id: 'classImpactType',
+    label: 'What type of class/session impact was reported?',
+    type: 'select',
+    required: true,
+    options: [...CLASS_IMPACT_TYPE_OPTIONS],
+  },
+  classImpactDetails: {
+    id: 'classImpactDetails',
+    label: 'How was the class/session affected?',
+    type: 'textarea',
+    required: true,
   },
   freezeStartDate: {
     id: 'freezeStartDate',
@@ -543,6 +591,8 @@ function normalizeInferredContext(input: unknown): Partial<DetailContext> {
   assignString('urgencyReason');
   assignString('clientsAffected');
   assignString('membership');
+  assignString('classImpactType');
+  assignString('classImpactDetails');
 
   return next;
 }
@@ -618,6 +668,19 @@ function mergeDetailForms(primary: DetailForm | null, secondary: DetailForm | nu
     description: primary.description || secondary.description,
     fields,
     submitLabel: primary.submitLabel || secondary.submitLabel,
+  };
+}
+
+function batchDetailFormForConversation(form: DetailForm | null): DetailForm | null {
+  if (!form) return null;
+  const fields = limitConversationalFieldBatch(form.fields);
+  if (fields.length === form.fields.length) return form;
+  return {
+    ...form,
+    title: fields.length === 1 ? fields[0].label : form.title,
+    description: undefined,
+    fields,
+    submitLabel: 'Continue',
   };
 }
 
@@ -726,7 +789,8 @@ function requiredFieldsForIssue(ctx: DetailContext, draft?: DraftTicket | null):
         subCategory: ctx.subCategory || draft.subCategory,
       }
     : ctx;
-  return getMissingIntakeFields(mergedContext, { includeClientImpact: Boolean(draft) });
+  if (draft) return getMissingIntakeFields(mergedContext, { includeClientImpact: true });
+  return getMissingIntakeFields(mergedContext);
 }
 
 const MEMBER_ENTITY_KEYS = ['memberId', 'memberName', 'memberContact', 'membership'] as const;
@@ -813,71 +877,84 @@ function detailFormForIncompleteDraft(draft: DraftTicket | null | undefined, ctx
 }
 
 function buildClientDraft(ctx: DetailContext, text: string): DraftTicket {
-  const category = ctx.category || 'General Feedback';
-  const subCategory = ctx.subCategory || 'Other';
-  const includeMemberContext = shouldCarryMemberContext(text, ctx);
-  const includeSessionContext = shouldCarrySessionContext(text, ctx);
-  const description = [
-    `Issue summary: ${ctx.description || text}`,
-    '',
-    'Operational context:',
-    ctx.intakeRoute ? `- Intake route: ${ctx.intakeRoute}` : null,
-    `- Category: ${category} / ${subCategory}`,
-    includeMemberContext && ctx.memberName ? `- Member: ${ctx.memberName}` : null,
-    ctx.studio ? `- Studio: ${ctx.studio}` : null,
-    includeSessionContext && ctx.trainer ? `- Instructor: ${ctx.trainer}` : null,
-    includeSessionContext && ctx.classType ? `- Class/session: ${ctx.classType}` : null,
-    ctx.incidentDateTime ? `- Approx. incident date/time: ${ctx.incidentDateTime}` : null,
-    ctx.desiredResolution ? `- Requested resolution: ${ctx.desiredResolution}` : null,
-    ...Object.entries(ctx)
-      .filter(([key, value]) => (
-        value &&
-        ![
-          'intakeRoute',
-          'requestType',
-          'memberId',
-          'memberName',
-          'memberContact',
-          'sessionId',
-          'studio',
-          'trainer',
-          'classType',
-          'classDateTime',
-          'membership',
-          'category',
-          'subCategory',
-          'reportedBy',
-          'priority',
-          'description',
-          'incidentDateTime',
-          'desiredResolution',
-          'memberSentiment',
-          'urgencyReason',
-        ].includes(key)
-      ))
-      .map(([key, value]) => `- ${getDetailField(key)?.label || key}: ${value}`),
-  ].filter(Boolean).join('\n');
+  const sourceText = ctx.initialReport || ctx.description || text;
+  const normalizedContext = normalizeDraftContextForSource(ctx, sourceText) as DetailContext;
+  const category = normalizedContext.category || 'General Feedback';
+  const subCategory = normalizedContext.subCategory || 'Other';
+  const includeMemberContext = shouldCarryMemberContext(sourceText, normalizedContext);
+  const includeSessionContext = shouldCarrySessionContext(sourceText, normalizedContext);
+  const description = buildOperationalTicketDescription({
+    sourceText,
+    context: normalizedContext,
+    category,
+    subCategory,
+  });
+  const summary = summarizeOperationalReport(sourceText);
 
   return {
-    title: [ctx.intakeRoute || 'Ticket', subCategory, includeMemberContext ? ctx.memberName : null].filter(Boolean).join(' · ').slice(0, 96),
+    title: [normalizedContext.intakeRoute || 'Ticket', subCategory, normalizedContext.trainer || (includeMemberContext ? normalizedContext.memberName : null)].filter(Boolean).join(' · ').slice(0, 96),
     description,
     category,
     subCategory,
-    priority: (ctx.priority as DraftTicket['priority']) || 'Medium',
-    studio: ctx.studio || 'Unspecified Studio',
-    trainer: includeSessionContext ? ctx.trainer || null : null,
-    classType: includeSessionContext ? ctx.classType || null : null,
-    classDateTime: includeSessionContext ? ctx.classDateTime || null : null,
-    memberName: includeMemberContext ? ctx.memberName || null : null,
-    memberContact: includeMemberContext ? ctx.memberContact || null : null,
-    reportedBy: ctx.reportedBy || null,
-    assignedTo: ctx.assignedTo || ctx.owner || null,
-    department: ctx.department || ctx.team || null,
-    tags: ['ai-draft', ctx.intakeRoute, category, subCategory].filter(Boolean).map((value) =>
+    priority: (normalizedContext.priority as DraftTicket['priority']) || 'Medium',
+    studio: normalizedContext.studio || 'Unspecified Studio',
+    trainer: includeSessionContext ? normalizedContext.trainer || null : null,
+    classType: includeSessionContext ? normalizedContext.classType || null : null,
+    classDateTime: includeSessionContext ? normalizedContext.classDateTime || null : null,
+    memberName: includeMemberContext ? normalizedContext.memberName || null : null,
+    memberContact: includeMemberContext ? normalizedContext.memberContact || null : null,
+    reportedBy: normalizedContext.reportedBy || null,
+    assignedTo: normalizedContext.assignedTo || normalizedContext.owner || null,
+    department: normalizedContext.department || normalizedContext.team || null,
+    tags: ['ai-draft', normalizedContext.intakeRoute, category, subCategory].filter(Boolean).map((value) =>
       String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     ),
-    sentiment: ctx.memberSentiment || 'Neutral',
-    conversationSummary: ctx.description || text,
+    sentiment: normalizedContext.memberSentiment || 'Neutral',
+    conversationSummary: summary,
+  };
+}
+
+function normalizeDraftForReview(draft: DraftTicket, ctx: DetailContext, text: string): DraftTicket {
+  const sourceText = ctx.initialReport || ctx.description || text || draft.conversationSummary || draft.description;
+  const category = draft.category || ctx.category || 'General Feedback';
+  const subCategory = draft.subCategory || ctx.subCategory || 'Other';
+  const normalizedContext = normalizeDraftContextForSource({
+    ...ctx,
+    intakeRoute: ctx.intakeRoute,
+    category,
+    subCategory,
+    studio: draft.studio || ctx.studio,
+    trainer: draft.trainer || ctx.trainer,
+    classType: draft.classType || ctx.classType,
+    classDateTime: draft.classDateTime || ctx.classDateTime,
+    memberName: draft.memberName || ctx.memberName,
+    memberContact: draft.memberContact || ctx.memberContact,
+    desiredResolution: ctx.desiredResolution,
+  }, sourceText) as DetailContext;
+  const includeMemberContext = shouldCarryMemberContext(sourceText, normalizedContext);
+  const includeSessionContext = shouldCarrySessionContext(sourceText, normalizedContext);
+  const description = draftDescriptionNeedsRewrite(draft.description, normalizedContext.intakeRoute, sourceText)
+    ? buildOperationalTicketDescription({
+        sourceText,
+        context: normalizedContext,
+        category,
+        subCategory,
+      })
+    : draft.description;
+
+  return {
+    ...draft,
+    title: draft.title || [normalizedContext.intakeRoute || 'Ticket', subCategory, normalizedContext.trainer || null].filter(Boolean).join(' · ').slice(0, 96),
+    description,
+    category,
+    subCategory,
+    studio: normalizedContext.studio || draft.studio || 'Unspecified Studio',
+    trainer: includeSessionContext ? normalizedContext.trainer || draft.trainer || null : null,
+    classType: includeSessionContext ? normalizedContext.classType || draft.classType || null : null,
+    classDateTime: includeSessionContext ? normalizedContext.classDateTime || draft.classDateTime || null : null,
+    memberName: includeMemberContext ? normalizedContext.memberName || draft.memberName || null : null,
+    memberContact: includeMemberContext ? normalizedContext.memberContact || draft.memberContact || null : null,
+    conversationSummary: summarizeOperationalReport(sourceText),
   };
 }
 
@@ -943,7 +1020,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const { createApprovedTicket, tickets, setSelectedTicket } = useTickets();
   const { user } = useBackendAuth();
   const reporterName = getReporterName(user);
-  const [messages, setMessages] = useState<Message[]>([GREETING]);
+  const reporterFirstName = getReporterFirstName(reporterName);
+  const [messages, setMessages] = useState<Message[]>(() => [buildGreetingMessage(reporterName)]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -988,6 +1066,13 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     setContext((current) => {
       if (current.reportedBy === reporterName) return current;
       return { ...current, reportedBy: reporterName };
+    });
+  }, [reporterName]);
+
+  useEffect(() => {
+    setMessages((current) => {
+      if (current.length !== 1 || current[0].id !== 'greet') return current;
+      return [buildGreetingMessage(reporterName)];
     });
   }, [reporterName]);
 
@@ -1150,10 +1235,11 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     if (ctx.description) parts.push(`Issue summary: ${ctx.description}`);
     if (ctx.incidentDateTime) parts.push(`Incident date/time: ${ctx.incidentDateTime}`);
     if (ctx.desiredResolution) parts.push(`Requested resolution: ${ctx.desiredResolution}`);
+    if (ctx.conversationPlan) parts.push(`Full conversational plan: ${ctx.conversationPlan}`);
     Object.entries(ctx).forEach(([key, value]) => {
       if (
         value &&
-        !['memberName', 'intakeRoute', 'requestType', 'clientsAffected', 'memberId', 'memberContact', 'sessionId', 'studio', 'trainer', 'classType', 'classDateTime', 'membership', 'category', 'subCategory', 'reportedBy', 'priority', 'description', 'incidentDateTime', 'desiredResolution'].includes(key)
+        !['memberName', 'intakeRoute', 'requestType', 'clientsAffected', 'memberId', 'memberContact', 'sessionId', 'studio', 'trainer', 'classType', 'classDateTime', 'membership', 'category', 'subCategory', 'reportedBy', 'priority', 'description', 'incidentDateTime', 'desiredResolution', 'conversationPlan', 'reporterFirstName'].includes(key)
       ) {
         parts.push(`${getDetailField(key)?.label || key}: ${value}`);
       }
@@ -1169,18 +1255,23 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         role: 'user',
         content: text,
       };
+      setInput('');
+      setMessages((prev) => [...prev, userMsg]);
+      setLoading(true);
+      await sleep(520);
       setMessages((prev) => [
         ...prev,
-        userMsg,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
           aiGenerated: true,
-          content: "Hi, I'm Athena. What are we logging?",
+          content: reporterFirstName
+            ? `Hi ${reporterFirstName}, what are we logging?`
+            : "Hi, what are we logging?",
           suggestedChips: getGreetingQuickActions(),
         },
       ]);
-      setInput('');
+      setLoading(false);
       return;
     }
     let activeContext: DetailContext = { ...(contextOverride || context), reportedBy: reporterName };
@@ -1207,6 +1298,26 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     if (Object.keys(localInference).length > 0) {
       activeContext = { ...activeContext, ...localInference, reportedBy: reporterName };
       setContext(activeContext);
+    }
+    if (reporterFirstName) {
+      activeContext = { ...activeContext, reporterFirstName };
+    }
+    if (
+      !contextOverride &&
+      !activeContext.conversationPlan &&
+      !/^here are the missing details:/i.test(text.trim()) &&
+      issueText.trim().length > 8
+    ) {
+      const plan = buildIntakeConversationPlan({
+        initialText: issueText,
+        context: activeContext,
+        reporterName,
+      });
+      activeContext = {
+        ...activeContext,
+        reporterFirstName: plan.reporterFirstName || reporterFirstName,
+        conversationPlan: serializeConversationPlan(plan),
+      };
     }
     activeContext.reportedBy = reporterName;
     activeContext = pruneEntityContextForIssue(activeContext, issueText);
@@ -1242,21 +1353,25 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 
       const missingFields = requiredFieldsForIssue(activeContext);
 
-      const { data, error } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
-        body: buildAthenaDraftRequestBody({
-          aiProvider: import.meta.env.VITE_AI_PROVIDER || 'deepseek',
-          messages: newMessages,
-          preamble,
-          conversationId,
-          context: activeContext,
-          intakeContract: {
-            missingFields,
-            fields: missingFields
-              .map((id) => getDetailField(id))
-              .filter(Boolean),
-          },
+      const { data, error } = await withTimeout(
+        invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
+          body: buildAthenaDraftRequestBody({
+            aiProvider: import.meta.env.VITE_AI_PROVIDER || 'openai',
+            messages: newMessages,
+            preamble,
+            conversationId,
+            context: activeContext,
+            intakeContract: {
+              missingFields,
+              fields: missingFields
+                .map((id) => getDetailField(id))
+                .filter(Boolean),
+            },
+          }),
         }),
-      });
+        ATHENA_CHAT_RESPONSE_TIMEOUT_MS,
+        ATHENA_CHAT_TIMEOUT_MESSAGE
+      );
 
       if (error) throw error;
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
@@ -1273,9 +1388,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         setContext(responseContext);
       }
 
-      const remainingMissingFields = requiredFieldsForIssue(responseContext, data?.ticket || undefined);
+      const normalizedAiTicket = data?.ticket ? normalizeDraftForReview(data.ticket, responseContext, text) : null;
+      const remainingMissingFields = requiredFieldsForIssue(responseContext, normalizedAiTicket || undefined);
       const requiredFieldSet = new Set(remainingMissingFields);
-      const incompleteDraftForm = pruneDetailForm(detailFormForIncompleteDraft(data?.ticket, responseContext), responseContext);
+      const incompleteDraftForm = pruneDetailForm(detailFormForIncompleteDraft(normalizedAiTicket, responseContext), responseContext);
       const localMissingForm = pruneDetailForm(detailFormForContext(responseContext), responseContext);
       const deterministicForm = incompleteDraftForm || localMissingForm;
       const acceptsAiDetailForm = shouldAcceptAiDetailForm({
@@ -1288,13 +1404,13 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
           )
         : null;
       const detailForm = mergeDetailForms(deterministicForm, normalizedForm);
-      const parsedQuestionForm = acceptsAiDetailForm && !detailForm && !data?.ticket
+      const parsedQuestionForm = acceptsAiDetailForm && !detailForm && !normalizedAiTicket
         ? pruneDetailForm(
             filterAiDetailForm(detailFormFromQuestionText(data?.reply || '', responseContext), responseContext, requiredFieldSet),
             responseContext
           )
         : null;
-      const finalDetailForm = detailForm || parsedQuestionForm;
+      const finalDetailForm = batchDetailFormForConversation(detailForm || parsedQuestionForm);
       const holdDraftForMoreInfo = shouldHoldDraftForMoreInfo({
         hasDetailForm: Boolean(finalDetailForm),
         remainingMissingFieldCount: remainingMissingFields.length,
@@ -1302,7 +1418,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       });
       let ticket = holdDraftForMoreInfo
         ? null
-        : data?.ticket || buildClientDraft(responseContext, text);
+        : normalizedAiTicket || buildClientDraft(responseContext, text);
       if (
         ticket &&
         responseContext.category === 'Hosted Class & Partnerships' &&
@@ -1324,23 +1440,37 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const singleFieldNeedsPicker = singleField
         ? ['memberName', 'memberContact', 'classType', 'sessionId', 'membership'].includes(singleField.id)
         : false;
+      const singleFieldChips = singleField && !singleFieldNeedsPicker && singleField.type === 'select'
+        ? chipsForSingleField(singleField, responseContext)
+        : [];
+      const renderSingleFieldAsChat = Boolean(
+        singleField &&
+        !singleFieldNeedsPicker &&
+        (singleField.type !== 'select' || singleFieldChips.length > 0)
+      );
+      const assistantContent = singleField
+        ? buildNaturalSingleFieldPrompt({
+            field: singleField,
+            reporterFirstName,
+          })
+        : finalDetailForm
+          ? (data?.reply && !/form below|complete the .*fields below/i.test(data.reply)
+              ? data.reply
+              : `${reporterFirstName ? `${reporterFirstName}, ` : ''}I need a few details before drafting this ticket.`)
+          : ticket
+            ? 'I drafted the ticket below. Please review it before publishing.'
+            : data?.reply || "Hmm, I didn't catch that. Could you rephrase?";
       setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
+      await sleep(writingPauseMs(assistantContent));
+      if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
       const assistantMsg: Message = {
         id: `a-${Date.now()}`,
         role: 'assistant',
         aiGenerated: true,
-        content: singleField
-          ? singleFieldNeedsPicker
-            ? `Select ${singleField.label.toLowerCase()}:`
-            : `Please submit ${singleField.label.toLowerCase()} below.`
-          : finalDetailForm
-            ? 'Please complete the required intake fields below.'
-            : ticket
-              ? 'I drafted the ticket below. Please review it before publishing.'
-              : data?.reply || "Hmm, I didn't catch that. Could you rephrase?",
+        content: assistantContent,
         ticket,
-        suggestedChips: [],
-        detailForm: finalDetailForm,
+        suggestedChips: singleFieldChips,
+        detailForm: renderSingleFieldAsChat ? null : finalDetailForm,
         published: false,
         ticketId: undefined,
       };
@@ -1355,6 +1485,42 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     } catch (e: unknown) {
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
       const message = getDisplayError(e, 'Ticket AI chat failed');
+      if (message.includes(ATHENA_CHAT_TIMEOUT_MESSAGE)) {
+        const timeoutForm = batchDetailFormForConversation(pruneDetailForm(detailFormForContext(activeContext), activeContext));
+        const singleField = timeoutForm?.fields.length === 1 ? timeoutForm.fields[0] : null;
+        const singleFieldNeedsPicker = singleField
+          ? ['memberName', 'memberContact', 'classType', 'sessionId', 'membership'].includes(singleField.id)
+          : false;
+        const singleFieldChips = singleField && !singleFieldNeedsPicker && singleField.type === 'select'
+          ? chipsForSingleField(singleField, activeContext)
+          : [];
+        const renderSingleFieldAsChat = Boolean(
+          singleField &&
+          !singleFieldNeedsPicker &&
+          (singleField.type !== 'select' || singleFieldChips.length > 0)
+        );
+        const fallbackTicket = timeoutForm ? null : buildClientDraft(activeContext, text);
+        const fallbackContent = singleField
+          ? buildNaturalSingleFieldPrompt({ field: singleField, reporterFirstName })
+          : timeoutForm
+            ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}the AI is taking too long, so I'll continue with the local intake flow.`
+            : 'The AI is taking too long, so I prepared a local draft for review.';
+
+        setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
+        const fallbackMessage: Message = {
+          id: `timeout-${Date.now()}`,
+          role: 'assistant',
+          aiGenerated: false,
+          content: fallbackContent,
+          ticket: fallbackTicket,
+          suggestedChips: singleFieldChips,
+          detailForm: renderSingleFieldAsChat ? null : timeoutForm,
+          published: false,
+        };
+        setMessages((prev) => [...prev, fallbackMessage]);
+        if (fallbackTicket) setActiveDraftReviewMessageId(fallbackMessage.id);
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         {
@@ -1399,7 +1565,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     setListening(false);
     setVoiceLiveText('');
     setVoiceHint('');
-    setMessages([GREETING]);
+    setMessages([buildGreetingMessage(reporterName)]);
     setContext({ reportedBy: reporterName });
     setPendingSingleField(null);
     setPendingAttachments([]);
@@ -1612,7 +1778,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       ].join('\n');
       const { data } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
         body: buildAthenaDraftRequestBody({
-          aiProvider: import.meta.env.VITE_AI_PROVIDER || 'deepseek',
+        aiProvider: import.meta.env.VITE_AI_PROVIDER || 'openai',
           messages: [{ id: `text-to-ticket-${Date.now()}`, role: 'user', content: aiInstruction }],
           preamble: buildContextPreamble({ ...context, reportedBy: reporterName }),
           conversationId,
@@ -1640,7 +1806,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         }, 'text');
       } else {
         const inferredContext = normalizeInferredContext(data?.inferredContext);
-        const draft = aiTicket || buildClientDraft(mergeInferredContext({ ...context, reportedBy: reporterName }, inferredContext), sourceText);
+        const draftContext = mergeInferredContext({ ...context, reportedBy: reporterName }, inferredContext);
+        const draft = aiTicket
+          ? normalizeDraftForReview(aiTicket, draftContext, sourceText)
+          : buildClientDraft(draftContext, sourceText);
         const messageId = `text-ticket-draft-${Date.now()}`;
         setMessages((prev) => [
           ...prev,
@@ -2486,13 +2655,18 @@ const HostedClassTemplateForm: React.FC<{
 
       <div className="space-y-4 p-5">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-          <MomenceSessionFormField
+          <MomenceSessionDropdownField
+            multi={false}
             values={sessionValues}
-            onSelect={selectSession}
-            onRemove={() => {
-              setSelectedSession(null);
-              setSessionValues({});
-              setAttendees([]);
+            onChange={async (sessions) => {
+              const session = sessions[0];
+              if (!session) {
+                setSelectedSession(null);
+                setSessionValues({});
+                setAttendees([]);
+                return;
+              }
+              await selectSession(session);
             }}
           />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -3210,6 +3384,8 @@ const fieldHelpText = (field: DetailFormField): string => {
   if (id === 'memberName' || id === 'memberContact') return 'Use Momence search where possible so the member record and contact stay consistent.';
   if (id === 'membership') return 'Choose the active package from Momence results when available, or from the standard membership list.';
   if (id === 'classType' || id === 'sessionId' || id === 'classDateTime' || id === 'trainer') return 'Choose the relevant class/session context for the member issue.';
+  if (id === 'classImpactType') return 'Classify the class/session impact so routing and urgency are clear before asking for details.';
+  if (id === 'classImpactDetails') return 'Capture exactly how the selected class/session changed, such as delay, pause, cancellation, relocation, or member response.';
   if (id === 'priority') return 'Choose the operational urgency. Safety, access and retention-risk issues should be High or Critical.';
   if (id === 'description') return 'Capture the concrete facts and what happened without adding subjective interpretation.';
   if (id === 'desiredResolution') return 'Document what the member asked Physique 57 to do next, including their preferred follow-up channel.';
@@ -3368,24 +3544,16 @@ const DetailCaptureForm: React.FC<{
           />
         )}
         {hasSessionFields && (
-          <MomenceSessionFormField
+          <MomenceSessionDropdownField
             values={values}
-            onSelect={(session) => {
+            onChange={(sessions) => {
               setValues((current) => ({
                 ...current,
-                sessionId: appendCsvUnique(current.sessionId, session.id),
-                classType: appendCsvUnique(current.classType, session.classType),
-                classDateTime: appendCsvUnique(current.classDateTime, session.startsAt || ''),
-                trainer: appendCsvUnique(current.trainer, session.trainer || current.trainer || ''),
-                studio: appendCsvUnique(current.studio, session.studio || current.studio || ''),
-              }));
-            }}
-            onRemove={(sessionName) => {
-              setValues((current) => ({
-                ...current,
-                sessionId: '',
-                classType: removeCsvItem(current.classType, sessionName),
-                classDateTime: '',
+                sessionId: sessions.map((session) => session.id).join(' | '),
+                classType: sessions.map((session) => session.classType).join(' | '),
+                classDateTime: sessions.map((session) => session.startsAt || '').filter(Boolean).join(' | '),
+                trainer: sessions.map((session) => session.trainer || '').filter(Boolean).join(' | '),
+                studio: sessions.map((session) => session.studio || '').filter(Boolean).join(' | ') || current.studio || '',
               }));
             }}
           />
@@ -3436,7 +3604,30 @@ const DetailCaptureForm: React.FC<{
               </div>
               {field.type === 'select' ? (
                 (() => {
-                  const forceSingle = new Set(['intakeRoute', 'category', 'subCategory', 'priority', 'studio', 'memberSentiment', 'clientsAffected', 'membership']);
+                  const forceSingle = new Set([
+                    'intakeRoute',
+                    'category',
+                    'subCategory',
+                    'priority',
+                    'studio',
+                    'memberSentiment',
+                    'clientsAffected',
+                    'classImpactType',
+                    'membership',
+                    'freezeReason',
+                    'rolloverReason',
+                    'hostedFeedbackArea',
+                    'prospectQuality',
+                    'followUpPreference',
+                    'hvacSymptom',
+                    'machineSymptom',
+                    'lockFaultType',
+                    'accessStatus',
+                    'securityRisk',
+                    'plumbingSymptom',
+                    'electricalSymptom',
+                    'appIssueSurface',
+                  ]);
                   const isMulti = !forceSingle.has(field.id);
                   const disabledSelect = field.id === 'subCategory' && !values.category;
                   const useButtons = !isMulti && !disabledSelect && shouldUseOptionButtons({ id, optionCount: options.length });
@@ -3670,6 +3861,9 @@ async function loadActiveMembershipOptions(memberId: string): Promise<string[]> 
   return Array.from(new Set([...activeMembershipOptions, ...MEMBERSHIPS]));
 }
 
+const MOMENCE_SESSION_DROPDOWN_CACHE_KEY = '__momence_session_dropdown_options__';
+const momenceSessionSearchCache = new Map<string, MomenceSessionOption[]>();
+
 const MomenceMemberFormField: React.FC<{
   values: Record<string, string>;
   onSelect: (member: MomenceMemberOption) => void | Promise<void>;
@@ -3754,93 +3948,110 @@ const MomenceMemberFormField: React.FC<{
   );
 };
 
-const MomenceSessionFormField: React.FC<{
+function splitPipeList(value?: string): string[] {
+  return (value || '')
+    .split('|')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function momenceSessionDropdownLabel(session: MomenceSessionOption): string {
+  return [session.label, session.description].filter(Boolean).join(' · ');
+}
+
+const MomenceSessionDropdownField: React.FC<{
   values: Record<string, string>;
-  onSelect: (session: MomenceSessionOption) => void;
-  onRemove: (sessionName: string) => void;
-}> = ({ values, onSelect, onRemove }) => {
-  const [query, setQuery] = useState(values.classType || '');
+  onChange: (sessions: MomenceSessionOption[]) => void | Promise<void>;
+  multi?: boolean;
+}> = ({ values, onChange, multi = true }) => {
   const [options, setOptions] = useState<MomenceSessionOption[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [focused, setFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const optionLabelMap = useMemo(() => {
+    const labelMap = new Map<string, MomenceSessionOption>();
+    options.forEach((session) => labelMap.set(momenceSessionDropdownLabel(session), session));
+    return labelMap;
+  }, [options]);
+
+  const selectedDropdownLabels = useMemo(() => {
+    const selectedIds = splitPipeList(values.sessionId);
+    if (selectedIds.length > 0 && options.length > 0) {
+      const byId = new Map(options.map((session) => [session.id, session]));
+      return selectedIds
+        .map((id) => byId.get(id))
+        .filter(Boolean)
+        .map((session) => momenceSessionDropdownLabel(session as MomenceSessionOption));
+    }
+    return splitPipeList(values.classType);
+  }, [options, values.classType, values.sessionId]);
 
   useEffect(() => {
-    const handle = window.setTimeout(async () => {
-      const selectedSessions = (values.classType || '')
-        .split('|')
-        .map((sessionName) => sessionName.trim().toLowerCase())
-        .filter(Boolean);
-      const normalizedQuery = query.trim().toLowerCase();
-      if (selectedSessions.includes(normalizedQuery) || (!focused && query.trim().length < 2)) {
-        setOptions([]);
-        return;
-      }
-      try {
-        setError(null);
-        setOptions(await searchMomenceSessions(query));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Session search failed');
-      }
-    }, 300);
-    return () => window.clearTimeout(handle);
-  }, [focused, query, values.classType]);
+    let cancelled = false;
+    const cached = momenceSessionSearchCache.get(MOMENCE_SESSION_DROPDOWN_CACHE_KEY);
+    if (cached) {
+      setOptions(cached);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    searchMomenceSessions('')
+      .then((sessions) => {
+        momenceSessionSearchCache.set(MOMENCE_SESSION_DROPDOWN_CACHE_KEY, sessions);
+        if (!cancelled) setOptions(sessions);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Session options failed to load');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDropdownChange = (nextValue: string) => {
+    const requestedLabels = splitPipeList(nextValue);
+    const finalLabels = multi
+      ? requestedLabels
+      : (() => {
+          const added = requestedLabels.find((label) => !selectedDropdownLabels.includes(label));
+          return added ? [added] : [];
+        })();
+    const selectedSessions = finalLabels
+      .map((label) => optionLabelMap.get(label))
+      .filter(Boolean) as MomenceSessionOption[];
+
+    void onChange(selectedSessions);
+  };
+
+  const dropdownOptions = options.map(momenceSessionDropdownLabel);
+  const dropdownValue = selectedDropdownLabels.join(' | ');
+  const placeholder = loading
+    ? 'Loading Momence sessions...'
+    : error
+      ? 'Momence sessions unavailable'
+      : multi
+        ? 'Select Momence sessions'
+        : 'Select Momence session';
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white p-3.5 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
       <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
         Momence Class / Session *
       </span>
-      <input
-        value={query}
-        onFocus={() => setFocused(true)}
-        onBlur={() => window.setTimeout(() => setFocused(false), 150)}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          if (values.classType && event.target.value !== values.classType) setOptions([]);
-        }}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-        placeholder="Search Momence sessions by class, instructor, studio, or date"
+      <MultiSelectDropdown
+        value={dropdownValue}
+        options={dropdownOptions}
+        placeholder={placeholder}
+        disabled={loading || dropdownOptions.length === 0}
+        onChange={handleDropdownChange}
       />
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
-      {values.classType && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {values.classType.split('|').map((sessionName) => sessionName.trim()).filter(Boolean).map((sessionName) => (
-            <button
-              key={sessionName}
-              type="button"
-              onClick={() => {
-                setQuery('');
-                setOptions([]);
-                onRemove(sessionName);
-              }}
-              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800"
-              title="Remove session"
-            >
-              {sessionName}
-              <X className="h-3 w-3" />
-            </button>
-          ))}
-        </div>
-      )}
-      {options.length > 0 && (
-        <div className="mt-2 max-h-44 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-[0_18px_44px_rgba(15,23,42,0.1)]">
-          {options.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => {
-                onSelect(option);
-                setQuery(option.classType);
-                setOptions([]);
-              }}
-              className="block w-full border-b border-stone-100 px-3 py-2 text-left text-xs last:border-0 hover:bg-slate-50"
-            >
-              <div className="font-semibold text-stone-900">{option.label}</div>
-              <div className="mt-0.5 text-[11px] text-stone-500">{option.description}</div>
-            </button>
-          ))}
-        </div>
-      )}
+      {loading && <div className="mt-1 text-[11px] text-slate-500">Loading Momence sessions...</div>}
     </div>
   );
 };

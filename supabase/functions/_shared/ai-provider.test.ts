@@ -28,7 +28,7 @@ describe('AI provider selection', () => {
     expect(request.url).toBe('https://api.openai.com/v1/chat/completions');
     expect(request.headers.Authorization).toBe('Bearer openai-key');
     expect(request.body).toMatchObject({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       response_format: { type: 'json_object' },
       temperature: 0.2,
     });

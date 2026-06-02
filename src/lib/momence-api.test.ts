@@ -17,7 +17,14 @@ vi.mock('./backend-supabase', () => ({
 }));
 
 describe('buildMomenceInsightSummary', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('summarizes member, memberships, bookings, notes, and tags for ticket context', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-30T00:00:00.000Z'));
+
     const summary = buildMomenceInsightSummary({
       member: {
         id: 42,

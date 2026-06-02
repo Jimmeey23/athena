@@ -10,4 +10,20 @@ describe('template form dialog layout', () => {
     expect(templateDialogMatch?.[1]).toContain('!w-[min(1440px,calc(100vw-2rem))]');
     expect(templateDialogMatch?.[1]).toContain('!max-w-[min(1440px,calc(100vw-2rem))]');
   });
+
+  it('uses a short warm personalized first message', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('`Hi ${firstName}, happy to help. What should we log today?`');
+    expect(source).toContain('"Hi, happy to help. What should we log today?"');
+    expect(source).not.toContain('your ticket intake assistant.\\n\\nTell me what happened');
+  });
+
+  it('uses a dropdown multi-select for Momence sessions instead of a search input', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('const MomenceSessionDropdownField: React.FC');
+    expect(source).toContain('<MultiSelectDropdown');
+    expect(source).not.toContain('placeholder="Search Momence sessions by class, instructor, studio, or date"');
+  });
 });

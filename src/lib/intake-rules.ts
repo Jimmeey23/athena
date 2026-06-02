@@ -69,6 +69,8 @@ export interface IntakeContext {
   urgencyReason?: string;
   memberSentiment?: string;
   momencePurchaseContext?: string;
+  classImpactType?: string;
+  classImpactDetails?: string;
   freezeStartDate?: string;
   freezeEndDate?: string;
   freezeReason?: string;
@@ -94,6 +96,16 @@ export const CLIENTS_AFFECTED_OPTIONS = [
   'Yes - directly and indirectly affected',
   'No clients affected',
   'Not confirmed yet',
+] as const;
+export const CLASS_IMPACT_TYPE_OPTIONS = [
+  'Delayed start',
+  'Paused during session',
+  'Cancelled',
+  'Moved to another space',
+  'Shortened session',
+  'Capacity or comfort issue',
+  'Member left early',
+  'Other impact',
 ] as const;
 
 const STUDIO_REQUIRED_CATEGORIES = new Set([
@@ -178,6 +190,19 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
   momencePurchaseContext: {
     id: 'momencePurchaseContext',
     label: 'Momence purchase/payment context',
+    type: 'textarea',
+    required: true,
+  },
+  classImpactType: {
+    id: 'classImpactType',
+    label: 'What type of class/session impact was reported?',
+    type: 'select',
+    required: true,
+    options: [...CLASS_IMPACT_TYPE_OPTIONS],
+  },
+  classImpactDetails: {
+    id: 'classImpactDetails',
+    label: 'How was the class/session affected?',
     type: 'textarea',
     required: true,
   },
@@ -289,42 +314,6 @@ const CLASS_CONTEXT_CATEGORIES = new Set([
 
 function hasConfirmedAffectedClients(value?: string): boolean {
   return /^yes\b/i.test(value?.trim() || '');
-}
-
-function shouldRequireClientImpactCheck(context: IntakeContext, issueText: string): boolean {
-  if (!isMissingIntakeValue(context.clientsAffected)) return false;
-
-  const route = (context.intakeRoute || '').toLowerCase();
-  const category = context.category || '';
-  const lower = issueText.toLowerCase();
-
-  if (hasConfirmedAffectedClients(context.clientsAffected)) return false;
-
-  if (
-    /\b(member|client|customer|guest|prospect|attendee|lead|class|session|booking|waitlist|refund|billing|payment|membership|package|freeze|roll\s?over|extension|complain|complaint|said|reported|requested|felt|uncomfortable|walked out|injury|medical|theft|harass)\b/.test(lower)
-  ) {
-    return true;
-  }
-
-  if (PHYSICAL_ONLY_CATEGORIES.has(category)) return false;
-
-  return [
-    'Customer Service and Communication',
-    'Pricing and Memberships',
-    'Billing & Membership',
-    'Sales & Consultation',
-    'Hosted Class & Partnerships',
-    'Trainer Feedback',
-    'Class Experience',
-    'Scheduling',
-    'Booking & Schedule',
-    'Front Desk & Service',
-    'Instructor & Class Quality',
-    'Safety and Security',
-    'Safety & Medical',
-    'Theft and Lost Items',
-    'Member Progress & Transformation',
-  ].includes(category) || route === 'complaint';
 }
 
 function shouldRequireNamedMemberContext(context: IntakeContext, issueText: string): boolean {
@@ -450,6 +439,22 @@ function buildIssueText(context: IntakeContext, extraText = ''): string {
     context.subCategory,
     context.description,
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function hasAffectedClassSignal(context: IntakeContext, issueText: string): boolean {
+  const value = [
+    issueText,
+    context.initialReport,
+    context.description,
+    context.operationalImpact,
+    context.currentWorkaround,
+    context.classImpactType,
+    context.classImpactDetails,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /\b(?:classes?|sessions?|schedule)\b.{0,36}\b(?:affected|impacted|delayed|paused|cancelled|canceled|moved|disrupted)\b/.test(value)
+    || /\b(?:affected|impacted|delayed|paused|cancelled|canceled|moved|disrupted)\b.{0,36}\b(?:classes?|sessions?|schedule)\b/.test(value)
+    || /\bclass flow\b|\bfull class\b|\bhad to pause\b|\bmembers?\s+stepped out\b|\bwalked out\b/.test(value);
 }
 
 function normalizeMembershipText(value: string): string {
@@ -719,6 +724,10 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
     return fields;
   }
 
+  if (includeClientImpact) {
+    add('clientsAffected', context.clientsAffected);
+  }
+
   const routeLower = route.toLowerCase();
   const issueText = buildIssueText(context);
   const categoryPathText = `${category} ${subCategory} ${issueText}`.toLowerCase();
@@ -761,13 +770,15 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
     }
   }
 
-  if (includeClientImpact && shouldRequireClientImpactCheck(context, issueText)) {
-    add('clientsAffected', context.clientsAffected);
-  }
   const requireAffectedClientSelection = hasConfirmedAffectedClients(context.clientsAffected);
 
   if (requireAffectedClientSelection) {
     add('memberName', context.memberId || context.memberName);
+    if (hasAffectedClassSignal(context, issueText)) {
+      add('classType', context.sessionId || context.classType);
+      add('classImpactType', context.classImpactType);
+      add('classImpactDetails', context.classImpactDetails);
+    }
   }
 
   if (membershipSpecific && /select active membership|which membership|membership record|package record/.test(issueText)) {
