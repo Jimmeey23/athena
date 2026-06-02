@@ -498,7 +498,7 @@ describe('intake publishability rules', () => {
     expect(context).toMatchObject({
       intakeRoute: 'Internal Reporting',
       category: 'Repair and Maintenance',
-      subCategory: 'Broken Equipment Not Repaired',
+      subCategory: 'Broken Equipment',
     });
 
     expect(getMissingIntakeFields(context)).toEqual([
@@ -530,7 +530,7 @@ describe('intake publishability rules', () => {
     expect(context).toMatchObject({
       intakeRoute: 'Internal Reporting',
       category: 'Repair and Maintenance',
-      subCategory: 'Broken Equipment Not Repaired',
+      subCategory: 'Broken Equipment',
     });
     expect(getMissingIntakeFields(context)).toEqual([
       'bikeSymptom',

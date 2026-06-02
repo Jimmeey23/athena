@@ -2677,6 +2677,8 @@ const HOSTED_FOLLOW_UP_PLAN_OPTIONS = [
   'Escalate to sales lead',
 ];
 
+const HOSTED_CLASS_SESSION_TYPES = ['private'];
+
 function momenceBookingMemberName(booking: MomenceSessionBooking): string {
   const name = [booking.member?.firstName, booking.member?.lastName].filter(Boolean).join(' ').trim();
   return name || `Momence member #${booking.member?.id || booking.id}`;
@@ -2908,6 +2910,7 @@ const HostedClassTemplateForm: React.FC<{
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
           <MomenceSessionDropdownField
             multi={false}
+            sessionTypes={HOSTED_CLASS_SESSION_TYPES}
             values={sessionValues}
             onChange={async (sessions) => {
               const session = sessions[0];
@@ -4154,8 +4157,11 @@ async function loadActiveMembershipOptions(memberId: string, hostMembershipOptio
   return uniqueOptions([...activeMembershipOptions, ...hostMembershipOptions]);
 }
 
-const MOMENCE_SESSION_DROPDOWN_CACHE_KEY = '__momence_session_dropdown_options__';
 const momenceSessionSearchCache = new Map<string, MomenceSessionOption[]>();
+
+function momenceSessionDropdownCacheKey(sessionTypes: string[]): string {
+  return `__momence_session_dropdown_options__:${sessionTypes.join(',')}`;
+}
 
 const MomenceMemberFormField: React.FC<{
   values: Record<string, string>;
@@ -4256,10 +4262,12 @@ const MomenceSessionDropdownField: React.FC<{
   values: Record<string, string>;
   onChange: (sessions: MomenceSessionOption[]) => void | Promise<void>;
   multi?: boolean;
-}> = ({ values, onChange, multi = true }) => {
+  sessionTypes?: string[];
+}> = ({ values, onChange, multi = true, sessionTypes = HOSTED_CLASS_SESSION_TYPES }) => {
   const [options, setOptions] = useState<MomenceSessionOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const cacheKey = useMemo(() => momenceSessionDropdownCacheKey(sessionTypes), [sessionTypes]);
 
   const optionLabelMap = useMemo(() => {
     const labelMap = new Map<string, MomenceSessionOption>();
@@ -4281,7 +4289,7 @@ const MomenceSessionDropdownField: React.FC<{
 
   useEffect(() => {
     let cancelled = false;
-    const cached = momenceSessionSearchCache.get(MOMENCE_SESSION_DROPDOWN_CACHE_KEY);
+    const cached = momenceSessionSearchCache.get(cacheKey);
     if (cached) {
       setOptions(cached);
       return;
@@ -4289,9 +4297,9 @@ const MomenceSessionDropdownField: React.FC<{
 
     setLoading(true);
     setError(null);
-    searchMomenceSessions('')
+    searchMomenceSessions('', { types: sessionTypes })
       .then((sessions) => {
-        momenceSessionSearchCache.set(MOMENCE_SESSION_DROPDOWN_CACHE_KEY, sessions);
+        momenceSessionSearchCache.set(cacheKey, sessions);
         if (!cancelled) setOptions(sessions);
       })
       .catch((e) => {
@@ -4304,7 +4312,7 @@ const MomenceSessionDropdownField: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cacheKey, sessionTypes]);
 
   const handleDropdownChange = (nextValue: string) => {
     const requestedLabels = splitPipeList(nextValue);

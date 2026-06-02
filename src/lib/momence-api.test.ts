@@ -6,6 +6,7 @@ import {
   listMomenceHostMembershipOptions,
   loadMomenceTicketContext,
   scheduleMomenceMembershipUnfreeze,
+  searchMomenceSessions,
   unfreezeMomenceMembership,
 } from './momence-api';
 
@@ -231,6 +232,51 @@ describe('Momence host membership options', () => {
           includeDisabled: false,
         },
         body: undefined,
+      }),
+    }));
+  });
+});
+
+describe('Momence session search', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_MOMENCE_SESSION_FUNCTION_URL', 'http://localhost/momence-session-search');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('requests private Momence sessions for hosted class session options', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      payload: [{
+        id: 501,
+        name: 'Studio Hosted Class',
+        startsAt: '2026-06-02T05:00:00.000Z',
+        teacher: { firstName: 'Anisha', lastName: 'Shah' },
+        inPersonLocation: { name: 'Kwality House, Kemps Corner' },
+        bookingCount: 12,
+        capacity: 20,
+      }],
+    }), { status: 200 })));
+
+    const sessions = await searchMomenceSessions('');
+
+    expect(sessions[0]).toMatchObject({
+      id: '501',
+      classType: 'Studio Hosted Class',
+      trainer: 'Anisha Shah',
+      studio: 'Kwality House, Kemps Corner',
+    });
+    expect(fetch).toHaveBeenCalledWith('http://localhost/momence-session-search', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        query: '',
+        pastDays: 180,
+        futureDays: 45,
+        pageSize: 200,
+        includeCancelled: false,
+        types: ['private'],
       }),
     }));
   });

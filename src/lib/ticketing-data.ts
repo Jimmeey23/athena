@@ -504,7 +504,7 @@ const SPREADSHEET_CATEGORIES: Record<string, string[]> = {
     'Fire Safety Compliance',
     'Water Dispenser Issues',
     'Dust and Mold in Corners',
-    'Broken Equipment Not Repaired',
+    'Broken Equipment',
   ],
   'Studio Amenities and Facilities': [
     'Studio Odour and Aroma',

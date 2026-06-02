@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CATEGORIES,
   DEPARTMENTS,
   REPORTING_ASSOCIATES,
   STUDIO_AREAS,
@@ -100,5 +101,11 @@ describe('Physique 57 master data constants', () => {
     expect(STUDIO_AREAS['Kenkere House, Bengaluru']).not.toContain('Strength Studio');
     expect(STUDIO_AREAS['Kenkere House, Bengaluru']).not.toContain('powerCycle studio');
     expect(getStudioAreaOptions('the Studio by Copper & Cloves, Bengaluru')).toEqual(STUDIO_AREAS['Kenkere House, Bengaluru']);
+  });
+
+  it('keeps issue labels descriptive instead of encoding repair status', () => {
+    expect(CATEGORIES['Repair and Maintenance']).toContain('Broken Equipment');
+    expect(CATEGORIES['Repair and Maintenance']).not.toContain('Broken Equipment Not Repaired');
+    expect(CATEGORIES['Repair and Maintenance'].join(' ')).not.toMatch(/\bnot repaired\b/i);
   });
 });

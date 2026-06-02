@@ -255,6 +255,10 @@ export interface LoadMomenceTicketContextOptions {
   includeTags?: boolean;
 }
 
+export interface SearchMomenceSessionsOptions {
+  types?: string[];
+}
+
 interface MomenceRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   params?: Record<string, string | number | boolean | undefined>;
@@ -666,7 +670,7 @@ export async function searchMomenceMembers(query: string): Promise<MomenceMember
   });
 }
 
-export async function searchMomenceSessions(query: string): Promise<MomenceSessionOption[]> {
+export async function searchMomenceSessions(query: string, options: SearchMomenceSessionsOptions = {}): Promise<MomenceSessionOption[]> {
   const now = new Date();
   const lookback = new Date(now);
   lookback.setDate(lookback.getDate() - SESSION_LOOKBACK_DAYS);
@@ -675,6 +679,8 @@ export async function searchMomenceSessions(query: string): Promise<MomenceSessi
   const sessionFunctionUrl = resolveSessionFunctionUrl();
   const sessionFunctionAnonKey = resolveSessionFunctionAnonKey();
   const normalizedQuery = normalizeSearchValue(query);
+  const sessionTypes = options.types?.map((type) => type.trim()).filter(Boolean);
+  const requestedSessionTypes = sessionTypes?.length ? sessionTypes : [SESSION_SEARCH_TYPE];
 
   let response: PaginatedMomenceResponse<MomenceSession>;
   if (sessionFunctionUrl) {
@@ -694,7 +700,7 @@ export async function searchMomenceSessions(query: string): Promise<MomenceSessi
         futureDays: SESSION_LOOKAHEAD_DAYS,
         pageSize: 200,
         includeCancelled: false,
-        types: SESSION_SEARCH_TYPE,
+        types: requestedSessionTypes,
       }),
     });
     if (!raw.ok) {
@@ -710,7 +716,7 @@ export async function searchMomenceSessions(query: string): Promise<MomenceSessi
         sortBy: 'startsAt',
         sortOrder: 'DESC',
         includeCancelled: false,
-        types: SESSION_SEARCH_TYPE,
+        types: requestedSessionTypes[0] || SESSION_SEARCH_TYPE,
         startAfter: lookback.toISOString(),
         startBefore: lookahead.toISOString(),
       },

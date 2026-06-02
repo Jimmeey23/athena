@@ -26,4 +26,13 @@ describe('template form dialog layout', () => {
     expect(source).toContain('<MultiSelectDropdown');
     expect(source).not.toContain('placeholder="Search Momence sessions by class, instructor, studio, or date"');
   });
+
+  it('passes private Momence session type explicitly from the hosted class template', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain("const HOSTED_CLASS_SESSION_TYPES = ['private']");
+    expect(source).toContain('sessionTypes={HOSTED_CLASS_SESSION_TYPES}');
+    expect(source).toContain("searchMomenceSessions('', { types: sessionTypes })");
+    expect(source).toContain('momenceSessionDropdownCacheKey(sessionTypes)');
+  });
 });

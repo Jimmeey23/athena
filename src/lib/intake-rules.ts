@@ -598,7 +598,7 @@ function getIssueProfileFieldIds(context: IntakeContext): string[] {
     return ['machineSymptom', 'operationalImpact', 'currentWorkaround', 'resolutionRequirement'];
   }
 
-  if (subCategory === 'Broken Equipment Not Repaired' || /equipment|studio tool|method tool|tool|prop|mat|weights?|ball|barre|station/.test(issueText)) {
+  if (/^Broken Equipment(?: Not Repaired)?$/i.test(subCategory) || /equipment|studio tool|method tool|tool|prop|mat|weights?|ball|barre|station/.test(issueText)) {
     return ['equipmentSymptom', 'operationalImpact', 'currentWorkaround', 'resolutionRequirement'];
   }
 
@@ -711,7 +711,7 @@ export function inferIntakeContextFromText(text: string, context: IntakeContext 
         : /leak|plumbing|drain|flush|sewage|overflow|clog|pipe/.test(lower) ? 'Plumbing Leaks'
         : /pest|cockroach|rat|rodent|insect|ant/.test(lower) ? 'Pest Control Needed'
         : /door|lock|handle|hinge/.test(lower) ? 'Door Lock Issues'
-        : /machine|washing|dryer|equipment|broken|not working|malfunction|faulty/.test(lower) ? 'Broken Equipment Not Repaired'
+        : /machine|washing|dryer|equipment|broken|not working|malfunction|faulty/.test(lower) ? 'Broken Equipment'
         : 'General Maintenance Delays';
     } else if (/odour|odor|smell|stench|ventilation|air quality|locker|shower|washroom|toilet|steam room|valet|parking|wi-fi|wifi|boutique|retail|amenity|amenities|cleanliness|hygiene|clean|dirty/.test(lower)) {
       inferred.category = 'Studio Amenities and Facilities';
