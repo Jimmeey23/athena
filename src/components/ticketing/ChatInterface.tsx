@@ -2712,6 +2712,13 @@ function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSes
   };
 }
 
+function formatHostedSessionDateTime(value?: string): string {
+  if (!value) return 'Date not returned';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 const GenericTemplateForm: React.FC<{
   template: ContextTemplate;
   disabled?: boolean;
@@ -2830,6 +2837,11 @@ const HostedClassTemplateForm: React.FC<{
   const [socialAmplification, setSocialAmplification] = useState(HOSTED_SOCIAL_OPTIONS[0]);
   const [followUpPlan, setFollowUpPlan] = useState(HOSTED_FOLLOW_UP_PLAN_OPTIONS[1]);
   const canSubmit = Boolean(selectedSession && classFeedback.trim()) && !disabled;
+  const hostedTemplateProgress = [
+    { label: 'Session', value: selectedSession ? 'Selected' : 'Required', complete: Boolean(selectedSession) },
+    { label: 'Member voice', value: classFeedback.trim() ? 'Captured' : 'Required', complete: Boolean(classFeedback.trim()) },
+    { label: 'Follow-up', value: followUpPlan || 'Pending', complete: Boolean(followUpPlan) },
+  ];
 
   const selectSession = async (session: MomenceSessionOption) => {
     const summary = sessionSummaryFromOption(session);
@@ -2870,7 +2882,7 @@ const HostedClassTemplateForm: React.FC<{
 
   return (
     <form
-      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.08)]"
+      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.12)]"
       onSubmit={(event) => {
         event.preventDefault();
         if (!selectedSession || !canSubmit) return;
@@ -2891,120 +2903,214 @@ const HostedClassTemplateForm: React.FC<{
         });
       }}
     >
-      <div className="flex flex-col gap-2 border-b border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Hosted class template</div>
-          <h3 className="mt-1 text-sm font-semibold text-slate-950">{template.label}</h3>
-          <p className="mt-1 text-xs text-slate-500">Select a Momence class, review attendees, then capture class, host, late-comer, and follow-up intelligence.</p>
+      <div className="border-b border-slate-200 bg-white px-5 py-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-700 shadow-sm">
+              <LayoutTemplate className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Hosted class template</div>
+              <h3 className="mt-1 text-base font-semibold text-slate-950">{template.label}</h3>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">Partner audience insight, attendee response, and conversion follow-up for Signature Partnership Experiences.</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div aria-label="Hosted template progress" className="grid min-w-[min(100%,390px)] grid-cols-3 gap-2">
+              {hostedTemplateProgress.map((item) => (
+                <div
+                  key={item.label}
+                  className={`rounded-2xl border px-3 py-2 ${
+                    item.complete
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  <div className="text-[9px] font-bold uppercase tracking-[0.14em] opacity-70">{item.label}</div>
+                  <div className="mt-1 truncate text-[11px] font-semibold">{item.value}</div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-        >
-          Close
-        </button>
       </div>
 
       <div className="space-y-4 p-5">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-          <MomenceSessionDropdownField
-            multi={false}
-            sessionTypes={HOSTED_CLASS_SESSION_TYPES}
-            values={sessionValues}
-            onChange={async (sessions) => {
-              const session = sessions[0];
-              if (!session) {
-                setSelectedSession(null);
-                setSessionValues({});
-                setAttendees([]);
-                return;
-              }
-              await selectSession(session);
-            }}
-          />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <TemplateSelect label="Partner type" value={partnerType} options={HOSTED_PARTNER_TYPE_OPTIONS} onChange={setPartnerType} />
-            <TemplateSelect label="Attendance source" value={acquisitionSource} options={HOSTED_SOURCE_OPTIONS} onChange={setAcquisitionSource} />
-          </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
+          <section className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Momence source</div>
+                <h4 className="mt-1 text-sm font-semibold text-slate-950">Selected session</h4>
+              </div>
+              <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">Private hosted</span>
+            </div>
+            <MomenceSessionDropdownField
+              multi={false}
+              sessionTypes={HOSTED_CLASS_SESSION_TYPES}
+              values={sessionValues}
+              onChange={async (sessions) => {
+                const session = sessions[0];
+                if (!session) {
+                  setSelectedSession(null);
+                  setSessionValues({});
+                  setAttendees([]);
+                  return;
+                }
+                await selectSession(session);
+              }}
+            />
+            {selectedSession && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {[
+                  { label: 'Class', value: selectedSession.classType || 'Class not returned' },
+                  { label: 'Date', value: formatHostedSessionDateTime(selectedSession.startsAt) },
+                  { label: 'Studio', value: selectedSession.studio || 'Studio not returned' },
+                  { label: 'Instructor', value: selectedSession.trainer || 'Instructor not returned' },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                    <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+                    <div className="mt-1 truncate text-xs font-semibold text-slate-900">{value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Partner signal</div>
+                <h4 className="mt-1 text-sm font-semibold text-slate-950">Partnership context</h4>
+              </div>
+              <ClipboardCheck className="h-4 w-4 text-blue-600" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TemplateTextInput label="Partner / host" value={partnerName} onChange={setPartnerName} />
+              <TemplateSelect label="Partner type" value={partnerType} options={HOSTED_PARTNER_TYPE_OPTIONS} onChange={setPartnerType} />
+              <TemplateSelect label="Attendance source" value={acquisitionSource} options={HOSTED_SOURCE_OPTIONS} onChange={setAcquisitionSource} />
+              <TemplateSelect label="Audience fit" value={audienceFit} options={HOSTED_AUDIENCE_FIT_OPTIONS} onChange={setAudienceFit} />
+            </div>
+          </section>
         </div>
         {bookingError && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{bookingError}</div>}
-        {loadingBookings && <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading class attendees from Momence...</div>}
+        {loadingBookings && <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">Loading class attendees from Momence...</div>}
 
         <div className="grid gap-4 xl:grid-cols-[minmax(520px,1.1fr)_minmax(420px,0.9fr)]">
-          <div className="space-y-3">
-            {selectedSession && (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Attendees</div>
-                <div className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">{attendees.length} loaded</div>
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Momence bookings</div>
+                <h4 className="mt-1 text-sm font-semibold text-slate-950">Attendee response</h4>
               </div>
+              <div className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+                {selectedSession ? `${attendees.length} loaded` : 'Awaiting session'}
+              </div>
+            </div>
+            {selectedSession && (
               <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
                 {attendees.length ? attendees.map((attendee) => (
-                  <div key={attendee.bookingId} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 lg:grid-cols-[minmax(0,1fr)_190px_190px]">
+                  <div key={attendee.bookingId} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:grid-cols-[minmax(0,1fr)_180px_190px]">
                     <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold text-slate-950">{attendee.memberName}</div>
-                      {attendee.memberContact && <div className="mt-0.5 truncate text-[11px] text-slate-500">{attendee.memberContact}</div>}
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-[11px] font-bold text-blue-700">
+                          {attendee.memberName.slice(0, 1).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-slate-950">{attendee.memberName}</div>
+                          {attendee.memberContact && <div className="mt-0.5 truncate text-[11px] text-slate-500">{attendee.memberContact}</div>}
+                        </div>
+                      </div>
                       <input
                         value={attendee.comment || ''}
                         onChange={(event) => updateAttendee(attendee.bookingId, { comment: event.target.value })}
                         placeholder="Optional member voice note"
-                        className="mt-2 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                       />
                     </div>
-                    <select
-                      value={attendee.status}
-                      onChange={(event) => updateAttendee(attendee.bookingId, { status: event.target.value })}
-                      className={`h-10 rounded-lg border px-2 text-xs font-semibold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${hostedStatusTone(attendee.status)}`}
-                    >
-                      {Array.from(new Set([attendee.status, ...HOSTED_ATTENDEE_STATUS_OPTIONS])).map((status) => (
-                        <option key={status} value={status}>{status}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={attendee.followUpPreference || HOSTED_FOLLOW_UP_OPTIONS[0]}
-                      onChange={(event) => updateAttendee(attendee.bookingId, { followUpPreference: event.target.value })}
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                    >
-                      {HOSTED_FOLLOW_UP_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
+                    <label className="block">
+                      <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">Attendance status</span>
+                      <select
+                        value={attendee.status}
+                        onChange={(event) => updateAttendee(attendee.bookingId, { status: event.target.value })}
+                        className={`h-10 w-full rounded-xl border px-2 text-xs font-semibold outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${hostedStatusTone(attendee.status)}`}
+                      >
+                        {Array.from(new Set([attendee.status, ...HOSTED_ATTENDEE_STATUS_OPTIONS])).map((status) => (
+                          <option key={status} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">Attendee follow-up</span>
+                      <select
+                        value={attendee.followUpPreference || HOSTED_FOLLOW_UP_OPTIONS[0]}
+                        onChange={(event) => updateAttendee(attendee.bookingId, { followUpPreference: event.target.value })}
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      >
+                        {HOSTED_FOLLOW_UP_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 )) : (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-3 py-8 text-center text-xs text-slate-500">
                     No attendees returned for this Momence class.
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
             {!selectedSession && (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-10 text-center text-sm leading-relaxed text-slate-500">
-                Select a Momence class above to load attendee status and follow-up fields.
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-10 text-center text-sm leading-relaxed text-slate-500">
+                Awaiting hosted Momence session selection.
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="grid content-start gap-3 sm:grid-cols-2">
-            <TemplateTextInput label="Partner / host" value={partnerName} onChange={setPartnerName} />
-            <TemplateSelect label="Audience fit" value={audienceFit} options={HOSTED_AUDIENCE_FIT_OPTIONS} onChange={setAudienceFit} />
-            <TemplateSelect label="Partner response" value={hostFeedback} options={HOSTED_PARTNER_RESPONSE_OPTIONS} onChange={setHostFeedback} />
-            <TemplateSelect label="Arrival pattern" value={lateComerFeedback} options={HOSTED_ARRIVAL_PATTERN_OPTIONS} onChange={setLateComerFeedback} />
-            <TemplateSelect label="Conversion signal" value={conversionSummary} options={HOSTED_CONVERSION_OPTIONS} onChange={setConversionSummary} />
-            <TemplateSelect label="Social opportunity" value={socialAmplification} options={HOSTED_SOCIAL_OPTIONS} onChange={setSocialAmplification} />
-            <TemplateSelect label="Follow-up plan" value={followUpPlan} options={HOSTED_FOLLOW_UP_PLAN_OPTIONS} onChange={setFollowUpPlan} />
-            <TemplateTextarea label="Member voice highlights" required value={classFeedback} onChange={setClassFeedback} />
-            <TemplateTextarea label="Additional context" value={otherFeedback} onChange={setOtherFeedback} />
-          </div>
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Ticket intelligence</div>
+                <h4 className="mt-1 text-sm font-semibold text-slate-950">Feedback and follow-up</h4>
+              </div>
+              <Gauge className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="grid content-start gap-3 sm:grid-cols-2">
+              <TemplateSelect label="Partner response" value={hostFeedback} options={HOSTED_PARTNER_RESPONSE_OPTIONS} onChange={setHostFeedback} />
+              <TemplateSelect label="Arrival pattern" value={lateComerFeedback} options={HOSTED_ARRIVAL_PATTERN_OPTIONS} onChange={setLateComerFeedback} />
+              <TemplateSelect label="Conversion signal" value={conversionSummary} options={HOSTED_CONVERSION_OPTIONS} onChange={setConversionSummary} />
+              <TemplateSelect label="Social opportunity" value={socialAmplification} options={HOSTED_SOCIAL_OPTIONS} onChange={setSocialAmplification} />
+              <TemplateSelect label="Follow-up plan" value={followUpPlan} options={HOSTED_FOLLOW_UP_PLAN_OPTIONS} onChange={setFollowUpPlan} />
+              <TemplateTextarea label="Member voice highlights" required value={classFeedback} onChange={setClassFeedback} />
+              <TemplateTextarea label="Additional context" value={otherFeedback} onChange={setOtherFeedback} />
+            </div>
+          </section>
         </div>
       </div>
-      <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${selectedSession ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            <CheckCircle2 className="h-3 w-3" />
+            {selectedSession ? 'Session selected' : 'Session required'}
+          </span>
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${classFeedback.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            <CheckCircle2 className="h-3 w-3" />
+            {classFeedback.trim() ? 'Member voice captured' : 'Member voice required'}
+          </span>
+        </div>
         <button
           type="submit"
           disabled={!canSubmit}
-          className="h-9 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-45"
         >
+          <CheckCircle2 className="h-3.5 w-3.5" />
           Generate ticket draft
         </button>
       </div>
@@ -3018,7 +3124,7 @@ const TemplateTextarea: React.FC<{
   required?: boolean;
   onChange: (value: string) => void;
 }> = ({ label, value, required = false, onChange }) => (
-  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100 sm:col-span-2">
+  <label className="block rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-100 sm:col-span-2">
     <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
       {label}
       {required ? <span className="text-blue-700"> *</span> : null}
@@ -3027,7 +3133,7 @@ const TemplateTextarea: React.FC<{
       value={value}
       onChange={(event) => onChange(event.target.value)}
       rows={3}
-      className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+      className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
   </label>
 );
@@ -3038,7 +3144,7 @@ const TemplateTextInput: React.FC<{
   required?: boolean;
   onChange: (value: string) => void;
 }> = ({ label, value, required = false, onChange }) => (
-  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+  <label className="block rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-100">
     <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
       {label}
       {required ? <span className="text-blue-700"> *</span> : null}
@@ -3046,7 +3152,7 @@ const TemplateTextInput: React.FC<{
     <input
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
   </label>
 );
@@ -3058,7 +3164,7 @@ const TemplateSelect: React.FC<{
   required?: boolean;
   onChange: (value: string) => void;
 }> = ({ label, value, options, required = false, onChange }) => (
-  <label className="block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+  <label className="block rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm transition focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-100">
     <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
       {label}
       {required ? <span className="text-blue-700"> *</span> : null}
@@ -3066,7 +3172,7 @@ const TemplateSelect: React.FC<{
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     >
       <option value="">Select {label.toLowerCase()}</option>
       {options.map((option) => (

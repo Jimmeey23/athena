@@ -35,4 +35,16 @@ describe('template form dialog layout', () => {
     expect(source).toContain("searchMomenceSessions('', { types: sessionTypes })");
     expect(source).toContain('momenceSessionDropdownCacheKey(sessionTypes)');
   });
+
+  it('keeps the hosted class form arranged as a polished operational template', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('Hosted template progress');
+    expect(source).toContain('Selected session');
+    expect(source).toContain('Partnership context');
+    expect(source).toContain('Feedback and follow-up');
+    expect(source).toContain('grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]');
+    expect(source).toContain('Session required');
+    expect(source).toContain('Member voice required');
+  });
 });
