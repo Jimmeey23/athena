@@ -11,6 +11,7 @@ import {
   getSlaState,
   getTicketGroupValue,
   isClosedTicket,
+  isRecordOnlyTicket,
   isTicketBreached,
   STATUSES,
   STUDIOS,
@@ -53,7 +54,7 @@ import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
 
 type DashboardView = 'list' | 'table' | 'kanban' | 'grouped' | 'sla' | 'analytics';
 type GroupBy = 'none' | 'status' | 'priority' | 'studio' | 'category' | 'assignee' | 'sla' | 'member';
-type SlaFilter = 'All' | 'Breached' | 'At Risk' | 'On Track' | 'Closed';
+type SlaFilter = 'All' | 'Breached' | 'At Risk' | 'On Track' | 'Closed' | 'Not Required';
 
 interface Filters {
   query: string;
@@ -529,7 +530,7 @@ function buildAnalytics(tickets: Ticket[]) {
       studioLoad: countBy((ticket) => ticket.studio).slice(0, 6),
       ownerLoad: countBy((ticket) => ticket.assignedTo).slice(0, 6),
       riskRows: tickets
-        .filter((ticket) => getSlaState(ticket) === 'Breached' || ticket.priority === 'Critical' || ticket.priority === 'High')
+        .filter((ticket) => !isRecordOnlyTicket(ticket) && (getSlaState(ticket) === 'Breached' || ticket.priority === 'Critical' || ticket.priority === 'High'))
         .slice(0, 8),
     },
   };
@@ -559,7 +560,7 @@ const FilterBar: React.FC<{
     </div>
     <FilterSelect label="Status" value={filters.status} values={['All', ...STATUSES]} onChange={(value) => onChange('status', value)} />
     <FilterSelect label="Priority" value={filters.priority} values={['All', 'Critical', 'High', 'Medium', 'Low']} onChange={(value) => onChange('priority', value)} />
-    <FilterSelect label="SLA" value={filters.sla} values={['All', 'Breached', 'At Risk', 'On Track', 'Closed']} onChange={(value) => onChange('sla', value as SlaFilter)} />
+    <FilterSelect label="SLA" value={filters.sla} values={['All', 'Breached', 'At Risk', 'On Track', 'Closed', 'Not Required']} onChange={(value) => onChange('sla', value as SlaFilter)} />
     <FilterSelect label="Studio" value={filters.studio} values={['All', ...options.studios]} onChange={(value) => onChange('studio', value)} />
     <FilterSelect label="Category" value={filters.category} values={['All', ...options.categories]} onChange={(value) => onChange('category', value)} />
     <FilterSelect label="Assignee" value={filters.assignee} values={['All', ...options.assignees]} onChange={(value) => onChange('assignee', value)} />
@@ -671,7 +672,7 @@ const TableView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void 
                 <Td><PlainTableValue value={ticket.priority} /></Td>
                 <Td>
                   <div className="flex min-w-0 items-center gap-2">
-                    <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="shrink-0 ring-0" />
+                    <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} noSla={isRecordOnlyTicket(ticket)} compact className="shrink-0 ring-0" />
                     <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-400">{sla}</span>
                   </div>
                 </Td>
@@ -732,6 +733,8 @@ const SlaPill: React.FC<{ state: string }> = ({ state }) => {
         ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300'
         : state === 'Closed'
           ? 'border-stone-200 bg-stone-50 text-stone-600 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300'
+          : state === 'Not Required'
+            ? 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
           : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300';
   return <span className={`inline-flex max-w-full rounded-full border px-2 py-0.5 text-[11px] font-semibold ${className}`}>{state}</span>;
 };
@@ -802,7 +805,7 @@ const SlaView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }>
           Escalation routing
         </div>
         <div className="space-y-2 p-4">
-          {sorted.filter((ticket) => getSlaState(ticket) !== 'Closed').slice(0, 12).map((ticket) => {
+          {sorted.filter((ticket) => !['Closed', 'Not Required'].includes(getSlaState(ticket))).slice(0, 12).map((ticket) => {
             const state = getSlaState(ticket);
             const target = getEscalationTarget(ticket.assignedTo);
             return (
@@ -821,7 +824,7 @@ const SlaView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }>
                   {ticket.assignedTo} → {target}
                 </div>
                 <div className="mt-2">
-                  <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="w-full justify-start ring-0" />
+                  <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} noSla={isRecordOnlyTicket(ticket)} compact className="w-full justify-start ring-0" />
                 </div>
               </button>
             );
@@ -856,7 +859,7 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
             </div>
             <PriorityPill priority={ticket.priority} />
             <div className="space-y-1">
-              <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="w-full justify-start ring-0" />
+              <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} noSla={isRecordOnlyTicket(ticket)} compact className="w-full justify-start ring-0" />
               <SlaPill state={getSlaState(ticket)} />
             </div>
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap, LayoutTemplate } from 'lucide-react';
+import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap, LayoutTemplate, Download, FileText, FileCode2, ImageDown } from 'lucide-react';
 import InteractiveRobotSpline from '@/components/InteractiveRobotSpline';
 import { ROBOT_SPLINE_URL } from '@/lib/galleryImages';
 import { TicketPreviewCard } from './TicketPreviewCard';
@@ -9,6 +9,7 @@ import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import {
   getMomenceMemberMemberships,
   getMomenceSessionBookings,
+  listMomenceHostMembershipOptions,
   loadMomenceTicketContext,
   MomenceInsightSummary,
   MomenceMemberOption,
@@ -42,7 +43,6 @@ import {
   HOSTED_CLASS_FEEDBACK_AREAS,
   INTAKE_ROUTES,
   MEMBER_SENTIMENT_OPTIONS,
-  MEMBERSHIPS,
   PRIORITY_SLA,
   REQUEST_TYPES,
   ROLLOVER_REASONS,
@@ -52,7 +52,7 @@ import {
   resolveTicketAssignee,
   resolveTicketDepartment,
 } from '@/lib/ticketing-data';
-import { findExistingSubmittedTicket } from '@/lib/ticket-duplicate-matching';
+import { findRelatedSubmittedTickets } from '@/lib/ticket-duplicate-matching';
 import { invokeTicketingFunction, withTimeout } from '@/lib/ticketing-functions';
 import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
 import {
@@ -71,6 +71,11 @@ import {
   limitConversationalFieldBatch,
   serializeConversationPlan,
 } from '@/lib/intake-conversation-plan';
+import {
+  htmlForChatTranscript,
+  plainTextForChatTranscript,
+  transcriptFileBaseName,
+} from '@/lib/chat-export';
 import {
   CONTEXT_TEMPLATES,
   ContextTemplate,
@@ -346,7 +351,7 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
     id: 'membership',
     label: 'Package / Membership',
     type: 'select',
-    options: MEMBERSHIPS,
+    options: [],
   },
   memberName: {
     id: 'memberName',
@@ -480,6 +485,112 @@ function getDetailField(id: string): DetailFormField | undefined {
   return DETAIL_FORM_FIELD_LIBRARY[id] || getIntakeFieldDefinition(id);
 }
 
+function downloadTextFile(filename: string, text: string, contentType: string) {
+  const blob = new Blob([text], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadDataUrl(filename: string, dataUrl: string) {
+  const anchor = document.createElement('a');
+  anchor.href = dataUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function collectDocumentStyleText(): string {
+  return Array.from(document.styleSheets)
+    .map((sheet) => {
+      try {
+        return Array.from(sheet.cssRules)
+          .map((rule) => rule.cssText)
+          .join('\n');
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function absoluteImageSources(root: HTMLElement) {
+  root.querySelectorAll('img').forEach((image) => {
+    const source = image.getAttribute('src');
+    if (!source) return;
+    try {
+      image.setAttribute('src', new URL(source, window.location.href).href);
+    } catch {
+      // Keep the original source if URL normalization fails.
+    }
+  });
+}
+
+async function imageLoaded(image: HTMLImageElement): Promise<void> {
+  if ('decode' in image) {
+    await image.decode();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('PNG export image render failed'));
+  });
+}
+
+async function pngDataUrlForElementScreenshot(node: HTMLElement): Promise<string> {
+  const width = Math.max(1, node.clientWidth);
+  const height = Math.max(1, node.clientHeight);
+  const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+  const clone = node.cloneNode(true) as HTMLElement;
+  absoluteImageSources(clone);
+  clone.style.width = `${Math.max(node.scrollWidth, width)}px`;
+  clone.style.height = `${Math.max(node.scrollHeight, height)}px`;
+  clone.style.maxWidth = 'none';
+  clone.style.maxHeight = 'none';
+  clone.style.overflow = 'visible';
+  clone.style.transform = `translate(${-node.scrollLeft}px, ${-node.scrollTop}px)`;
+  clone.style.transformOrigin = 'top left';
+
+  const wrapper = document.createElement('div');
+  wrapper.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+  wrapper.style.width = `${width}px`;
+  wrapper.style.height = `${height}px`;
+  wrapper.style.overflow = 'hidden';
+  wrapper.style.background = '#f3f4f6';
+
+  const style = document.createElement('style');
+  style.textContent = collectDocumentStyleText();
+  wrapper.append(style, clone);
+
+  const serialized = new XMLSerializer().serializeToString(wrapper);
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<foreignObject width="100%" height="100%">${serialized}</foreignObject>`,
+    '</svg>',
+  ].join('');
+  const image = new Image();
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await imageLoaded(image);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(width * pixelRatio);
+  canvas.height = Math.round(height * pixelRatio);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas is unavailable for PNG export');
+  context.scale(pixelRatio, pixelRatio);
+  context.fillStyle = '#f3f4f6';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL('image/png');
+}
+
 function normalizeDetailForm(input: unknown): DetailForm | null {
   if (!input || typeof input !== 'object') return null;
   const form = input as Partial<DetailForm> & { fields?: Array<Partial<DetailFormField> | string> };
@@ -491,7 +602,8 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
         const normalizedId = field === 'requestType' ? 'intakeRoute' : field;
         if (seen.has(normalizedId)) return null;
         seen.add(normalizedId);
-        return getDetailField(normalizedId);
+        const base = getDetailField(normalizedId);
+        return base ? { ...base, required: true } : undefined;
       }
       const id = field.id ? (String(field.id) === 'requestType' ? 'intakeRoute' : String(field.id)) : '';
       if (id === 'reportedBy') return null;
@@ -499,10 +611,8 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
       if (seen.has(id)) return null;
       seen.add(id);
       if (base) {
-        // AI-provided label and options take priority over library defaults.
-        // This lets the AI give contextual, issue-specific labels to known fields
-        // (e.g. 'description' can be labelled "What is wrong with the latch?" instead
-        // of the generic library label "Member's stated feedback").
+        // AI-provided labels can be contextual, but known fields keep the app's
+        // standard option lists so irrelevant choices do not leak into the form.
         const aiLabel = typeof (field as Partial<DetailFormField>).label === 'string' && (field as Partial<DetailFormField>).label!.trim()
           ? (field as Partial<DetailFormField>).label!.trim()
           : null;
@@ -510,12 +620,14 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
         const aiOptions = Array.isArray(rawAiOptions) && rawAiOptions.length > 0
           ? rawAiOptions.map(String).filter(Boolean).slice(0, 30)
           : null;
+        const standardOptions = base.options?.length ? base.options : null;
         return {
           ...base,
           ...field,
           id: base.id,
           label: aiLabel || base.label,
-          options: aiOptions || base.options,
+          options: standardOptions || aiOptions || base.options,
+          required: field.required ?? base.required,
         } as DetailFormField;
       }
 
@@ -587,6 +699,7 @@ function normalizeInferredContext(input: unknown): Partial<DetailContext> {
   assignString('subCategory');
   assignString('priority');
   assignString('memberSentiment');
+  assignString('resolutionRequired');
   assignString('desiredResolution');
   assignString('urgencyReason');
   assignString('clientsAffected');
@@ -642,12 +755,13 @@ function pruneDetailForm(form: DetailForm | null, ctx: DetailContext): DetailFor
 
 function filterAiDetailForm(form: DetailForm | null, ctx: DetailContext, requiredFields: Set<string>): DetailForm | null {
   if (!form) return null;
-  const fields = form.fields.filter((field) => {
+  const fields = form.fields.map((field) => {
     if (field.id === 'reportedBy') return false;
     if (field.id === 'description' && requiredFields.size > 0 && !requiredFields.has('description')) return false;
-    if (!isProtectedEntityField(field.id)) return true;
-    return requiredFields.has(field.id);
-  });
+    if (getDetailField(field.id) && !requiredFields.has(field.id)) return false;
+    if (isProtectedEntityField(field.id) && !requiredFields.has(field.id)) return false;
+    return requiredFields.has(field.id) ? { ...field, required: true } : field;
+  }).filter(Boolean) as DetailFormField[];
 
   if (fields.length === 0) return null;
   return { ...form, fields };
@@ -787,6 +901,15 @@ function requiredFieldsForIssue(ctx: DetailContext, draft?: DraftTicket | null):
         ...ctx,
         category: ctx.category || draft.category,
         subCategory: ctx.subCategory || draft.subCategory,
+        priority: ctx.priority || draft.priority,
+        studio: ctx.studio || draft.studio,
+        trainer: ctx.trainer || draft.trainer || undefined,
+        classType: ctx.classType || draft.classType || undefined,
+        classDateTime: ctx.classDateTime || draft.classDateTime || undefined,
+        memberName: ctx.memberName || draft.memberName || undefined,
+        memberContact: ctx.memberContact || draft.memberContact || undefined,
+        reportedBy: ctx.reportedBy || draft.reportedBy || undefined,
+        memberSentiment: ctx.memberSentiment || draft.sentiment || undefined,
       }
     : ctx;
   if (draft) return getMissingIntakeFields(mergedContext, { includeClientImpact: true });
@@ -991,7 +1114,7 @@ function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket
     memberContact: null,
     reportedBy: null,
     assignedTo: 'Trainer Profile',
-    department: 'Training',
+    department: 'Training & Client Experience',
     tags: ['trainer-profile', 'instructor-evaluation', 'profile-only', input.template.toLowerCase()],
     sentiment: scorePercent >= 80 ? 'Positive' : scorePercent >= 65 ? 'Neutral' : 'Concern',
     conversationSummary: [
@@ -1005,7 +1128,7 @@ function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket
       profileOnly: true,
       trainerReview,
       routing: {
-        department: 'Training',
+        department: 'Training & Client Experience',
         assigned_to: 'Trainer Profile',
         status: 'Closed',
         priority: 'Low',
@@ -1038,6 +1161,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const [textToTicketText, setTextToTicketText] = useState('');
   const [activeTemplate, setActiveTemplate] = useState<ContextTemplate | null>(null);
   const [now, setNow] = useState<Date>(new Date());
+  const [exportingFormat, setExportingFormat] = useState<'png' | null>(null);
   const publishingRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1061,6 +1185,59 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     () => messages.find((message) => message.id === activeDraftReviewMessageId && message.ticket) || null,
     [activeDraftReviewMessageId, messages]
   );
+
+  const addExportError = useCallback((format: string, error: unknown) => {
+    const message = getDisplayError(error, `Could not export ${format}`);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `export-error-${Date.now()}`,
+        role: 'assistant',
+        content: `I could not export the conversation as ${format}: ${message}`,
+      },
+    ]);
+  }, []);
+
+  const exportTranscriptText = useCallback(() => {
+    try {
+      const exportedAt = new Date();
+      downloadTextFile(
+        `${transcriptFileBaseName(exportedAt)}.txt`,
+        plainTextForChatTranscript(messages, { conversationId, reporterName, exportedAt }),
+        'text/plain;charset=utf-8'
+      );
+    } catch (error) {
+      addExportError('text', error);
+    }
+  }, [addExportError, conversationId, messages, reporterName]);
+
+  const exportTranscriptHtml = useCallback(() => {
+    try {
+      const exportedAt = new Date();
+      downloadTextFile(
+        `${transcriptFileBaseName(exportedAt)}.html`,
+        htmlForChatTranscript(messages, { conversationId, reporterName, exportedAt }),
+        'text/html;charset=utf-8'
+      );
+    } catch (error) {
+      addExportError('HTML', error);
+    }
+  }, [addExportError, conversationId, messages, reporterName]);
+
+  const exportTranscriptPng = useCallback(async () => {
+    const node = scrollRef.current;
+    if (!node) return;
+    setExportingFormat('png');
+    try {
+      const exportedAt = new Date();
+      const dataUrl = await pngDataUrlForElementScreenshot(node);
+      downloadDataUrl(`${transcriptFileBaseName(exportedAt)}.png`, dataUrl);
+    } catch (error) {
+      addExportError('PNG', error);
+    } finally {
+      setExportingFormat(null);
+    }
+  }, [addExportError]);
 
   useEffect(() => {
     setContext((current) => {
@@ -1337,16 +1514,23 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     const requestEpoch = activeChatEpochRef.current;
     try {
       setLoading(true);
-      const existingTicket = findExistingSubmittedTicket(capturedVoice || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
-      if (existingTicket) {
-        setSelectedTicket(existingTicket);
-        onOpenExistingTicket?.(existingTicket);
+      const relatedTickets = findRelatedSubmittedTickets(capturedVoice || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
+      if (relatedTickets.exactDuplicate) {
         setMessages((prev) => [
           ...prev,
           {
             id: `duplicate-${Date.now()}`,
             role: 'assistant',
-            content: `Possible existing ticket: **${existingTicket.id}** — ${existingTicket.title}. I opened it for reference, but I will still draft a new ticket below so you can proceed if this is a separate issue.`,
+            content: `Exact duplicate found: **${relatedTickets.exactDuplicate.id}** — ${relatedTickets.exactDuplicate.title}. I will merge this intake into that ticket automatically if you approve the draft; I will not open the ticket drawer.`,
+          },
+        ]);
+      } else if (relatedTickets.similarTickets.length > 0) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `similar-${Date.now()}`,
+            role: 'assistant',
+            content: `Similar ticket group found: ${relatedTickets.similarTickets.map((ticket) => `**${ticket.id}**`).join(', ')}. These will be grouped for context only, not merged, because the specifics are different.`,
           },
         ]);
       }
@@ -1454,9 +1638,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             reporterFirstName,
           })
         : finalDetailForm
-          ? (data?.reply && !/form below|complete the .*fields below/i.test(data.reply)
-              ? data.reply
-              : `${reporterFirstName ? `${reporterFirstName}, ` : ''}I need a few details before drafting this ticket.`)
+          ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}I need the remaining required details before drafting this ticket.`
           : ticket
             ? 'I drafted the ticket below. Please review it before publishing.'
             : data?.reply || "Hmm, I didn't catch that. Could you rephrase?";
@@ -1963,7 +2145,13 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
               <p className="truncate text-xs text-slate-500">Support, Smarter.</p>
             </div>
           </div>
-          <div />
+          <ChatExportMenu
+            disabled={messages.length === 0 || Boolean(exportingFormat)}
+            exportingPng={exportingFormat === 'png'}
+            onExportText={exportTranscriptText}
+            onExportHtml={exportTranscriptHtml}
+            onExportPng={exportTranscriptPng}
+          />
         </div>
 
         {instructorEvaluationMode ? (
@@ -2274,6 +2462,69 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         )}
       </div>
     </div>
+  );
+};
+
+const ChatExportMenu: React.FC<{
+  disabled?: boolean;
+  exportingPng?: boolean;
+  onExportText: () => void;
+  onExportHtml: () => void;
+  onExportPng: () => void | Promise<void>;
+}> = ({ disabled = false, exportingPng = false, onExportText, onExportHtml, onExportPng }) => {
+  const [open, setOpen] = useState(false);
+  const runAction = (action: () => void | Promise<void>) => {
+    setOpen(false);
+    void action();
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45"
+          title="Export chat conversation"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-56 overflow-hidden rounded-2xl border-slate-200 bg-white/96 p-1.5 shadow-[0_24px_70px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+      >
+        <button
+          type="button"
+          onClick={() => runAction(onExportText)}
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          Text transcript
+        </button>
+        <button
+          type="button"
+          onClick={() => runAction(onExportHtml)}
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+        >
+          <FileCode2 className="h-3.5 w-3.5" />
+          HTML transcript
+        </button>
+        <button
+          type="button"
+          onClick={() => runAction(onExportPng)}
+          disabled={exportingPng}
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ImageDown className="h-3.5 w-3.5" />
+          {exportingPng ? 'Preparing PNG...' : 'PNG screenshot'}
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -3040,7 +3291,7 @@ const DraftTicketReviewPreview: React.FC<{
 
   const reviewContext = useMemo(() => contextFromDraft(draft, context), [context, draft]);
   const duplicateTicket = useMemo(
-    () => findExistingSubmittedTicket(`${draft.title}\n${draft.description}`, reviewContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket))),
+    () => findRelatedSubmittedTickets(`${draft.title}\n${draft.description}`, reviewContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket))).exactDuplicate,
     [draft.description, draft.title, reviewContext, tickets]
   );
   const reviewInsights = useMemo(
@@ -3454,27 +3705,48 @@ const DetailCaptureForm: React.FC<{
     if (initialContext[key]) initialValues[key] = initialContext[key] || '';
   }
   const [values, setValues] = useState<Record<string, string>>(initialValues);
-  const [membershipOptions, setMembershipOptions] = useState<string[]>(MEMBERSHIPS);
+  const [hostMembershipOptions, setHostMembershipOptions] = useState<string[]>([]);
+  const [membershipOptions, setMembershipOptions] = useState<string[]>([]);
   const hasMemberFields = form.fields.some((field) => field.id === 'memberName' || field.id === 'memberContact');
   const hasSessionFields = form.fields.some((field) => field.id === 'classType' || field.id === 'classDateTime' || field.id === 'sessionId');
 
   useEffect(() => {
-    if (!values.memberId) {
-      setMembershipOptions(MEMBERSHIPS);
-      return;
-    }
     let cancelled = false;
-    loadActiveMembershipOptions(values.memberId)
+    loadHostMembershipOptions()
       .then((options) => {
-        if (!cancelled) setMembershipOptions(options);
+        if (!cancelled) {
+          setHostMembershipOptions(options);
+          setMembershipOptions((current) => current.length ? current : options);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMembershipOptions(MEMBERSHIPS);
+        if (!cancelled) {
+          setHostMembershipOptions([]);
+          setMembershipOptions((current) => current);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [values.memberId]);
+  }, []);
+
+  useEffect(() => {
+    if (!values.memberId) {
+      setMembershipOptions(hostMembershipOptions);
+      return;
+    }
+    let cancelled = false;
+    loadActiveMembershipOptions(values.memberId, hostMembershipOptions)
+      .then((options) => {
+        if (!cancelled) setMembershipOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setMembershipOptions(hostMembershipOptions);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostMembershipOptions, values.memberId]);
 
   const setValue = (id: string, value: string) => {
     setValues((current) => {
@@ -3546,6 +3818,7 @@ const DetailCaptureForm: React.FC<{
         {hasSessionFields && (
           <MomenceSessionDropdownField
             values={values}
+            multi={false}
             onChange={(sessions) => {
               setValues((current) => ({
                 ...current,
@@ -3570,11 +3843,9 @@ const DetailCaptureForm: React.FC<{
               ? CATEGORIES[category] || []
               : field.id === 'subCategory'
                 ? []
-              : field.id === 'membership' && values.memberId
-                ? membershipOptions
-                : field.id === 'membership'
-                  ? MEMBERSHIPS
-                  : field.options || [];
+              : field.id === 'membership'
+                ? withCurrentOption(membershipOptions, values.membership)
+                : field.options || [];
 
           return (
             <div
@@ -3610,6 +3881,8 @@ const DetailCaptureForm: React.FC<{
                     'subCategory',
                     'priority',
                     'studio',
+                    'trainer',
+                    'reportedBy',
                     'memberSentiment',
                     'clientsAffected',
                     'classImpactType',
@@ -3621,9 +3894,13 @@ const DetailCaptureForm: React.FC<{
                     'followUpPreference',
                     'hvacSymptom',
                     'machineSymptom',
+                    'bikeSymptom',
+                    'equipmentSymptom',
                     'lockFaultType',
                     'accessStatus',
                     'securityRisk',
+                    'resolutionRequirement',
+                    'affectedArea',
                     'plumbingSymptom',
                     'electricalSymptom',
                     'appIssueSurface',
@@ -3853,12 +4130,28 @@ function formatMembershipOption(membership: MomenceMembership): string {
   return [name, credits, endDate].filter(Boolean).join(' · ');
 }
 
-async function loadActiveMembershipOptions(memberId: string): Promise<string[]> {
+function uniqueOptions(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function withCurrentOption(options: string[], current?: string): string[] {
+  return uniqueOptions([...(current ? [current] : []), ...options]);
+}
+
+let hostMembershipOptionsCache: string[] | null = null;
+
+async function loadHostMembershipOptions(): Promise<string[]> {
+  if (hostMembershipOptionsCache) return hostMembershipOptionsCache;
+  hostMembershipOptionsCache = await listMomenceHostMembershipOptions();
+  return hostMembershipOptionsCache;
+}
+
+async function loadActiveMembershipOptions(memberId: string, hostMembershipOptions: string[] = []): Promise<string[]> {
   const memberships = await getMomenceMemberMemberships(memberId);
   const activeMembershipOptions = memberships
     .filter((membership) => !membership.isFrozen)
     .map(formatMembershipOption);
-  return Array.from(new Set([...activeMembershipOptions, ...MEMBERSHIPS]));
+  return uniqueOptions([...activeMembershipOptions, ...hostMembershipOptions]);
 }
 
 const MOMENCE_SESSION_DROPDOWN_CACHE_KEY = '__momence_session_dropdown_options__';

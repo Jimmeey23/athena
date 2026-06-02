@@ -1,3 +1,10 @@
+import {
+  REPORTING_ASSOCIATES,
+  STUDIOS,
+  TRAINERS,
+  getStudioAreaOptions,
+} from './ticketing-data';
+
 export type IntakePriority = 'Critical' | 'High' | 'Medium' | 'Low';
 
 const KNOWN_MEMBERSHIP_NAMES = [
@@ -68,6 +75,7 @@ export interface IntakeContext {
   desiredResolution?: string;
   urgencyReason?: string;
   memberSentiment?: string;
+  resolutionRequired?: string;
   momencePurchaseContext?: string;
   classImpactType?: string;
   classImpactDetails?: string;
@@ -90,6 +98,7 @@ export interface IntakeContext {
 const PLACEHOLDER_VALUE_PATTERN = /unspecified|not specified|member-reported issue|ai intake|authenticated user/i;
 
 const INTAKE_ROUTES = ['Request', 'Complaint', 'Feedback', 'Internal Reporting'];
+export const RESOLUTION_REQUIRED_OPTIONS = ['Yes', 'No'] as const;
 export const CLIENTS_AFFECTED_OPTIONS = [
   'Yes - directly affected',
   'Yes - indirectly affected',
@@ -106,6 +115,34 @@ export const CLASS_IMPACT_TYPE_OPTIONS = [
   'Capacity or comfort issue',
   'Member left early',
   'Other impact',
+] as const;
+export const OPERATIONAL_IMPACT_OPTIONS = [
+  'No immediate operational impact',
+  'Studio tool unavailable',
+  'Member-facing session affected',
+  'Staff workflow affected',
+  'Safety or access risk',
+  'Revenue/bookings affected',
+  'Comfort or cleanliness affected',
+  'Unable to determine',
+] as const;
+export const CURRENT_WORKAROUND_OPTIONS = [
+  'No workaround currently in place',
+  'Item removed from use',
+  'Members redirected to alternate option',
+  'Temporary signage / communication added',
+  'Staff monitoring manually',
+  'Vendor/team already notified',
+  'Workaround not possible',
+  'Unable to determine',
+] as const;
+export const RESOLUTION_REQUIREMENT_OPTIONS = [
+  'Vendor inspection / repair required',
+  'Internal operations follow-up required',
+  'Replacement part or item needed',
+  'Monitor and close if stable',
+  'No action needed / record only',
+  'Escalate to studio management',
 ] as const;
 
 const STUDIO_REQUIRED_CATEGORIES = new Set([
@@ -175,18 +212,25 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
   },
   category: { id: 'category', label: 'Category', type: 'select', required: true },
   subCategory: { id: 'subCategory', label: 'Issue type', type: 'select', required: true, dependsOn: 'category' },
-  studio: { id: 'studio', label: 'Studio', type: 'select', required: true },
+  studio: { id: 'studio', label: 'Studio', type: 'select', required: true, options: [...STUDIOS] },
   incidentDateTime: { id: 'incidentDateTime', label: 'When was this first noticed?', type: 'datetime-local', required: true },
-  reportedBy: { id: 'reportedBy', label: 'Documented By', type: 'text', required: true },
+  reportedBy: { id: 'reportedBy', label: 'Documented By', type: 'select', required: true, options: [...REPORTING_ASSOCIATES] },
   priority: { id: 'priority', label: 'Priority', type: 'select', required: true, options: ['Critical', 'High', 'Medium', 'Low'] },
   description: { id: 'description', label: 'Issue summary', type: 'textarea', required: true },
   memberName: { id: 'memberName', label: 'Member', type: 'text', required: true },
   memberContact: { id: 'memberContact', label: 'Member Contact', type: 'text' },
   classType: { id: 'classType', label: 'Momence Class / Session', type: 'select', required: true },
-  trainer: { id: 'trainer', label: 'Instructor', type: 'select' },
+  trainer: { id: 'trainer', label: 'Instructor', type: 'select', options: [...TRAINERS] },
   membership: { id: 'membership', label: 'Active Package / Membership', type: 'select', required: true },
   desiredResolution: { id: 'desiredResolution', label: 'Requested resolution', type: 'textarea' },
   memberSentiment: { id: 'memberSentiment', label: 'Member Sentiment', type: 'select' },
+  resolutionRequired: {
+    id: 'resolutionRequired',
+    label: 'Does this ticket require a resolution?',
+    type: 'select',
+    required: true,
+    options: [...RESOLUTION_REQUIRED_OPTIONS],
+  },
   momencePurchaseContext: {
     id: 'momencePurchaseContext',
     label: 'Momence purchase/payment context',
@@ -223,6 +267,20 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
     type: 'select',
     required: true,
     options: ['Will not turn on', 'Not draining', 'Not spinning', 'Leaking water', 'Electrical issue', 'Excess noise or vibration', 'Other / unsure'],
+  },
+  bikeSymptom: {
+    id: 'bikeSymptom',
+    label: 'Bike issue observed',
+    type: 'select',
+    required: true,
+    options: ['Console or power not responding', 'Resistance not adjusting', 'Pedal or crank issue', 'Seat or handlebar issue', 'Loose part', 'Excess noise or vibration', 'Other / unsure'],
+  },
+  equipmentSymptom: {
+    id: 'equipmentSymptom',
+    label: 'Studio tool issue observed',
+    type: 'select',
+    required: true,
+    options: ['Not working / unusable', 'Loose or broken part', 'Electrical issue', 'Missing part or accessory', 'Excess noise or vibration', 'Other / unsure'],
   },
   hvacSymptom: {
     id: 'hvacSymptom',
@@ -266,24 +324,27 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
     required: true,
     options: ['Light not working', 'Flickering light', 'Socket not working', 'Exposed/loose wiring', 'Trip or power loss', 'Other / unsure'],
   },
-  affectedArea: { id: 'affectedArea', label: 'Affected area inside the studio', type: 'text', required: true },
+  affectedArea: { id: 'affectedArea', label: 'Affected area inside the studio', type: 'select', required: true, options: getStudioAreaOptions() },
   operationalImpact: {
     id: 'operationalImpact',
     label: 'Operational impact right now',
-    type: 'textarea',
+    type: 'select',
     required: true,
+    options: [...OPERATIONAL_IMPACT_OPTIONS],
   },
   currentWorkaround: {
     id: 'currentWorkaround',
     label: 'Temporary workaround currently in place',
-    type: 'textarea',
+    type: 'select',
     required: true,
+    options: [...CURRENT_WORKAROUND_OPTIONS],
   },
   resolutionRequirement: {
     id: 'resolutionRequirement',
     label: 'Expected resolution or vendor action needed',
-    type: 'textarea',
+    type: 'select',
     required: true,
+    options: [...RESOLUTION_REQUIREMENT_OPTIONS],
   },
   appIssueSurface: {
     id: 'appIssueSurface',
@@ -364,7 +425,12 @@ function shouldRequireCommercialVerificationContext(context: IntakeContext, issu
   const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
   const classAccessConcern =
     mentionsClassContext &&
-    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+    (
+      /(denied|not allowed|unable to join|could not join|cannot join|would not be able|restriction|protocol|policy)/.test(lower) ||
+      /\blate\s+(entry|arrival|cancellation|cancel|policy)\b/.test(lower) ||
+      /\barrived\s+late\b.{0,60}\b(denied|not allowed|unable|could not|cannot|entry|policy|restriction)\b/.test(lower) ||
+      /\bfirst\s+(class|barre|power\s?cycle|cycle|session)\b/.test(lower)
+    );
 
   return commercialConcern || classAccessConcern;
 }
@@ -522,8 +588,18 @@ function getIssueProfileFieldIds(context: IntakeContext): string[] {
 
   if (!PHYSICAL_ONLY_CATEGORIES.has(category)) return [];
 
-  if (/washing|washer|laundry|dryer|machine/.test(issueText) || subCategory === 'Broken Equipment Not Repaired') {
+  const bikeIssue = /\b(?:bike|spin bike|cycle bike|powercycle bike|power cycle bike)\b|\bbike\s*(?:no|number|#)?\s*\d+\b/.test(issueText);
+  if (bikeIssue) {
+    return ['bikeSymptom', 'operationalImpact', 'currentWorkaround', 'resolutionRequirement'];
+  }
+
+  const laundryMachineIssue = /washing|washer|laundry|dryer|machine/.test(issueText);
+  if (laundryMachineIssue) {
     return ['machineSymptom', 'operationalImpact', 'currentWorkaround', 'resolutionRequirement'];
+  }
+
+  if (subCategory === 'Broken Equipment Not Repaired' || /equipment|studio tool|method tool|tool|prop|mat|weights?|ball|barre|station/.test(issueText)) {
+    return ['equipmentSymptom', 'operationalImpact', 'currentWorkaround', 'resolutionRequirement'];
   }
 
   if (/door|lock|latch|handle|hinge|access|closing|opening/.test(issueText) || subCategory === 'Door Lock Issues') {
@@ -827,6 +903,7 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
   if (!isPhysicalCategory) {
     add('description', shouldRequireFullIssueSummary(context, issueText) ? '' : context.description);
   }
+  add('resolutionRequired', context.resolutionRequired);
 
   return fields;
 }
@@ -836,12 +913,19 @@ export function isIntakePublishable(context: IntakeContext): boolean {
 }
 
 export function getIntakeFieldDefinitions(context: IntakeContext): IntakeFieldDefinition[] {
-  return getMissingIntakeFields(context).map((id) => (
-    FIELD_DEFINITIONS[id] || {
+  return getMissingIntakeFields(context).map((id) => {
+    const definition = FIELD_DEFINITIONS[id];
+    if (definition?.id === 'affectedArea') {
+      return {
+        ...definition,
+        options: getStudioAreaOptions(context.studio),
+      };
+    }
+    return definition || {
       id,
       label: id.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (value) => value.toUpperCase()),
       type: 'text',
       required: true,
-    }
-  ));
+    };
+  });
 }

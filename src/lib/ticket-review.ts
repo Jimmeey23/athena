@@ -170,7 +170,7 @@ export function buildTicketReviewInsights({
       ? `SLA risk: ${draft.priority} priority ticket should be published promptly to start the ${slaHours}h SLA clock.`
       : undefined,
     duplicateTicket
-      ? `Duplicate risk: possible existing ticket ${duplicateTicket.id} should be linked or merged if it is the same issue.`
+      ? `Exact duplicate: existing ticket ${duplicateTicket.id} will be merged automatically on approval.`
       : undefined,
   ]);
 

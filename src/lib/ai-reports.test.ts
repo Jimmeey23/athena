@@ -11,9 +11,11 @@ import {
   filterTicketsForReport,
   getResolvedAt,
   htmlForReport,
+  isTrainerReportId,
   normalizeReportNarrativeResponse,
   paginateReportRows,
   reportPayloadForNarrative,
+  reportRuntimeErrorMessage,
 } from './ai-reports';
 
 const baseTicket = (patch: Partial<Ticket>): Ticket => ({
@@ -46,11 +48,16 @@ const event = (patch: Partial<TicketReportEvent>): TicketReportEvent => ({
 });
 
 describe('AI reports engine', () => {
-  it('declares exactly 20 report definitions with stable ids', () => {
-    expect(ALL_REPORT_DEFINITIONS).toHaveLength(20);
-    expect(new Set(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).size).toBe(20);
+  it('declares the expanded report catalog with stable trainer intelligence ids', () => {
+    expect(ALL_REPORT_DEFINITIONS.length).toBeGreaterThan(20);
+    expect(new Set(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).size).toBe(ALL_REPORT_DEFINITIONS.length);
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('executive_operations_summary');
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('data_quality_intake_completeness');
+    expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_performance_consolidated');
+    expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_member_voice_consolidated');
+    expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_coaching_priority_report');
+    expect(isTrainerReportId('trainer_performance_consolidated')).toBe(true);
+    expect(isTrainerReportId('executive_operations_summary')).toBe(false);
   });
 
   it('filters tickets by inclusive created date bounds and source type', () => {
@@ -142,6 +149,77 @@ describe('AI reports engine', () => {
       expect(report.sourceRows.length).toBeGreaterThan(0);
       expect(report.dataQualityNotes.length).toBeGreaterThan(0);
     }
+  });
+
+  it('builds consolidated trainer performance reports from evaluations and member voice tickets', () => {
+    const report = buildReport({
+      reportId: 'trainer_performance_consolidated',
+      tickets: [
+        baseTicket({
+          id: 'P57-TRAINER-1',
+          title: 'Instructor evaluation · Simran Dutt · Barre',
+          description: 'Instructor evaluation submitted for Simran Dutt.',
+          category: 'Trainer Feedback',
+          subCategory: 'Knowledge and Competence',
+          priority: 'Low',
+          status: 'Closed',
+          trainer: 'Simran Dutt',
+          tags: ['trainer-profile', 'instructor-evaluation', 'profile-only', 'barre'],
+          sentiment: 'Positive',
+          createdAt: '2026-05-08T10:00:00.000Z',
+          metadata: {
+            profileOnly: true,
+            trainerReview: {
+              id: 'review-1',
+              trainer: 'Simran Dutt',
+              template: 'Barre',
+              studio: 'Supreme HQ, Bandra',
+              classType: 'Studio Barre 57',
+              reviewPeriod: '2026-05-08',
+              createdAt: '2026-05-08T10:00:00.000Z',
+              totalWeightage: 100,
+              totalScore: 84,
+              scorePercent: 84,
+              scores: [
+                { category: 'Client feedback', weightage: 12.5, score: 11 },
+                { category: 'Musicality', weightage: 8, score: 5 },
+              ],
+              feedback: 'Strong client connection with musicality coaching needed.',
+              focusPoints: 'Beat matching',
+              goals: 'Hold 85%+ in next review',
+            },
+          },
+        }),
+        baseTicket({
+          id: 'P57-TRAINER-2',
+          title: 'Member compliment for Simran',
+          description: 'Member reported that Simran gave clear corrections.',
+          category: 'Trainer Feedback',
+          subCategory: 'Instructor Appreciation / Compliment',
+          priority: 'Medium',
+          status: 'Resolved',
+          trainer: 'Simran Dutt',
+          sentiment: 'Positive',
+          tags: ['ai-approved', 'member-voice'],
+          createdAt: '2026-05-09T10:00:00.000Z',
+        }),
+      ],
+      events: [],
+      period: { from: '2026-05-01', to: '2026-05-19' },
+      filters: DEFAULT_REPORT_FILTERS,
+      generatedAt: '2026-05-19T09:30:00.000Z',
+    });
+
+    expect(report.reportTickets).toBe(2);
+    expect(report.sourceRows.map((row) => row.ticketId)).toEqual(expect.arrayContaining(['P57-TRAINER-1', 'P57-TRAINER-2']));
+    expect(report.metrics.map((metric) => metric.id)).toContain('trainer_review_count');
+    expect(report.metrics.map((metric) => metric.id)).toContain('trainer_average_score');
+    expect(report.metrics.map((metric) => metric.id)).toContain('trainer_member_voice_count');
+    expect(report.metrics.find((metric) => metric.id === 'trainer_average_score')?.value).toBe('84%');
+    expect(report.sections.map((section) => section.id)).toContain('trainer_score_trend');
+    expect(report.sections.map((section) => section.id)).toContain('trainer_member_voice');
+    expect(report.sections.map((section) => section.id)).toContain('trainer_coaching_priorities');
+    expect(report.dataQualityNotes.join(' ')).toContain('trainer evaluation scorecards');
   });
 
   it('exports report payloads to JSON-safe objects and CSV text', () => {
@@ -276,5 +354,12 @@ describe('AI reports engine', () => {
     expect(normalized.findings.length).toBeGreaterThan(0);
     expect(normalized.risks.length).toBeGreaterThan(0);
     expect(normalized.dataQualityNotes.length).toBeGreaterThan(0);
+  });
+
+  it('replaces raw browser fetch failures with report-specific fallback copy', () => {
+    expect(reportRuntimeErrorMessage(new TypeError('Failed to fetch'), 'Athena summary service could not be reached.')).toBe(
+      'Athena summary service could not be reached.'
+    );
+    expect(reportRuntimeErrorMessage(new Error('Unauthorized'), 'Fallback copy')).toBe('Unauthorized');
   });
 });

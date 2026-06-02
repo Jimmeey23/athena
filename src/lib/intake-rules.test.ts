@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   captureMemberVoiceFromText,
+  getIntakeFieldDefinition,
   getIntakeFieldDefinitions,
   getMissingIntakeFields,
   inferIntakeContextFromText,
@@ -27,6 +28,7 @@ describe('intake publishability rules', () => {
       'reportedBy',
       'priority',
       'description',
+      'resolutionRequired',
     ]);
     expect(isIntakePublishable(context)).toBe(false);
   });
@@ -45,8 +47,8 @@ describe('intake publishability rules', () => {
       resolutionRequirement: 'Vendor inspection and repair needed today.',
     };
 
-    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
-    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([]);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'resolutionRequired']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(['resolutionRequired']);
   });
 
   it('treats placeholder values as missing while accepting a real studio', () => {
@@ -67,9 +69,9 @@ describe('intake publishability rules', () => {
     expect(isMissingIntakeValue('Member-reported issue')).toBe(true);
     expect(isMissingIntakeValue('AI Intake')).toBe(true);
     expect(isMissingIntakeValue('Bandra')).toBe(false);
-    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'studio', 'incidentDateTime', 'reportedBy']);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'studio', 'incidentDateTime', 'reportedBy', 'resolutionRequired']);
 
-    expect(getMissingIntakeFields({ ...context, studio: 'Bandra' })).toEqual(['clientsAffected', 'incidentDateTime', 'reportedBy']);
+    expect(getMissingIntakeFields({ ...context, studio: 'Bandra' })).toEqual(['clientsAffected', 'incidentDateTime', 'reportedBy', 'resolutionRequired']);
   });
 
   it('marks a complete member-facing complaint context publishable', () => {
@@ -84,6 +86,7 @@ describe('intake publishability rules', () => {
       reportedBy: 'Priya Shah',
       priority: 'High',
       description: 'Member reported that her WhatsApp query was not answered for two days.',
+      resolutionRequired: 'Yes',
     };
 
     expect(getMissingIntakeFields(context)).toEqual([]);
@@ -103,10 +106,52 @@ describe('intake publishability rules', () => {
       priority: 'High',
       urgencyReason: 'Member described an unresolved delay affecting renewal confidence.',
       description: 'Member reported that her WhatsApp query was not answered for two days.',
+      resolutionRequired: 'Yes',
     };
 
     expect(getMissingIntakeFields(context)).toEqual([]);
     expect(isIntakePublishable(context)).toBe(true);
+  });
+
+  it('always asks the mandatory resolution-required question last before publishing', () => {
+    const context: IntakeContext = {
+      intakeRoute: 'Feedback',
+      category: 'General Feedback',
+      subCategory: 'Suggestion',
+      clientsAffected: 'No clients affected',
+      reportedBy: 'frontdesk@physique57india.com',
+      description: 'Member suggested adding more weekend recovery sessions.',
+    };
+
+    expect(getMissingIntakeFields(context)).toEqual(['resolutionRequired']);
+    expect(getIntakeFieldDefinitions(context)).toEqual([
+      expect.objectContaining({
+        id: 'resolutionRequired',
+        label: 'Does this ticket require a resolution?',
+        type: 'select',
+        required: true,
+        options: ['Yes', 'No'],
+      }),
+    ]);
+    expect(isIntakePublishable(context)).toBe(false);
+    expect(isIntakePublishable({ ...context, resolutionRequired: 'No' })).toBe(true);
+  });
+
+  it('keeps the resolution-required question after every other missing intake field', () => {
+    const context: IntakeContext = {
+      intakeRoute: 'Complaint',
+      category: 'Customer Service and Communication',
+      subCategory: 'Delay in Response',
+      clientsAffected: 'No clients affected',
+    };
+
+    expect(getMissingIntakeFields(context).at(-1)).toBe('resolutionRequired');
+    expect(getMissingIntakeFields(context)).toEqual([
+      'reportedBy',
+      'priority',
+      'description',
+      'resolutionRequired',
+    ]);
   });
 
   it('still treats AI Intake and empty auth fallbacks as missing reportedBy values', () => {
@@ -275,6 +320,7 @@ describe('intake publishability rules', () => {
       'desiredResolution',
       'memberSentiment',
       'description',
+      'resolutionRequired',
     ]);
   });
 
@@ -302,6 +348,36 @@ describe('intake publishability rules', () => {
       'memberSentiment',
     ]));
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('membership');
+  });
+
+  it('does not treat instructor lateness as a member commercial access dispute', () => {
+    const text = 'instructor arrived late for class';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      description: text,
+      clientsAffected: 'Yes - directly affected',
+      memberId: 'mom_123',
+      memberName: 'Mitali Kumar',
+      studio: 'Kwality House, Kemps Corner',
+      sessionId: 'session_456',
+      classType: 'powerCycle',
+      reportedBy: 'ops@physique57india.com',
+      priority: 'Low',
+    };
+
+    expect(context).toMatchObject({
+      category: 'Trainer Feedback',
+      subCategory: 'Trainer Punctuality Issues',
+    });
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(['resolutionRequired']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toEqual(expect.arrayContaining([
+      'membership',
+      'incidentDateTime',
+      'momencePurchaseContext',
+      'desiredResolution',
+      'memberSentiment',
+    ]));
   });
 
   it('infers specified membership packages from the initial report', () => {
@@ -332,9 +408,9 @@ describe('intake publishability rules', () => {
       resolutionRequirement: 'Vendor inspection and repair needed today.',
     };
 
-    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
-    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([]);
-    expect(getMissingIntakeFields({ ...context, clientsAffected: 'No clients affected' })).toEqual([]);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'resolutionRequired']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(['resolutionRequired']);
+    expect(getMissingIntakeFields({ ...context, clientsAffected: 'No clients affected' })).toEqual(['resolutionRequired']);
   });
 
   it('requires Momence member search when affected clients are confirmed', () => {
@@ -352,12 +428,12 @@ describe('intake publishability rules', () => {
       clientsAffected: 'Yes - indirectly affected',
     };
 
-    expect(getMissingIntakeFields(context)).toEqual(['memberName']);
+    expect(getMissingIntakeFields(context)).toEqual(['memberName', 'resolutionRequired']);
     expect(getMissingIntakeFields({
       ...context,
       memberId: 'mom_456 | mom_789',
       memberName: 'Asha Mehta | Tara Rao',
-    })).toEqual([]);
+    })).toEqual(['resolutionRequired']);
   });
 
   it('requires affected class selection and impact details when a class was affected', () => {
@@ -390,7 +466,7 @@ describe('intake publishability rules', () => {
       classType: 'Barre 57',
       classImpactType: 'Paused during session',
       classImpactDetails: 'Class paused twice and two members stepped out for water.',
-    })).toEqual([]);
+    })).toEqual(['resolutionRequired']);
   });
 
   it('always asks the client impact check before publish when unanswered', () => {
@@ -408,7 +484,7 @@ describe('intake publishability rules', () => {
       resolutionRequirement: 'Vendor needs to repair the latch today.',
     };
 
-    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected']);
+    expect(getMissingIntakeFields(context)).toEqual(['clientsAffected', 'resolutionRequired']);
   });
 
   it('asks washing machine operational questions without member or class fields', () => {
@@ -433,10 +509,106 @@ describe('intake publishability rules', () => {
       'operationalImpact',
       'currentWorkaround',
       'resolutionRequirement',
+      'resolutionRequired',
     ]);
     expect(getMissingIntakeFields(context)).not.toContain('memberName');
     expect(getMissingIntakeFields(context)).not.toContain('classType');
     expect(getIntakeFieldDefinitions(context).map((field) => field.id)).toContain('machineSymptom');
+  });
+
+  it('asks bike-specific repair questions without leaking-water machine options', () => {
+    const text = 'BIKE NO 7 IS NOT WORKING AT THE STUDIO';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      reportedBy: 'ops@physique57india.com',
+      clientsAffected: 'No clients affected',
+      studio: 'Kwality House, Kemps Corner',
+      incidentDateTime: '2026-06-02T10:37',
+    };
+
+    expect(context).toMatchObject({
+      intakeRoute: 'Internal Reporting',
+      category: 'Repair and Maintenance',
+      subCategory: 'Broken Equipment Not Repaired',
+    });
+    expect(getMissingIntakeFields(context)).toEqual([
+      'bikeSymptom',
+      'operationalImpact',
+      'currentWorkaround',
+      'resolutionRequirement',
+      'resolutionRequired',
+    ]);
+    expect(getMissingIntakeFields(context)).not.toContain('machineSymptom');
+    expect(getIntakeFieldDefinitions(context).find((field) => field.id === 'bikeSymptom')?.options).not.toContain('Leaking water');
+  });
+
+  it('uses structured options for operational impact, workaround, and resolution requirement', () => {
+    const text = 'BIKE NO 7 IS NOT WORKING AT THE STUDIO';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      reportedBy: 'ops@physique57india.com',
+      clientsAffected: 'No clients affected',
+      studio: 'Kwality House, Kemps Corner',
+      incidentDateTime: '2026-06-02T10:37',
+    };
+    const fields = getIntakeFieldDefinitions(context);
+
+    expect(fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'operationalImpact',
+        type: 'select',
+        options: expect.arrayContaining(['No immediate operational impact', 'Studio tool unavailable']),
+      }),
+      expect.objectContaining({
+        id: 'currentWorkaround',
+        type: 'select',
+        options: expect.arrayContaining(['No workaround currently in place', 'Item removed from use']),
+      }),
+      expect.objectContaining({
+        id: 'resolutionRequirement',
+        type: 'select',
+        options: expect.arrayContaining(['Vendor inspection / repair required', 'No action needed / record only']),
+      }),
+    ]));
+  });
+
+  it('uses app constants for studio, instructor, reporter, and studio-area options', () => {
+    expect(getIntakeFieldDefinition('studio')).toEqual(expect.objectContaining({
+      type: 'select',
+      options: expect.arrayContaining(['Kwality House, Kemps Corner', 'the Studio by Copper & Cloves, Bengaluru']),
+    }));
+    expect(getIntakeFieldDefinition('trainer')).toEqual(expect.objectContaining({
+      type: 'select',
+      options: expect.arrayContaining(['Janhavi Jain', 'Kabir Varma', 'Veena Narasimhan']),
+    }));
+
+    const text = 'AC is not cooling in Studio 1 at Kwality House';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      category: 'Repair and Maintenance',
+      subCategory: 'AC and HVAC Issues',
+      studio: 'Kwality House, Kemps Corner',
+      clientsAffected: 'No clients affected',
+      incidentDateTime: '2026-06-02T10:37',
+    };
+
+    const fields = getIntakeFieldDefinitions(context);
+
+    expect(fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'reportedBy',
+        type: 'select',
+        options: expect.arrayContaining(['Akshay Rane', 'Tahira Sayyed', 'Santhosh Kumar']),
+      }),
+      expect.objectContaining({
+        id: 'affectedArea',
+        type: 'select',
+        options: expect.arrayContaining(['Studio 1', 'Strength Studio', 'powerCycle studio']),
+      }),
+    ]));
   });
 
   it('classifies loose office skirting as maintenance without digital fields', () => {
@@ -478,6 +650,7 @@ describe('intake publishability rules', () => {
       'accessStatus',
       'securityRisk',
       'resolutionRequirement',
+      'resolutionRequired',
     ]);
     expect(getMissingIntakeFields(context)).not.toContain('memberName');
     expect(getMissingIntakeFields(context)).not.toContain('classType');
@@ -505,6 +678,7 @@ describe('intake publishability rules', () => {
       'operationalImpact',
       'currentWorkaround',
       'resolutionRequirement',
+      'resolutionRequired',
     ]);
   });
 });

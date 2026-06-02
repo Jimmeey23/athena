@@ -318,7 +318,7 @@ const TicketReviewPanel: React.FC<{
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
         <div className="mb-1 flex items-center gap-2 font-semibold">
           <AlertTriangle className="h-4 w-4" />
-          Possible duplicate: {insights.duplicateWarning.ticketId}
+          Exact duplicate: {insights.duplicateWarning.ticketId}
         </div>
         <div className="leading-relaxed">
           {insights.duplicateWarning.title} · {insights.duplicateWarning.status}

@@ -42,6 +42,7 @@ import {
 } from '@/lib/settings-routing-ops';
 import { canOpenAppTab, visibleAppTabValues } from '@/lib/app-access';
 import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
+import { appSidebarClassName } from './app-layout-sidebar';
 
 const TicketDashboard = lazy(() =>
   import('./ticketing/TicketDashboard').then((module) => ({ default: module.TicketDashboard }))
@@ -267,9 +268,7 @@ const SupportShell: React.FC = () => {
             <aside
               onMouseEnter={() => setSidebarHovered(true)}
               onMouseLeave={() => setSidebarHovered(false)}
-              className={`z-10 hidden flex-shrink-0 flex-col border-l border-slate-200/80 bg-white/75 py-3 shadow-[-10px_0_40px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-all duration-300 md:flex ${
-                sidebarExpanded ? 'w-56 px-2.5' : 'w-[72px] px-2'
-              }`}
+              className={appSidebarClassName(sidebarExpanded)}
             >
               <div className="mb-2 flex items-center justify-end">
                 <button
@@ -815,7 +814,7 @@ function createRoutingScopeRule(
     location,
     owner,
     owners,
-    department: patch.department || employee?.department || settings.departments.find((department) => department.active)?.name || 'Customer Service',
+    department: patch.department || employee?.department || settings.departments.find((department) => department.active)?.name || 'Sales & Client Servicing',
     escalation: patch.escalation || employee?.manager || getEscalationTarget(owner),
     priority,
     slaHours: patch.slaHours || PRIORITY_SLA[priority].hours,
@@ -839,7 +838,7 @@ function createRoutingCategoryRules(
     category,
     owner,
     owners,
-    department: patch.department || employee?.department || settings.departments.find((department) => department.active)?.name || 'Customer Service',
+    department: patch.department || employee?.department || settings.departments.find((department) => department.active)?.name || 'Sales & Client Servicing',
     escalation: patch.escalation || employee?.manager || getEscalationTarget(owner),
     priority,
     slaHours: patch.slaHours || PRIORITY_SLA[priority].hours,
@@ -1062,7 +1061,7 @@ const SettingsPanel: React.FC<{ userEmail: string; accessRole: string }> = ({ us
           id: `employee-${Date.now()}`,
           name: 'New Employee',
           email: '',
-          department: departments[0] || 'Customer Service',
+          department: departments[0] || 'Sales & Client Servicing',
           role: '',
           location: locations[0] || '',
           manager: 'Mitali Kumar',

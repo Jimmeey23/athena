@@ -3,6 +3,7 @@ import { backendSupabase } from './backend-supabase';
 import {
   buildMomenceInsightSummary,
   freezeMomenceMembership,
+  listMomenceHostMembershipOptions,
   loadMomenceTicketContext,
   scheduleMomenceMembershipUnfreeze,
   unfreezeMomenceMembership,
@@ -187,6 +188,49 @@ describe('Momence membership freeze actions', () => {
           unfreezeType: 'scheduled',
           unfreezeAt: '2026-06-15T00:00:00.000Z',
         },
+      }),
+    }));
+  });
+});
+
+describe('Momence host membership options', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', 'http://localhost/momence-search');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('loads available membership names from the host memberships endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      payload: [
+        { id: 1, name: 'Studio 8 Class Package', disabled: false },
+        { id: 2, name: 'Studio 8 Class Package', disabled: false },
+        { id: 3, name: 'Disabled Legacy Package', disabled: true },
+        { id: 4, name: 'Studio Annual Unlimited Membership', disabled: false },
+      ],
+    }), { status: 200 })));
+
+    await expect(listMomenceHostMembershipOptions()).resolves.toEqual([
+      'Studio 8 Class Package',
+      'Studio Annual Unlimited Membership',
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith('http://localhost/momence-search', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        path: '/host/memberships',
+        method: 'GET',
+        params: {
+          page: 0,
+          pageSize: 200,
+          sortBy: 'name',
+          sortOrder: 'ASC',
+          includeDisabled: false,
+        },
+        body: undefined,
       }),
     }));
   });

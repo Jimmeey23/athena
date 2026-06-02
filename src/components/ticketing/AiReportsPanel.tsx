@@ -17,15 +17,21 @@ import {
   csvForReport,
   fallbackNarrativeForReport,
   htmlForReport,
+  isTrainerReportId,
   jsonForReport,
+  normalizeReportNarrativeResponse,
   paginateReportRows,
+  reportPayloadForNarrative,
   reportFileSlug,
+  reportRuntimeErrorMessage,
 } from '@/lib/ai-reports';
 import { CATEGORIES, STATUSES, Ticket } from '@/lib/ticketing-data';
 import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
+import { invokeTicketingFunction, withTimeout } from '@/lib/ticketing-functions';
 import {
   AlertTriangle,
   BarChart3,
+  Building2,
   CalendarDays,
   ChevronLeft,
   CheckCircle2,
@@ -36,11 +42,15 @@ import {
   FileJson,
   FileSpreadsheet,
   Filter,
-  LineChart as LineChartIcon,
+  GraduationCap,
+  MessageSquareText,
   Printer,
   RefreshCw,
   Search,
+  SlidersHorizontal,
+  Sparkles,
   Table2,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Bar,
@@ -71,14 +81,78 @@ interface TicketEventRow {
 }
 
 const CHART_COLORS = ['#2563eb', '#1d4ed8', '#0ea5e9', '#334155', '#64748b', '#475569', '#0891b2', '#0284c7'];
-const REPORT_GROUPS: ReportDefinition['group'][] = ['Leadership', 'Operations', 'Client Feedback', 'Revenue', 'Quality'];
 const PRIORITIES: Ticket['priority'][] = ['Critical', 'High', 'Medium', 'Low'];
-const SLA_STATES = ['Breached', 'At Risk', 'On Track', 'Closed'];
+const SLA_STATES = ['Breached', 'At Risk', 'On Track', 'Closed', 'Not Required'];
+const REPORT_NARRATIVE_TIMEOUT_MS = 30000;
 const SOURCE_TYPES: Array<{ value: ReportFilters['sourceType']; label: string }> = [
   { value: 'all', label: 'Live + Historic' },
   { value: 'live', label: 'Live only' },
   { value: 'historic', label: 'Historic only' },
 ];
+
+type ReportFamilyId = 'executive' | 'client_voice' | 'trainer' | 'studio_ops' | 'revenue';
+
+interface ReportFamily {
+  id: ReportFamilyId;
+  title: string;
+  description: string;
+  primaryReportId: ReportId;
+  reportIds: ReportId[];
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const REPORT_FAMILIES: ReportFamily[] = [
+  {
+    id: 'executive',
+    title: 'Executive Operations',
+    description: 'Leadership KPIs, open risk, SLA health, and accountable follow-up.',
+    primaryReportId: 'executive_operations_summary',
+    reportIds: ['executive_operations_summary', 'sla_health_breach_risk', 'status_funnel_backlog_aging', 'owner_workload_accountability'],
+    icon: TrendingUp,
+  },
+  {
+    id: 'client_voice',
+    title: 'Client Voice & Retention',
+    description: 'Member sentiment, complaints, recurring drivers, and retention risk.',
+    primaryReportId: 'member_voice_sentiment_report',
+    reportIds: ['member_voice_sentiment_report', 'complaint_retention_risk_report', 'category_driver_analysis', 'recurring_subcategory_analysis'],
+    icon: MessageSquareText,
+  },
+  {
+    id: 'trainer',
+    title: 'Trainer Performance',
+    description: 'Scorecards, consolidated trainer reports, member voice, and coaching priorities.',
+    primaryReportId: 'trainer_performance_consolidated',
+    reportIds: ['trainer_performance_consolidated', 'trainer_scorecard_trend', 'trainer_member_voice_consolidated', 'trainer_coaching_priority_report', 'instructor_class_experience_feedback'],
+    icon: GraduationCap,
+  },
+  {
+    id: 'studio_ops',
+    title: 'Studio Operations',
+    description: 'Studio space performance, facilities, routing load, and handoff risk.',
+    primaryReportId: 'studio_space_performance',
+    reportIds: ['studio_space_performance', 'facility_studio_tools_environment_issues', 'department_routing_load', 'escalation_handoff_report'],
+    icon: Building2,
+  },
+  {
+    id: 'revenue',
+    title: 'Revenue & Partnerships',
+    description: 'Membership service requests, hosted class intelligence, and conversion signals.',
+    primaryReportId: 'request_membership_service_report',
+    reportIds: ['request_membership_service_report', 'hosted_class_partnership_intelligence', 'sales_consultation_conversion_signals'],
+    icon: BarChart3,
+  },
+];
+
+const PRIMARY_REPORT_IDS = new Set(REPORT_FAMILIES.flatMap((family) => family.reportIds));
+
+function familyForReport(reportId: ReportId): ReportFamily {
+  return REPORT_FAMILIES.find((family) => family.reportIds.includes(reportId)) || REPORT_FAMILIES[0];
+}
+
+function reportDefinition(reportId: ReportId): ReportDefinition {
+  return ALL_REPORT_DEFINITIONS.find((definition) => definition.id === reportId) || ALL_REPORT_DEFINITIONS[0];
+}
 
 function formatDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -153,6 +227,7 @@ export const AiReportsPanel: React.FC = () => {
   const { tickets, loading, error, refresh, setSelectedTicket } = useTickets();
   const operationalTickets = useMemo(() => tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)), [tickets]);
   const [selectedReportId, setSelectedReportId] = useState<ReportId>('executive_operations_summary');
+  const [activeFamilyId, setActiveFamilyId] = useState<ReportFamilyId>('executive');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('30d');
   const [period, setPeriod] = useState<ReportPeriod>(() => defaultPeriod());
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS);
@@ -160,18 +235,39 @@ export const AiReportsPanel: React.FC = () => {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState('');
   const [narrative, setNarrative] = useState<ReportNarrative | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showAdvancedReports, setShowAdvancedReports] = useState(false);
+
+  const activeFamily = useMemo(
+    () => REPORT_FAMILIES.find((family) => family.id === activeFamilyId) || familyForReport(selectedReportId),
+    [activeFamilyId, selectedReportId]
+  );
+  const activeFamilyReports = useMemo(
+    () => activeFamily.reportIds.map(reportDefinition),
+    [activeFamily]
+  );
+  const advancedReports = useMemo(
+    () => ALL_REPORT_DEFINITIONS.filter((definition) => !PRIMARY_REPORT_IDS.has(definition.id)),
+    []
+  );
+  const reportTickets = useMemo(
+    () => isTrainerReportId(selectedReportId) ? tickets : operationalTickets,
+    [operationalTickets, selectedReportId, tickets]
+  );
 
   const options = useMemo(() => ({
-    studios: uniqueSorted(operationalTickets.map((ticket) => ticket.studio)),
-    categories: uniqueSorted([...Object.keys(CATEGORIES), ...operationalTickets.map((ticket) => ticket.category)]),
-    owners: uniqueSorted(operationalTickets.map((ticket) => ticket.assignedTo)),
-    sentiments: uniqueSorted(operationalTickets.map((ticket) => ticket.sentiment || 'Unspecified')),
-  }), [operationalTickets]);
+    studios: uniqueSorted(reportTickets.map((ticket) => ticket.studio)),
+    categories: uniqueSorted([...Object.keys(CATEGORIES), ...reportTickets.map((ticket) => ticket.category)]),
+    owners: uniqueSorted(reportTickets.map((ticket) => ticket.assignedTo)),
+    sentiments: uniqueSorted(reportTickets.map((ticket) => ticket.sentiment || 'Unspecified')),
+  }), [reportTickets]);
 
   useEffect(() => {
     let cancelled = false;
-    const ids = operationalTickets.filter((ticket) => !ticket.tags.includes('historic')).map((ticket) => ticket.id).filter(Boolean);
+    const ids = tickets.filter((ticket) => !ticket.tags.includes('historic')).map((ticket) => ticket.id).filter(Boolean);
     if (ids.length === 0) {
       setEvents([]);
       return;
@@ -196,7 +292,7 @@ export const AiReportsPanel: React.FC = () => {
       } catch (eventLoadError) {
         if (!cancelled) {
           setEvents([]);
-          setEventsError(eventLoadError instanceof Error ? eventLoadError.message : 'Unable to load ticket events');
+          setEventsError(reportRuntimeErrorMessage(eventLoadError, 'Ticket event data could not be reached'));
         }
       } finally {
         if (!cancelled) setEventsLoading(false);
@@ -207,34 +303,71 @@ export const AiReportsPanel: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [operationalTickets]);
+  }, [tickets]);
 
   const report = useMemo(() => {
     const built = buildReport({
       reportId: selectedReportId,
-      tickets: operationalTickets,
+      tickets: reportTickets,
       events,
       period,
       filters,
     });
     return narrative ? { ...built, narrative } : built;
-  }, [events, filters, narrative, operationalTickets, period, selectedReportId]);
+  }, [events, filters, narrative, period, reportTickets, selectedReportId]);
 
-  const ticketById = useMemo(() => new Map(operationalTickets.map((ticket) => [ticket.id, ticket])), [operationalTickets]);
+  const ticketById = useMemo(() => new Map(reportTickets.map((ticket) => [ticket.id, ticket])), [reportTickets]);
 
   const setFilter = <K extends keyof ReportFilters>(key: K, value: ReportFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
     setNarrative(null);
+    setSummaryError('');
   };
 
   const setPreset = (preset: PeriodPreset) => {
     setPeriodPreset(preset);
     if (preset !== 'custom') setPeriod(periodForPreset(preset));
     setNarrative(null);
+    setSummaryError('');
   };
 
-  const refreshSummary = () => {
-    setNarrative(fallbackNarrativeForReport(report));
+  const selectReport = (reportId: ReportId) => {
+    setSelectedReportId(reportId);
+    setActiveFamilyId(familyForReport(reportId).id);
+    setNarrative(null);
+    setSummaryError('');
+  };
+
+  const selectFamily = (family: ReportFamily) => {
+    setActiveFamilyId(family.id);
+    setSelectedReportId(family.primaryReportId);
+    setNarrative(null);
+    setSummaryError('');
+  };
+
+  const generateAiSummary = async () => {
+    if (report.reportTickets === 0) return;
+    setSummaryLoading(true);
+    setSummaryError('');
+    try {
+      const { data, error: invokeError } = await withTimeout(
+        invokeTicketingFunction('ticket-ai-chat', {
+          body: {
+            ...reportPayloadForNarrative(report),
+            aiProvider: import.meta.env.VITE_AI_PROVIDER || 'openai',
+          },
+        }),
+        REPORT_NARRATIVE_TIMEOUT_MS,
+        'Athena report summary timed out'
+      );
+      if (invokeError) throw invokeError;
+      setNarrative(normalizeReportNarrativeResponse(data, report));
+    } catch (summaryError) {
+      setNarrative(fallbackNarrativeForReport(report));
+      setSummaryError(reportRuntimeErrorMessage(summaryError, 'Athena summary service could not be reached. Showing computed summary instead.'));
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
   const refreshAll = async () => {
@@ -252,16 +385,16 @@ export const AiReportsPanel: React.FC = () => {
 
   return (
     <div className="ai-reports-shell flex h-full min-h-0 flex-col bg-[#f8fafc] text-slate-950">
-      <header className="flex-shrink-0 border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm backdrop-blur-xl">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <header className="report-screen-only flex-shrink-0 border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm backdrop-blur-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
               <FileText className="h-4 w-4" />
-              Reports
+              {REPORT_BRAND.product}
             </div>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Operations Reporting</h2>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Build a Report</h2>
             <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              Table-first operational reports built from ticket data, with paginated source registers, computed KPIs, and export-ready layouts.
+              Guided reports with computed source data first, optional Athena executive summaries, and detailed drilldowns.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -272,16 +405,16 @@ export const AiReportsPanel: React.FC = () => {
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh tickets
+              Refresh data
             </button>
             <button
               type="button"
-              onClick={refreshSummary}
-              disabled={report.reportTickets === 0}
+              onClick={generateAiSummary}
+              disabled={summaryLoading || report.reportTickets === 0}
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-black disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Refresh summary
+              <Sparkles className={`h-3.5 w-3.5 ${summaryLoading ? 'animate-pulse' : ''}`} />
+              {summaryLoading ? 'Generating...' : 'Generate AI summary'}
             </button>
             <button type="button" onClick={exportCsv} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300">
               <FileSpreadsheet className="h-3.5 w-3.5" />
@@ -302,173 +435,262 @@ export const AiReportsPanel: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
-          <div className="grid gap-2 sm:grid-cols-4">
-            <FilterSelect label="Period" value={periodPreset} values={[
-              ['7d', '7 days'],
-              ['30d', '30 days'],
-              ['90d', '90 days'],
-              ['month', 'This month'],
-              ['quarter', 'This quarter'],
-              ['custom', 'Custom'],
-            ]} onChange={(value) => setPreset(value as PeriodPreset)} />
-            <DateInput label="From" value={period.from} onChange={(value) => {
-              setPeriodPreset('custom');
-              setPeriod((current) => ({ ...current, from: value }));
-              setNarrative(null);
-            }} />
-            <DateInput label="To" value={period.to} onChange={(value) => {
-              setPeriodPreset('custom');
-              setPeriod((current) => ({ ...current, to: value }));
-              setNarrative(null);
-            }} />
-            <FilterSelect label="Source" value={filters.sourceType} values={SOURCE_TYPES.map((item) => [item.value, item.label])} onChange={(value) => setFilter('sourceType', value as ReportFilters['sourceType'])} />
-          </div>
-          <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-            <TextFilter value={filters.query} onChange={(value) => setFilter('query', value)} />
-            <FilterSelect label="Studio" value={filters.studio} values={['All', ...options.studios]} onChange={(value) => setFilter('studio', value)} />
-            <FilterSelect label="Category" value={filters.category} values={['All', ...options.categories]} onChange={(value) => setFilter('category', value)} />
-            <FilterSelect label="Priority" value={filters.priority} values={['All', ...PRIORITIES]} onChange={(value) => setFilter('priority', value)} />
-            <FilterSelect label="Status" value={filters.status} values={['All', ...STATUSES]} onChange={(value) => setFilter('status', value)} />
-            <FilterSelect label="Owner" value={filters.owner} values={['All', ...options.owners]} onChange={(value) => setFilter('owner', value)} />
-            <FilterSelect label="SLA" value={filters.sla} values={['All', ...SLA_STATES]} onChange={(value) => setFilter('sla', value)} />
-            <input
-              value={filters.tag}
-              onChange={(event) => setFilter('tag', event.target.value)}
-              placeholder="Tag"
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            />
-          </div>
-        </div>
       </header>
 
-      <div className="ai-reports-content-grid grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[310px_minmax(0,1fr)_380px]">
-        <aside className="min-h-0 overflow-y-auto border-r border-slate-200 bg-white/70 p-4">
-          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            <Filter className="h-4 w-4" />
-            Report Catalog
-          </div>
-          <div className="flex flex-col gap-4">
-            {REPORT_GROUPS.map((group) => (
-              <section key={group}>
-                <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{group}</h3>
-                <div className="flex flex-col gap-2">
-                  {ALL_REPORT_DEFINITIONS.filter((definition) => definition.group === group).map((definition) => (
-                    <ReportCatalogButton
-                      key={definition.id}
-                      definition={definition}
-                      selected={definition.id === selectedReportId}
-                      onSelect={() => {
-                        setSelectedReportId(definition.id);
-                        setNarrative(null);
-                      }}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        </aside>
-
-        <main className="ai-report-print min-h-0 overflow-y-auto p-5">
+      <main className="ai-report-print min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="mx-auto grid max-w-[1540px] gap-5">
           <ReportPrintHeader report={report} />
           {(error || eventsError) && (
-            <div className="mb-4 grid gap-2">
+            <div className="grid gap-2">
               {error && <AlertMessage tone="danger" text={error} />}
               {eventsError && <AlertMessage tone="warning" text={`Event data unavailable: ${eventsError}. Lifecycle reports will use ticket metadata fallback.`} />}
             </div>
           )}
 
-          <section className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-5 py-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">
-                    <BarChart3 className="h-4 w-4" />
-                    {report.definition.group}
-                  </div>
-                  <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{report.definition.title}</h1>
-                  <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500">{report.definition.description}</p>
+          <section className="report-screen-only rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-950">1. Choose a report family</h3>
+                <p className="mt-1 text-xs text-slate-500">Five core report families stay visible. Detailed and advanced reports remain available without cluttering the first view.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvancedReports((current) => !current)}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {showAdvancedReports ? 'Hide advanced reports' : 'Advanced reports'}
+              </button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {REPORT_FAMILIES.map((family) => (
+                <ReportFamilyButton
+                  key={family.id}
+                  family={family}
+                  selected={family.id === activeFamily.id}
+                  reportCount={family.reportIds.length}
+                  onSelect={() => selectFamily(family)}
+                />
+              ))}
+            </div>
+            <div className="mt-4 grid gap-2 lg:grid-cols-5">
+              {activeFamilyReports.map((definition) => (
+                <ReportPresetButton
+                  key={definition.id}
+                  definition={definition}
+                  selected={definition.id === selectedReportId}
+                  onSelect={() => selectReport(definition.id)}
+                />
+              ))}
+            </div>
+            {showAdvancedReports && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                  <Filter className="h-3.5 w-3.5" />
+                  Advanced Report Catalog
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Period</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{report.period.from} to {report.period.to}</div>
-                  <div className="mt-1 text-xs text-slate-500">{report.reportTickets} report tickets · {report.allTicketsInPeriod} period tickets</div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  {advancedReports.map((definition) => (
+                    <ReportPresetButton
+                      key={definition.id}
+                      definition={definition}
+                      selected={definition.id === selectedReportId}
+                      onSelect={() => selectReport(definition.id)}
+                      compact
+                    />
+                  ))}
                 </div>
               </div>
-            </div>
+            )}
           </section>
 
-          {loading && operationalTickets.length === 0 ? (
+          <section className="report-screen-only rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-950">2. Set report scope</h3>
+                <p className="mt-1 text-xs text-slate-500">Keep the core scope visible. Use advanced filters only when the report needs narrowing.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFilters((current) => !current)}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white"
+              >
+                <Filter className="h-3.5 w-3.5" />
+                {showAdvancedFilters ? 'Hide filters' : 'More filters'}
+              </button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+              <FilterSelect label="Report preset" value={selectedReportId} values={activeFamilyReports.map((definition) => [definition.id, definition.title])} onChange={(value) => selectReport(value as ReportId)} />
+              <FilterSelect label="Period" value={periodPreset} values={[
+                ['7d', '7 days'],
+                ['30d', '30 days'],
+                ['90d', '90 days'],
+                ['month', 'This month'],
+                ['quarter', 'This quarter'],
+                ['custom', 'Custom'],
+              ]} onChange={(value) => setPreset(value as PeriodPreset)} />
+              <DateInput label="From" value={period.from} onChange={(value) => {
+                setPeriodPreset('custom');
+                setPeriod((current) => ({ ...current, from: value }));
+                setNarrative(null);
+                setSummaryError('');
+              }} />
+              <DateInput label="To" value={period.to} onChange={(value) => {
+                setPeriodPreset('custom');
+                setPeriod((current) => ({ ...current, to: value }));
+                setNarrative(null);
+                setSummaryError('');
+              }} />
+              <FilterSelect label="Source" value={filters.sourceType} values={SOURCE_TYPES.map((item) => [item.value, item.label])} onChange={(value) => setFilter('sourceType', value as ReportFilters['sourceType'])} />
+            </div>
+            {showAdvancedFilters && (
+              <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+                <TextFilter value={filters.query} onChange={(value) => setFilter('query', value)} />
+                <FilterSelect label="Studio" value={filters.studio} values={['All', ...options.studios]} onChange={(value) => setFilter('studio', value)} />
+                <FilterSelect label="Category" value={filters.category} values={['All', ...options.categories]} onChange={(value) => setFilter('category', value)} />
+                <FilterSelect label="Priority" value={filters.priority} values={['All', ...PRIORITIES]} onChange={(value) => setFilter('priority', value)} />
+                <FilterSelect label="Status" value={filters.status} values={['All', ...STATUSES]} onChange={(value) => setFilter('status', value)} />
+                <FilterSelect label="Owner" value={filters.owner} values={['All', ...options.owners]} onChange={(value) => setFilter('owner', value)} />
+                <FilterSelect label="SLA" value={filters.sla} values={['All', ...SLA_STATES]} onChange={(value) => setFilter('sla', value)} />
+                <input
+                  value={filters.tag}
+                  onChange={(event) => setFilter('tag', event.target.value)}
+                  placeholder="Tag"
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                />
+              </div>
+            )}
+          </section>
+
+          {loading && reportTickets.length === 0 ? (
             <EmptyState label="Loading tickets for reporting..." />
           ) : report.reportTickets === 0 ? (
             <EmptyState label="No tickets match the selected report period and filters." />
           ) : (
-            <div className="grid gap-5">
-              <SourceRowsTable report={report} ticketById={ticketById} onOpen={setSelectedTicket} />
-              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Key Performance Indicators</h2>
-                    <p className="mt-1 text-xs text-slate-500">Computed from the filtered source register above.</p>
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+              <div className="grid gap-5">
+                <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-100 px-5 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">
+                          <BarChart3 className="h-4 w-4" />
+                          {report.definition.group}
+                        </div>
+                        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{report.definition.title}</h1>
+                        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500">{report.definition.description}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Period</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">{report.period.from} to {report.period.to}</div>
+                        <div className="mt-1 text-xs text-slate-500">{report.reportTickets} report tickets · {report.allTicketsInPeriod} period tickets</div>
+                      </div>
+                    </div>
                   </div>
-                  <ReportBadge tone="neutral" minWidth="min-w-[84px]">Computed</ReportBadge>
-                </div>
-                <div className="grid gap-3 md:grid-cols-3 2xl:grid-cols-5">
-                  {report.metrics.slice(0, 10).map((metric) => (
-                    <MetricCard key={metric.id} metric={metric} />
-                  ))}
-                </div>
-              </section>
-              <section className="grid gap-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-950">Analysis</h2>
-                    <p className="mt-1 text-xs text-slate-500">Charts and ranked views are secondary to the ticket source table.</p>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">Detailed KPIs</h2>
+                      <p className="mt-1 text-xs text-slate-500">Computed from the filtered source register and report-specific logic.</p>
+                    </div>
+                    <ReportBadge tone="neutral" minWidth="min-w-[84px]">Computed</ReportBadge>
                   </div>
-                </div>
-                <div className="grid gap-5 2xl:grid-cols-2">
-                  {report.sections.map((section) => (
-                    <ReportSectionPanel key={section.id} section={section} />
-                  ))}
-                </div>
-              </section>
+                  <div className="grid gap-3 md:grid-cols-3 2xl:grid-cols-5">
+                    {report.metrics.slice(0, 10).map((metric) => (
+                      <MetricCard key={metric.id} metric={metric} />
+                    ))}
+                  </div>
+                </section>
+
+                <section className="grid gap-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-950">Detailed Analysis</h2>
+                      <p className="mt-1 text-xs text-slate-500">Charts, ranked drivers, and trainer intelligence stay detailed below the simplified builder.</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-5 2xl:grid-cols-2">
+                    {report.sections.map((section) => (
+                      <ReportSectionPanel key={section.id} section={section} />
+                    ))}
+                  </div>
+                </section>
+
+                <SourceRowsTable report={report} ticketById={ticketById} onOpen={setSelectedTicket} />
+              </div>
+
+              <aside className="report-screen-only min-h-0">
+                <NarrativePanel
+                  report={report}
+                  eventsLoading={eventsLoading}
+                  summaryLoading={summaryLoading}
+                  summaryError={summaryError}
+                  onGenerate={generateAiSummary}
+                />
+              </aside>
             </div>
           )}
           <ReportPrintFooter />
-        </main>
-
-        <aside className="min-h-0 overflow-y-auto border-l border-slate-200 bg-white/80 p-4">
-          <NarrativePanel report={report} eventsLoading={eventsLoading} />
-        </aside>
-      </div>
+        </div>
+      </main>
     </div>
   );
 };
 
-const ReportCatalogButton: React.FC<{
+const ReportFamilyButton: React.FC<{
+  family: ReportFamily;
+  selected: boolean;
+  reportCount: number;
+  onSelect: () => void;
+}> = ({ family, selected, reportCount, onSelect }) => {
+  const Icon = family.icon;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`group min-h-[132px] rounded-2xl border p-4 text-left transition ${
+        selected
+          ? 'border-slate-300 bg-slate-950 text-white shadow-sm'
+          : 'border-slate-200 bg-white text-slate-950 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${selected ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-slate-950 group-hover:text-white'}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className={`rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${selected ? 'border-white/15 bg-white/10 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+          {reportCount} reports
+        </span>
+      </div>
+      <div className="mt-4 text-sm font-semibold">{family.title}</div>
+      <p className={`mt-2 text-xs leading-relaxed ${selected ? 'text-slate-300' : 'text-slate-500'}`}>{family.description}</p>
+    </button>
+  );
+};
+
+const ReportPresetButton: React.FC<{
   definition: ReportDefinition;
   selected: boolean;
   onSelect: () => void;
-}> = ({ definition, selected, onSelect }) => (
+  compact?: boolean;
+}> = ({ definition, selected, onSelect, compact = false }) => (
   <button
     type="button"
     onClick={onSelect}
-    className={`group w-full rounded-xl border p-3 text-left transition ${
+    className={`group w-full rounded-xl border text-left transition ${
       selected
-        ? 'border-slate-300 bg-slate-100 shadow-sm'
+        ? 'border-blue-200 bg-blue-50 shadow-sm'
         : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm'
-    }`}
+    } ${compact ? 'p-2.5' : 'p-3'}`}
   >
-    <div className="flex items-start gap-3">
-      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${selected ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-950 group-hover:text-white'}`}>
-        <LineChartIcon className="h-4 w-4" />
-      </span>
+    <div className="flex items-start gap-2">
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold leading-snug text-slate-950">{definition.title}</span>
-        <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">{definition.bestFor}</span>
+        <span className="block text-xs font-semibold leading-snug text-slate-950">{definition.title}</span>
+        {!compact && <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">{definition.bestFor}</span>}
       </span>
-      <ChevronRight className={`mt-2 h-4 w-4 shrink-0 ${selected ? 'text-slate-700' : 'text-slate-300'}`} />
+      <ChevronRight className={`mt-0.5 h-4 w-4 shrink-0 ${selected ? 'text-blue-700' : 'text-slate-300'}`} />
     </div>
   </button>
 );
@@ -833,21 +1055,44 @@ const ReportBadge: React.FC<{ children: React.ReactNode; tone?: ReportBadgeTone;
   );
 };
 
-const NarrativePanel: React.FC<{ report: GeneratedReport; eventsLoading: boolean }> = ({ report, eventsLoading }) => {
+const NarrativePanel: React.FC<{
+  report: GeneratedReport;
+  eventsLoading: boolean;
+  summaryLoading: boolean;
+  summaryError: string;
+  onGenerate: () => void;
+}> = ({ report, eventsLoading, summaryLoading, summaryError, onGenerate }) => {
   const narrative = report.narrative || fallbackNarrativeForReport(report);
+  const generatedByAi = Boolean(report.narrative?.generatedByAi);
   return (
-    <div className="flex flex-col gap-4">
+    <div className="sticky top-5 flex flex-col gap-4">
       <section className="rounded-xl border border-slate-200 bg-slate-950 p-4 text-white shadow-sm">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">Executive Summary</div>
-          <CheckCircle2 className="h-4 w-4 text-slate-300" />
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">
+            {generatedByAi ? 'Athena AI Summary' : 'Computed Summary'}
+          </div>
+          {generatedByAi ? <Sparkles className="h-4 w-4 text-slate-300" /> : <CheckCircle2 className="h-4 w-4 text-slate-300" />}
         </div>
         <p className="mt-3 text-sm leading-relaxed text-slate-100">{narrative.summary}</p>
-        {!report.narrative && (
-          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-            Computed summary built from the current report metrics and source register.
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+          {generatedByAi
+            ? 'AI narrative generated from deterministic KPIs, sections, data-quality notes, and top source rows.'
+            : 'Computed summary is available immediately. Generate an AI summary when the report is ready to share.'}
+        </div>
+        {summaryError && (
+          <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
+            {summaryError}
           </div>
         )}
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={summaryLoading || report.reportTickets === 0}
+          className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white px-3 text-xs font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Sparkles className={`h-3.5 w-3.5 ${summaryLoading ? 'animate-pulse' : ''}`} />
+          {summaryLoading ? 'Generating Athena summary...' : generatedByAi ? 'Regenerate AI summary' : 'Upgrade with Athena'}
+        </button>
       </section>
 
       <NarrativeList title="Findings" items={narrative.findings} icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />} />

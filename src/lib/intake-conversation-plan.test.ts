@@ -69,6 +69,21 @@ describe('conversational field batching', () => {
       { id: 'priority', label: 'Priority', type: 'select' },
     ])).toHaveLength(2);
   });
+
+  it('holds the resolution-required question until it is the only remaining field', () => {
+    expect(limitConversationalFieldBatch([
+      { id: 'description', label: 'Describe the issue', type: 'textarea' },
+      { id: 'resolutionRequired', label: 'Does this ticket require a resolution?', type: 'select' },
+    ])).toEqual([
+      { id: 'description', label: 'Describe the issue', type: 'textarea' },
+    ]);
+
+    expect(limitConversationalFieldBatch([
+      { id: 'resolutionRequired', label: 'Does this ticket require a resolution?', type: 'select' },
+    ])).toEqual([
+      { id: 'resolutionRequired', label: 'Does this ticket require a resolution?', type: 'select' },
+    ]);
+  });
 });
 
 describe('natural single-field prompts', () => {
@@ -97,5 +112,18 @@ describe('natural single-field prompts', () => {
         reporterFirstName: 'Priya',
       })
     ).toContain('what changed for the affected class/session');
+  });
+
+  it('asks the resolution-required gate with the exact required copy', () => {
+    expect(
+      buildNaturalSingleFieldPrompt({
+        field: {
+          id: 'resolutionRequired',
+          label: 'Does this ticket require a resolution?',
+          type: 'select',
+          options: ['Yes', 'No'],
+        },
+      })
+    ).toBe('Does this ticket require a resolution?');
   });
 });

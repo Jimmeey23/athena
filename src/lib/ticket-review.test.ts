@@ -96,6 +96,7 @@ describe('buildTicketReviewInsights', () => {
     expect(review.duplicateWarning?.ticketId).toBe('P57-DUP1');
     expect(review.riskSignals).toContain('Retention risk: frustration/refund/cancellation signal needs proactive follow-up.');
     expect(review.riskSignals).toContain('SLA risk: High priority ticket should be published promptly to start the 8h SLA clock.');
+    expect(review.riskSignals).toContain('Exact duplicate: existing ticket P57-DUP1 will be merged automatically on approval.');
     expect(review.sections.find((section) => section.title === 'Client details')?.items).toContain('Asha Rao');
   });
 

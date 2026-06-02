@@ -128,6 +128,13 @@ CLIENT IMPACT CHECK:
 - If the report or selected context says a class/session/schedule was affected, require classType, classImpactType, and classImpactDetails after client impact is confirmed. The owner needs the exact Momence session plus whether the class was delayed, paused, moved, cancelled, disrupted, or otherwise affected.
 - If clientsAffected is "No clients affected" or "Not confirmed yet", do not ask for memberName unless the user later confirms affected clients.
 
+RESOLUTION REQUIRED FINAL GATE:
+- Before drafting or publishing any ticket, ask exactly: "Does this ticket require a resolution?"
+- Use field ID resolutionRequired, type select, required true, options: Yes, No.
+- Ask this as the final missing field after all other intake details are complete.
+- If resolutionRequired is Yes, route the ticket normally to the appropriate owner, department, and SLA.
+- If resolutionRequired is No, the ticket is record-only: assign the department/team only, do not assign a specific owner, do not start an SLA, and mark it as record-only/no-resolution-required.
+
 CONVERSATION PLAN MEMORY:
 - When context.conversationPlan exists, treat it as the durable plan for this conversation, not as a recent-message summary.
 - Follow that plan to choose the next unanswered question. Do not rely only on the last few messages.
@@ -188,6 +195,7 @@ type DetailFieldId =
   | 'priority'
   | 'description'
   | 'desiredResolution'
+  | 'resolutionRequired'
   | 'incidentDateTime'
   | 'memberSentiment'
   | 'momencePurchaseContext'
@@ -206,6 +214,8 @@ type DetailFieldId =
   | 'prospectQuality'
   | 'followUpPreference'
   | 'machineSymptom'
+  | 'bikeSymptom'
+  | 'equipmentSymptom'
   | 'hvacSymptom'
   | 'lockFaultType'
   | 'accessStatus'
@@ -246,32 +256,54 @@ const CLASS_IMPACT_TYPE_OPTIONS = [
   'Member left early',
   'Other impact',
 ];
+const RECORD_ONLY_ASSIGNEE = 'Unassigned';
+const DEPARTMENTS = [
+  'Management',
+  'Marketing & PR',
+  'Sales & Client Servicing',
+  'Training & Client Experience',
+  'Operations & Maintenance',
+  'Accounts & Finance',
+  'Technical Support',
+];
+
+function normalizeDepartmentName(department?: string | null): string {
+  const normalized = String(department || '').trim().toLowerCase();
+  if (!normalized) return 'Management';
+  if (normalized === 'marketing' || normalized === 'marketing & pr') return 'Marketing & PR';
+  if (normalized === 'training' || normalized === 'training & client experience') return 'Training & Client Experience';
+  if (normalized === 'operations' || normalized === 'operations & maintenance') return 'Operations & Maintenance';
+  if (normalized === 'accounts' || normalized === 'finance' || normalized === 'accounts & finance') return 'Accounts & Finance';
+  if (normalized === 'technical support' || normalized === 'tech support') return 'Technical Support';
+  if (normalized === 'customer service' || normalized === 'client servicing' || normalized === 'sales & client servicing') return 'Sales & Client Servicing';
+  return DEPARTMENTS.find((item) => item.toLowerCase() === normalized) || department || 'Management';
+}
 
 const ASSIGNMENT_RULES: Record<string, { assignedTo: string; team: string }> = {
   Scheduling: { assignedTo: 'Akshay Rane', team: 'Sales & Client Servicing' },
-  'Class Experience': { assignedTo: 'Anisha Shah', team: 'Training' },
-  'Trainer Feedback': { assignedTo: 'Anisha Shah', team: 'Training' },
-  'Repair and Maintenance': { assignedTo: 'Zahur Shaikh', team: 'Operations' },
-  'Studio Amenities and Facilities': { assignedTo: 'Zahur Shaikh', team: 'Operations' },
-  'Operating Systems': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations' },
-  'Tech Issues': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations' },
+  'Class Experience': { assignedTo: 'Anisha Shah', team: 'Training & Client Experience' },
+  'Trainer Feedback': { assignedTo: 'Anisha Shah', team: 'Training & Client Experience' },
+  'Repair and Maintenance': { assignedTo: 'Zahur Shaikh', team: 'Operations & Maintenance' },
+  'Studio Amenities and Facilities': { assignedTo: 'Zahur Shaikh', team: 'Operations & Maintenance' },
+  'Operating Systems': { assignedTo: 'Saachi Shetty - Operations', team: 'Technical Support' },
+  'Tech Issues': { assignedTo: 'Saachi Shetty - Operations', team: 'Technical Support' },
   'Pricing and Memberships': { assignedTo: 'Akshay Rane', team: 'Sales & Client Servicing' },
-  'Customer Service and Communication': { assignedTo: 'Nunu Yeptomi', team: 'Customer Service' },
-  'Brand Feedback': { assignedTo: 'Saachi Shetty', team: 'Marketing' },
-  'Safety and Security': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations' },
-  'Theft and Lost Items': { assignedTo: 'Zahur Shaikh', team: 'Operations' },
-  Miscellaneous: { assignedTo: 'Nunu Yeptomi', team: 'Customer Service' },
-  'Instructor & Class Quality': { assignedTo: 'Anisha Shah', team: 'Training' },
+  'Customer Service and Communication': { assignedTo: 'Nunu Yeptomi', team: 'Sales & Client Servicing' },
+  'Brand Feedback': { assignedTo: 'Saachi Shetty', team: 'Marketing & PR' },
+  'Safety and Security': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations & Maintenance' },
+  'Theft and Lost Items': { assignedTo: 'Zahur Shaikh', team: 'Operations & Maintenance' },
+  Miscellaneous: { assignedTo: 'Nunu Yeptomi', team: 'Management' },
+  'Instructor & Class Quality': { assignedTo: 'Anisha Shah', team: 'Training & Client Experience' },
   'Booking & Schedule': { assignedTo: 'Akshay Rane', team: 'Sales & Client Servicing' },
-  'Facility & Equipment': { assignedTo: 'Zahur Shaikh', team: 'Operations' },
+  'Facility & Equipment': { assignedTo: 'Zahur Shaikh', team: 'Operations & Maintenance' },
   'Billing & Membership': { assignedTo: 'Akshay Rane', team: 'Sales & Client Servicing' },
-  'Safety & Medical': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations' },
-  'Front Desk & Service': { assignedTo: 'Nunu Yeptomi', team: 'Customer Service' },
-  'App & Digital': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations' },
-  'Hosted Class & Partnerships': { assignedTo: 'Saachi Shetty', team: 'Marketing' },
-  'Member Progress & Transformation': { assignedTo: 'Anisha Shah', team: 'Training' },
+  'Safety & Medical': { assignedTo: 'Saachi Shetty - Operations', team: 'Operations & Maintenance' },
+  'Front Desk & Service': { assignedTo: 'Nunu Yeptomi', team: 'Sales & Client Servicing' },
+  'App & Digital': { assignedTo: 'Saachi Shetty - Operations', team: 'Technical Support' },
+  'Hosted Class & Partnerships': { assignedTo: 'Saachi Shetty', team: 'Marketing & PR' },
+  'Member Progress & Transformation': { assignedTo: 'Anisha Shah', team: 'Training & Client Experience' },
   'Sales & Consultation': { assignedTo: 'Jimmeey Gondaa', team: 'Sales & Client Servicing' },
-  'General Feedback': { assignedTo: 'Nunu Yeptomi', team: 'Customer Service' },
+  'General Feedback': { assignedTo: 'Nunu Yeptomi', team: 'Management' },
 };
 const REFUND_CATEGORIES = ['Billing & Membership', 'Pricing and Memberships'];
 const SERVER_MASTER_DATA = {
@@ -284,6 +316,7 @@ const SERVER_MASTER_DATA = {
     'the Studio by Copper & Cloves, Bengaluru',
   ],
   categories: Object.keys(ASSIGNMENT_RULES),
+  departments: DEPARTMENTS,
   priorities: Object.keys(PRIORITY_SLA_HOURS),
   clientsAffectedOptions: CLIENTS_AFFECTED_OPTIONS,
   classImpactTypeOptions: CLASS_IMPACT_TYPE_OPTIONS,
@@ -315,9 +348,12 @@ function resolveAssignment(category: string, studio?: string | null, subCategory
   }
 
   if (['Facility & Equipment', 'Repair and Maintenance', 'Studio Amenities and Facilities', 'Safety and Security', 'Safety & Medical', 'Theft and Lost Items', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
+    if (['Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
+      return { assignedTo: 'Saachi Shetty - Operations', team: 'Technical Support' };
+    }
     return isBengaluruStudio(studio)
-      ? { assignedTo: 'Shifa Ali', team: 'Management' }
-      : { assignedTo: 'Zahur Shaikh', team: 'Operations' };
+      ? { assignedTo: 'Shifa Ali', team: 'Operations & Maintenance' }
+      : { assignedTo: 'Zahur Shaikh', team: 'Operations & Maintenance' };
   }
 
   return ASSIGNMENT_RULES[category] || ASSIGNMENT_RULES['General Feedback'];
@@ -438,7 +474,12 @@ function shouldRequireCommercialVerificationContext(
   const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
   const classAccessConcern =
     mentionsClassContext &&
-    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
+    (
+      /(denied|not allowed|unable to join|could not join|cannot join|would not be able|restriction|protocol|policy)/.test(lower) ||
+      /\blate\s+(entry|arrival|cancellation|cancel|policy)\b/.test(lower) ||
+      /\barrived\s+late\b.{0,60}\b(denied|not allowed|unable|could not|cannot|entry|policy|restriction)\b/.test(lower) ||
+      /\bfirst\s+(class|barre|power\s?cycle|cycle|session)\b/.test(lower)
+    );
 
   return commercialConcern || classAccessConcern;
 }
@@ -525,6 +566,10 @@ function computeSlaDueAt(priority: Priority): string {
   const dueAt = new Date();
   dueAt.setHours(dueAt.getHours() + PRIORITY_SLA_HOURS[priority]);
   return dueAt.toISOString();
+}
+
+function ticketRequiresResolution(context: Record<string, unknown>): boolean {
+  return cleanString(context.resolutionRequired).toLowerCase() !== 'no';
 }
 
 function ticketSlug(value: unknown): string {
@@ -728,6 +773,58 @@ const PROTECTED_ENTITY_FIELD_IDS = new Set([
   'membership',
 ]);
 
+const KNOWN_DETAIL_FIELD_IDS = new Set([
+  'intakeRoute',
+  'requestType',
+  'clientsAffected',
+  'studio',
+  'category',
+  'subCategory',
+  'trainer',
+  'classType',
+  'membership',
+  'memberName',
+  'memberContact',
+  'reportedBy',
+  'priority',
+  'description',
+  'desiredResolution',
+  'resolutionRequired',
+  'incidentDateTime',
+  'memberSentiment',
+  'momencePurchaseContext',
+  'classImpactType',
+  'classImpactDetails',
+  'freezeStartDate',
+  'freezeEndDate',
+  'freezeReason',
+  'classesRemaining',
+  'packageExpiryDate',
+  'requestedRolloverDate',
+  'rolloverReason',
+  'partnerName',
+  'hostedFeedbackArea',
+  'attendeeCount',
+  'prospectQuality',
+  'followUpPreference',
+  'machineSymptom',
+  'bikeSymptom',
+  'equipmentSymptom',
+  'hvacSymptom',
+  'lockFaultType',
+  'accessStatus',
+  'securityRisk',
+  'plumbingSymptom',
+  'electricalSymptom',
+  'affectedArea',
+  'operationalImpact',
+  'currentWorkaround',
+  'resolutionRequirement',
+  'appIssueSurface',
+  'appErrorObserved',
+  'deviceContext',
+]);
+
 /**
  * Removes protected entity fields from the AI's proposed detailForm unless the business
  * rules guard also flagged them as required. Non-entity (issue-specific) fields from
@@ -739,14 +836,13 @@ function filterAiDetailFormFields(
 ): AiDetailForm | null {
   if (!form) return null;
   const guardedSet = new Set<string>(guardedFields);
-  const filteredFields = form.fields.filter((field) => {
+  const filteredFields = form.fields.map((field) => {
     if (field.id === 'reportedBy') return false;
     if (field.id === 'description' && guardedSet.size > 0 && !guardedSet.has('description')) return false;
-    // Always keep issue-specific fields the AI generates (e.g. incidentDateTime, freezeReason, etc.)
-    if (!PROTECTED_ENTITY_FIELD_IDS.has(field.id)) return true;
-    // Only keep entity fields when the rules-based guard also requires them
-    return guardedSet.has(field.id as DetailFieldId);
-  });
+    if (KNOWN_DETAIL_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return false;
+    if (PROTECTED_ENTITY_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return false;
+    return guardedSet.has(field.id) ? { ...field, required: true } : field;
+  }).filter(Boolean) as AiDetailField[];
   if (filteredFields.length === 0) return null;
   return { ...form, fields: filteredFields };
 }
@@ -1056,8 +1152,19 @@ function requiredFieldsForIssue(
   const isPhysicalCategory = physicalOnlyCategories.has(category);
   if (isPhysicalCategory) {
     add('incidentDateTime', context.incidentDateTime);
-    if (/washing|washer|laundry|dryer|machine/.test(lower) || subCategory === 'Broken Equipment Not Repaired') {
+    const bikeIssue = /\b(?:bike|spin bike|cycle bike|powercycle bike|power cycle bike)\b|\bbike\s*(?:no|number|#)?\s*\d+\b/.test(lower);
+    if (bikeIssue) {
+      add('bikeSymptom', context.bikeSymptom);
+      add('operationalImpact', context.operationalImpact);
+      add('currentWorkaround', context.currentWorkaround);
+      add('resolutionRequirement', context.resolutionRequirement);
+    } else if (/washing|washer|laundry|dryer|machine/.test(lower)) {
       add('machineSymptom', context.machineSymptom);
+      add('operationalImpact', context.operationalImpact);
+      add('currentWorkaround', context.currentWorkaround);
+      add('resolutionRequirement', context.resolutionRequirement);
+    } else if (subCategory === 'Broken Equipment Not Repaired' || /equipment|studio tool|method tool|tool|prop|mat|weights?|ball|barre|station/.test(lower)) {
+      add('equipmentSymptom', context.equipmentSymptom);
       add('operationalImpact', context.operationalImpact);
       add('currentWorkaround', context.currentWorkaround);
       add('resolutionRequirement', context.resolutionRequirement);
@@ -1156,6 +1263,7 @@ function requiredFieldsForIssue(
   if (!isPhysicalCategory) {
     add('description', shouldRequireFullIssueSummary(text, context, category) ? '' : context.description);
   }
+  add('resolutionRequired', context.resolutionRequired);
 
   return Array.from(new Set(fields));
 }
@@ -1189,18 +1297,25 @@ function toTicketRow(
   createdBy?: string | null,
 ) {
   const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
+  const recordOnly = !profileOnly && !ticketRequiresResolution(context);
   const priority = normalizePriority(draft.priority);
   const fallbackAssignment = resolveAssignment(draft.category, draft.studio, draft.subCategory);
-  const assignedTo = profileOnly ? 'Trainer Profile' : cleanString(draft.assignedTo)
+  const assignedTo = profileOnly ? 'Trainer Profile' : recordOnly ? RECORD_ONLY_ASSIGNEE : cleanString(draft.assignedTo)
     || cleanString(context.assignedTo)
     || cleanString(context.owner)
     || fallbackAssignment.assignedTo;
-  const team = profileOnly ? 'Training' : cleanString(draft.department)
+  const team = profileOnly ? 'Training & Client Experience' : normalizeDepartmentName(cleanString(draft.department)
     || cleanString(context.department)
     || cleanString(context.team)
-    || fallbackAssignment.team;
+    || fallbackAssignment.team);
   const effectivePriority = profileOnly ? 'Low' : priority;
   const sourceRef = buildSourceRef(draft, context, conversationId);
+  const status = profileOnly || recordOnly ? 'Closed' : 'New';
+  const slaDueAt = profileOnly
+    ? cleanString(draft.classDateTime, new Date().toISOString())
+    : recordOnly
+      ? new Date().toISOString()
+      : computeSlaDueAt(effectivePriority);
 
   return {
     source_ref: sourceRef,
@@ -1209,7 +1324,7 @@ function toTicketRow(
     category: cleanString(draft.category, 'General Feedback'),
     sub_category: cleanString(draft.subCategory, 'Other'),
     priority: effectivePriority,
-    status: profileOnly ? 'Closed' : 'New',
+    status,
     studio: cleanString(draft.studio, 'Unspecified Studio'),
     trainer: draft.trainer || null,
     class_type: draft.classType || null,
@@ -1219,25 +1334,36 @@ function toTicketRow(
     reported_by: draft.reportedBy || 'AI Intake',
     assigned_to: assignedTo,
     team,
-    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved', profileOnly ? 'profile-only' : ''])).filter(Boolean),
+    tags: Array.from(new Set([
+      ...(draft.tags || []),
+      'ai-approved',
+      profileOnly ? 'profile-only' : recordOnly ? 'record-only' : '',
+      recordOnly ? 'no-resolution-required' : '',
+    ])).filter(Boolean),
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || draft.description,
     metadata: {
       ...(draft.metadata || {}),
       source_ref: sourceRef,
       profileOnly,
+      resolution_required: !recordOnly,
+      no_sla: recordOnly,
       intake_context: context,
       routing: {
         department: team,
         assigned_to: assignedTo,
-        status: profileOnly ? 'Closed' : 'New',
+        owner_pool: recordOnly ? [] : [assignedTo],
+        next_escalation: recordOnly ? null : undefined,
+        status,
         priority: effectivePriority,
         profile_only: profileOnly,
-        routing_source: profileOnly ? 'trainer_profile_record' : assignedTo === fallbackAssignment.assignedTo ? 'athena_employee_directory' : 'approved_context',
+        resolution_required: !recordOnly,
+        sla_due_at: recordOnly ? null : slaDueAt,
+        routing_source: profileOnly ? 'trainer_profile_record' : recordOnly ? 'record_only' : assignedTo === fallbackAssignment.assignedTo ? 'athena_employee_directory' : 'approved_context',
       },
     },
     created_by: createdBy || null,
-    sla_due_at: profileOnly ? cleanString(draft.classDateTime, new Date().toISOString()) : computeSlaDueAt(effectivePriority),
+    sla_due_at: slaDueAt,
   };
 }
 

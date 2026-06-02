@@ -142,6 +142,13 @@ export function buildIntakeConversationPlan({
   }
 
   steps.push({
+    id: 'resolution-required',
+    title: 'Confirm whether this ticket requires a resolution',
+    fieldIds: ['resolutionRequired'],
+    reason: 'This final gate separates actionable tickets from record-only documentation.',
+  });
+
+  steps.push({
     id: 'draft-review',
     title: 'Draft only after required context is complete',
     fieldIds: [],
@@ -173,7 +180,12 @@ export function serializeConversationPlan(plan: IntakeConversationPlan): string 
 export function limitConversationalFieldBatch<T extends { id: string }>(fields: T[], maxFields = 2): T[] {
   const clientImpactField = fields.find((field) => field.id === 'clientsAffected');
   if (clientImpactField) return [clientImpactField];
-  return fields.slice(0, Math.max(1, maxFields));
+  const resolutionRequiredField = fields.find((field) => field.id === 'resolutionRequired');
+  if (resolutionRequiredField && fields.length === 1) return [resolutionRequiredField];
+  const fieldsBeforeResolutionGate = resolutionRequiredField
+    ? fields.filter((field) => field.id !== 'resolutionRequired')
+    : fields;
+  return fieldsBeforeResolutionGate.slice(0, Math.max(1, maxFields));
 }
 
 function questionFromLabel(label: string): string {
@@ -205,6 +217,9 @@ export function buildNaturalSingleFieldPrompt({ field, reporterFirstName }: Natu
   }
   if (field.id === 'incidentDateTime') {
     return `${prefix}when did this happen or first get noticed?`;
+  }
+  if (field.id === 'resolutionRequired') {
+    return `${prefix}Does this ticket require a resolution?`;
   }
 
   if (field.type === 'select') return `${prefix}${questionFromLabel(field.label)}`;

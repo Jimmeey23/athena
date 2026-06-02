@@ -15,23 +15,153 @@ export const TRAINERS = [
   'Bret Saldanha',
   'Cauveri Vikrant',
   'Chaitanya Nahar',
+  'Janhavi Jain',
+  'Kabir Varma',
   'Kajol Kanchan',
   'Karan Bhatia',
   'Karanvir Bhatia',
   'Mrigakshi Jaiswal',
+  'Nishanth Raj',
+  'Poojitha Bhaskar',
   'Pranjali Jain',
   'Pushyank Nahar',
   'Raunak Khemuka',
   'Reshma Sharma',
   "Richard D'Costa",
   'Rohan Dahima',
+  'Saniya Jaiswal',
   'Shruti Kulkarni',
   'Shruti Suresh',
   'Siddhartha Kusuma',
   'Simonelle De Vitre',
   'Simran Dutt',
+  'Upasna Paranjpe',
+  'Veena Narasimhan',
   'Vivaran Dhasmana',
 ];
+
+export const REPORTING_ASSOCIATES = [
+  'Akshay Rane',
+  'Zaheer Agarbattiwala',
+  'Zahur Shaikh',
+  'Tahira Sayyed',
+  'Imran Shaikh',
+  'Deesha Changwani',
+  'Admin Admin',
+  'Nadiya Shaikh',
+  'Shipra Bhika',
+  'Manisha Rathod',
+  'Sheetal Kataria',
+  'Priyanka Abnave',
+  'Prathap Kp',
+  'Api Serou',
+  'Pavanthika',
+  'Santhosh Kumar',
+];
+
+export const DEPARTMENTS = [
+  'Management',
+  'Marketing & PR',
+  'Sales & Client Servicing',
+  'Training & Client Experience',
+  'Operations & Maintenance',
+  'Accounts & Finance',
+  'Technical Support',
+];
+
+const KWALITY_STUDIO_AREAS = [
+  'Studio 1',
+  'Studio 2',
+  'Strength Studio',
+  'powerCycle studio',
+  'his space',
+  'her space',
+  'guest washroom',
+  'staff washroom',
+  'brain cell',
+  'pantry',
+  'reception',
+  'studio entrance',
+  'outside entrance',
+  'lift area',
+  'building entrance',
+];
+
+const SUPREME_STUDIO_AREAS = [
+  'studio 1',
+  'studio - 2 or powerCycle Studio',
+  'Studio 3',
+  'Office',
+  'his space',
+  'her space',
+  'reception',
+  'entrance',
+  'building entrance',
+  'lift area',
+  'outside entrance',
+];
+
+const BENGALURU_STUDIO_AREAS = [
+  'studio 1',
+  'studio 2',
+  'Office',
+  'his space',
+  'her space',
+  'guest washroom',
+  'reception',
+  'entrance',
+  'building entrance',
+  'lift area',
+  'outside entrance',
+];
+
+const COURTSIDE_STUDIO_AREAS = [
+  'studio 1',
+  'studio 2',
+  'his space',
+  'her space',
+  'guest washroom',
+  'reception',
+  'entrance',
+  'building entrance',
+  'lift area',
+  'outside entrance',
+];
+
+export const STUDIO_AREAS: Record<string, string[]> = {
+  'Kwality House, Kemps Corner': KWALITY_STUDIO_AREAS,
+  'Supreme HQ, Bandra': SUPREME_STUDIO_AREAS,
+  'Kenkere House, Bengaluru': BENGALURU_STUDIO_AREAS,
+  'Courtside, Mumbai': COURTSIDE_STUDIO_AREAS,
+  'the Studio by Copper & Cloves, Bengaluru': BENGALURU_STUDIO_AREAS,
+};
+
+function uniqueText(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+export function getStudioAreaOptions(studio?: string): string[] {
+  const normalizedStudio = String(studio || '').toLowerCase();
+  const exact = STUDIO_AREAS[studio || ''];
+  if (exact) return exact;
+  if (/kwality|kemps/.test(normalizedStudio)) return KWALITY_STUDIO_AREAS;
+  if (/supreme|bandra/.test(normalizedStudio)) return SUPREME_STUDIO_AREAS;
+  if (/bengaluru|bangalore|kenkere|copper|cloves/.test(normalizedStudio)) return BENGALURU_STUDIO_AREAS;
+  if (/courtside/.test(normalizedStudio)) return COURTSIDE_STUDIO_AREAS;
+  return uniqueText(Object.values(STUDIO_AREAS).flat());
+}
+
+export function normalizeDepartmentName(department?: string): string {
+  const normalized = String(department || '').trim().toLowerCase();
+  if (!normalized) return 'Management';
+  if (normalized === 'marketing' || normalized === 'marketing & pr') return 'Marketing & PR';
+  if (normalized === 'training' || normalized === 'training & client experience') return 'Training & Client Experience';
+  if (normalized === 'operations' || normalized === 'operations & maintenance') return 'Operations & Maintenance';
+  if (normalized === 'accounts' || normalized === 'finance' || normalized === 'accounts & finance') return 'Accounts & Finance';
+  if (normalized === 'technical support' || normalized === 'tech support') return 'Technical Support';
+  if (normalized === 'customer service' || normalized === 'client servicing' || normalized === 'sales & client servicing') return 'Sales & Client Servicing';
+  return DEPARTMENTS.find((item) => item.toLowerCase() === normalized) || department || 'Management';
+}
 
 export const CLASS_TYPES = [
   'Studio Hosted Class',
@@ -720,12 +850,13 @@ export function resolveTicketAssignee(category: string, studio?: string): string
 
 export function resolveTicketDepartment(category: string, assignedTo: string): string {
   const employee = getEmployee(assignedTo);
-  if (employee?.team) return employee.team;
+  if (employee?.team) return normalizeDepartmentName(employee.team);
+  if (['App & Digital', 'Operating Systems', 'Tech Issues'].includes(category)) return 'Technical Support';
   if (isSalesCategory(category)) return 'Sales & Client Servicing';
-  if (category.includes('Trainer') || category.includes('Class') || category.includes('Instructor')) return 'Training';
-  if (category.includes('Brand') || category.includes('Hosted')) return 'Marketing';
-  if (isOperationsCategory(category)) return 'Operations';
-  return 'Customer Service';
+  if (category.includes('Trainer') || category.includes('Class') || category.includes('Instructor')) return 'Training & Client Experience';
+  if (category.includes('Brand') || category.includes('Hosted')) return 'Marketing & PR';
+  if (isOperationsCategory(category)) return 'Operations & Maintenance';
+  return 'Management';
 }
 
 export interface TicketFollowUpDetail {
@@ -791,17 +922,26 @@ export interface Ticket {
   metadata?: TicketMetadata;
 }
 
-export type SlaState = 'Breached' | 'At Risk' | 'On Track' | 'Closed';
+export type SlaState = 'Breached' | 'At Risk' | 'On Track' | 'Closed' | 'Not Required';
+
+export function isRecordOnlyTicket(ticket: Ticket): boolean {
+  return ticket.tags.includes('record-only') ||
+    ticket.tags.includes('no-resolution-required') ||
+    ticket.metadata?.resolution_required === false ||
+    ticket.metadata?.no_sla === true;
+}
 
 export function isClosedTicket(ticket: Ticket): boolean {
   return ticket.status === 'Resolved' || ticket.status === 'Closed';
 }
 
 export function isTicketBreached(ticket: Ticket, now = Date.now()): boolean {
+  if (isRecordOnlyTicket(ticket)) return false;
   return !isClosedTicket(ticket) && new Date(ticket.slaDueAt).getTime() < now;
 }
 
 export function getSlaState(ticket: Ticket, now = Date.now()): SlaState {
+  if (isRecordOnlyTicket(ticket)) return 'Not Required';
   if (isClosedTicket(ticket)) return 'Closed';
   const dueAt = new Date(ticket.slaDueAt).getTime();
   if (dueAt < now) return 'Breached';

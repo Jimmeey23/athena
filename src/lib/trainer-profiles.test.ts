@@ -88,7 +88,7 @@ describe('trainer profile evaluation engine', () => {
     expect(ticket.assignedTo).toBe('Trainer Profile');
   });
 
-  it('excludes inactive and unspecified instructors from trainer profile tabs', () => {
+  it('keeps requested instructors active while excluding unspecified trainer placeholders', () => {
     const profiles = buildTrainerProfilesFromReviews([{
       id: 'inactive-review-1',
       createdAt: '2026-05-31T00:00:00.000Z',
@@ -118,7 +118,7 @@ describe('trainer profile evaluation engine', () => {
       sourceRef: 'fillout:legacy:unspecified-review-1',
     }]);
 
-    expect(profiles.map((profile) => profile.trainer)).not.toContain('Upasna Paranjpe');
+    expect(profiles.map((profile) => profile.trainer)).toContain('Upasna Paranjpe');
     expect(profiles.map((profile) => profile.trainer)).not.toContain('Unspecified Instructor');
   });
 

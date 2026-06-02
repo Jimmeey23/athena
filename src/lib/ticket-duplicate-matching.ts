@@ -13,6 +13,11 @@ export interface DuplicateTicketContext {
   sessionId?: string | null;
 }
 
+export interface RelatedSubmittedTickets {
+  exactDuplicate: Ticket | null;
+  similarTickets: Ticket[];
+}
+
 const GENERIC_ISSUE_TYPES = new Set(['', 'other', 'member reported issue', 'member-reported issue', 'general feedback']);
 
 function normalizeComparable(value?: string | null): string {
@@ -28,38 +33,6 @@ function splitMultiValue(value?: string | null): string[] {
     .split('|')
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function normalizeTicketSearchText(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((token) => token.length > 2 && ![
-          'the',
-          'and',
-          'for',
-          'with',
-          'from',
-          'this',
-          'that',
-          'member',
-          'client',
-          'class',
-          'studio',
-          'house',
-          'kwality',
-          'kemps',
-          'corner',
-          'bandra',
-          'mumbai',
-          'bengaluru',
-          'bangalore',
-        ].includes(token))
-    )
-  );
 }
 
 function ticketCategoryFamily(category?: string | null): string {
@@ -89,10 +62,11 @@ function hasProvidedIdentity(ctx: DuplicateTicketContext): boolean {
   return Boolean(ctx.memberName?.trim() || ctx.memberContact?.trim());
 }
 
-function issueTypeMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
-  if (ctx.category && ticketCategoryFamily(ctx.category) !== ticketCategoryFamily(ticket.category)) return false;
-  if (!ctx.subCategory || isGenericIssueType(ctx.subCategory)) return true;
-  if (!ticket.subCategory || isGenericIssueType(ticket.subCategory)) return false;
+function strictIssueTypeMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+  if (!ctx.category || !ticket.category) return false;
+  if (ticketCategoryFamily(ctx.category) !== ticketCategoryFamily(ticket.category)) return false;
+  if (!ctx.subCategory || !ticket.subCategory) return false;
+  if (isGenericIssueType(ctx.subCategory) || isGenericIssueType(ticket.subCategory)) return false;
   return normalizeComparable(ctx.subCategory) === normalizeComparable(ticket.subCategory);
 }
 
@@ -149,100 +123,73 @@ function contextSessionIds(ctx: DuplicateTicketContext): Set<string> {
   return new Set(splitMultiValue(ctx.sessionId).map((value) => value.toLowerCase()));
 }
 
-function sessionDateMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+function exactStudioMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+  const inputStudio = normalizeComparable(ctx.studio);
+  return Boolean(inputStudio && inputStudio === normalizeComparable(ticket.studio));
+}
+
+function exactIncidentMinuteMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
   const rawContext = metadataContext(ticket);
-  const inputDates = dateKeys(ctx.classDateTime, 'minute');
-  const ticketDates = new Set([
+  const inputIncidentDates = dateKeys(ctx.incidentDateTime, 'minute');
+  if (inputIncidentDates.size === 0) return false;
+
+  const ticketIncidentDates = new Set([
+    ...dateKeys(contextString(rawContext, 'incidentDateTime'), 'minute'),
+  ]);
+  return ticketIncidentDates.size > 0 && hasIntersection(inputIncidentDates, ticketIncidentDates);
+}
+
+function exactSessionMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+  const inputSessionIds = contextSessionIds(ctx);
+  if (inputSessionIds.size > 0) {
+    const existingSessionIds = ticketSessionIds(ticket);
+    return existingSessionIds.size > 0 && hasIntersection(inputSessionIds, existingSessionIds);
+  }
+
+  const inputClassDates = dateKeys(ctx.classDateTime, 'minute');
+  if (inputClassDates.size === 0) return false;
+
+  const rawContext = metadataContext(ticket);
+  const ticketClassDates = new Set([
     ...dateKeys(ticket.classDateTime, 'minute'),
     ...dateKeys(contextString(rawContext, 'classDateTime'), 'minute'),
   ]);
-  return inputDates.size > 0 && ticketDates.size > 0 && hasIntersection(inputDates, ticketDates);
+  if (ticketClassDates.size === 0 || !hasIntersection(inputClassDates, ticketClassDates)) return false;
+
+  const inputClassType = normalizeComparable(ctx.classType);
+  if (!inputClassType) return true;
+  return inputClassType === normalizeComparable(ticket.classType);
 }
 
-function sessionAnchorMatches(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
-  const inputSessionIds = contextSessionIds(ctx);
-  if (inputSessionIds.size === 0) return true;
-  const existingSessionIds = ticketSessionIds(ticket);
-  if (existingSessionIds.size > 0) return hasIntersection(inputSessionIds, existingSessionIds);
-  return sessionDateMatches(ctx, ticket);
+function hasExactDuplicateAnchors(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+  if (!strictIssueTypeMatches(ctx, ticket)) return false;
+  if (!exactStudioMatches(ctx, ticket)) return false;
+  if (!exactIncidentMinuteMatches(ctx, ticket)) return false;
+
+  const hasMemberOrSessionAnchor =
+    (hasProvidedIdentity(ctx) && hasExactIdentityMatch(ctx, ticket)) ||
+    exactSessionMatches(ctx, ticket);
+
+  return hasMemberOrSessionAnchor;
 }
 
-function dateAnchorsMatch(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
-  const rawContext = metadataContext(ticket);
-  const inputClassDates = dateKeys(ctx.classDateTime, 'minute');
-  if (inputClassDates.size > 0) {
-    const ticketClassDates = new Set([
-      ...dateKeys(ticket.classDateTime, 'minute'),
-      ...dateKeys(contextString(rawContext, 'classDateTime'), 'minute'),
-    ]);
-    if (ticketClassDates.size === 0 || !hasIntersection(inputClassDates, ticketClassDates)) return false;
-  }
-
-  const inputIncidentDates = dateKeys(ctx.incidentDateTime, 'date');
-  if (inputIncidentDates.size > 0) {
-    const ticketIncidentDates = dateKeys(contextString(rawContext, 'incidentDateTime'), 'date');
-    if (ticketIncidentDates.size === 0 || !hasIntersection(inputIncidentDates, ticketIncidentDates)) return false;
-  }
-
+function hasSimilarIssueAnchors(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
+  if (!strictIssueTypeMatches(ctx, ticket)) return false;
+  if (hasExactDuplicateAnchors(ctx, ticket)) return false;
   return true;
 }
 
-function hasRequiredDuplicateAnchors(ctx: DuplicateTicketContext, ticket: Ticket): boolean {
-  if (hasProvidedIdentity(ctx) && !hasExactIdentityMatch(ctx, ticket)) return false;
-  if (!issueTypeMatches(ctx, ticket)) return false;
-  if (!sessionAnchorMatches(ctx, ticket)) return false;
-  return dateAnchorsMatch(ctx, ticket);
+export function findRelatedSubmittedTickets(_text: string, ctx: DuplicateTicketContext, tickets: Ticket[]): RelatedSubmittedTickets {
+  const exactDuplicate = tickets.find((ticket) => hasExactDuplicateAnchors(ctx, ticket)) || null;
+  const exactDuplicateId = exactDuplicate?.id;
+  const similarTickets = tickets
+    .filter((ticket) => ticket.id !== exactDuplicateId && hasSimilarIssueAnchors(ctx, ticket))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 5);
+
+  return { exactDuplicate, similarTickets };
 }
 
 export function findExistingSubmittedTicket(text: string, ctx: DuplicateTicketContext, tickets: Ticket[]): Ticket | null {
-  const explicitId = text.match(/\b(?:P57|TKT|TK)-?[A-Z0-9-]{3,}\b/i)?.[0]?.toLowerCase();
-  if (explicitId) {
-    const byId = tickets.find((ticket) => ticket.id.toLowerCase() === explicitId);
-    if (byId) return byId;
-  }
-
-  const inputTokens = normalizeTicketSearchText([
-    text,
-    ctx.memberName,
-    ctx.memberContact,
-    ctx.studio,
-    ctx.trainer,
-    ctx.classType,
-    ctx.category,
-    ctx.subCategory,
-  ].filter(Boolean).join(' '));
-  if (inputTokens.length < 4) return null;
-
-  let best: { ticket: Ticket; score: number } | null = null;
-  for (const ticket of tickets) {
-    if (!hasRequiredDuplicateAnchors(ctx, ticket)) continue;
-
-    const haystackTokens = normalizeTicketSearchText([
-      ticket.id,
-      ticket.title,
-      ticket.description,
-      ticket.conversationSummary,
-      ticket.category,
-      ticket.subCategory,
-      ticket.memberName,
-      ticket.memberContact,
-      ticket.studio,
-      ticket.trainer,
-      ticket.classType,
-    ].filter(Boolean).join(' '));
-    const haystack = new Set(haystackTokens);
-    const overlap = inputTokens.filter((token) => haystack.has(token)).length;
-    const hasIssueOverlap = overlap >= 3;
-    const exactIdentityMatch = hasExactIdentityMatch(ctx, ticket);
-    const contextBoost =
-      (exactIdentityMatch ? 0.12 : 0) +
-      (ctx.studio && ticket.studio === ctx.studio ? 0.04 : 0) +
-      (ctx.trainer && ticket.trainer === ctx.trainer ? 0.04 : 0) +
-      (sessionAnchorMatches(ctx, ticket) && ctx.sessionId ? 0.18 : 0);
-    const score = overlap / Math.max(8, Math.min(inputTokens.length, haystackTokens.length)) + contextBoost;
-    const threshold = exactIdentityMatch ? 0.68 : 0.74;
-    if (hasIssueOverlap && score >= threshold && (!best || score > best.score)) best = { ticket, score };
-  }
-
-  return best?.ticket || null;
+  return findRelatedSubmittedTickets(text, ctx, tickets).exactDuplicate;
 }

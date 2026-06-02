@@ -7,6 +7,7 @@ describe('intake option buttons', () => {
     expect(shouldUseOptionButtons({ id: 'priority', optionCount: 4 })).toBe(true);
     expect(shouldUseOptionButtons({ id: 'clientsAffected', optionCount: 5 })).toBe(true);
     expect(shouldUseOptionButtons({ id: 'classImpactType', optionCount: 8 })).toBe(true);
+    expect(shouldUseOptionButtons({ id: 'resolutionRequirement', optionCount: 6 })).toBe(true);
     expect(shouldUseOptionButtons({ id: 'custom_context_select', optionCount: 4 })).toBe(true);
   });
 

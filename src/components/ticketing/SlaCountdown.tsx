@@ -38,7 +38,8 @@ export const SlaCountdown: React.FC<{
   label?: string;
   compact?: boolean;
   className?: string;
-}> = ({ slaDueAt, status, label = 'SLA countdown', compact = false, className = '' }) => {
+  noSla?: boolean;
+}> = ({ slaDueAt, status, label = 'SLA countdown', compact = false, className = '', noSla = false }) => {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -49,17 +50,22 @@ export const SlaCountdown: React.FC<{
   const dueAt = slaDueAt ? new Date(slaDueAt).getTime() : Number.NaN;
   const closed = status === 'Resolved' || status === 'Closed';
   const diffMs = dueAt - now;
-  const tone = toneFor(diffMs, closed);
+  const tone = noSla ? 'closed' : toneFor(diffMs, closed);
   const dueLabel = useMemo(() => {
+    if (noSla) return 'No SLA target';
     if (!slaDueAt || Number.isNaN(dueAt)) return 'No SLA target';
     return new Date(slaDueAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
-  }, [dueAt, slaDueAt]);
-  const value = closed
+  }, [dueAt, noSla, slaDueAt]);
+  const value = noSla
+    ? 'No SLA'
+    : closed
     ? 'Closed'
     : tone === 'unknown'
       ? '--:--:--'
       : `${diffMs < 0 ? '+' : '-'}${formatDuration(diffMs)}`;
-  const caption = closed
+  const caption = noSla
+    ? 'Record only'
+    : closed
     ? 'SLA no longer counting'
     : diffMs < 0
       ? 'Past target'

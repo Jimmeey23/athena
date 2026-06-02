@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ticket, PRIORITY_SLA, getEscalationTarget } from '@/lib/ticketing-data';
+import { Ticket, PRIORITY_SLA, getEscalationTarget, isRecordOnlyTicket } from '@/lib/ticketing-data';
 import { MapPin, Tag, AlertCircle, CheckCircle2, Circle, Loader2, ArrowUpRight, ShieldCheck, Clock3 } from 'lucide-react';
 import { SlaCountdown } from './SlaCountdown';
 
@@ -114,7 +114,7 @@ export const TicketCard: React.FC<Props> = ({ ticket, onClick }) => {
           </div>
         )}
         <div className="grid gap-2 sm:grid-cols-2">
-          <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} compact className="w-full ring-0" />
+          <SlaCountdown slaDueAt={ticket.slaDueAt} status={ticket.status} noSla={isRecordOnlyTicket(ticket)} compact className="w-full ring-0" />
           <div className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white/80 px-2 py-1.5 font-medium text-stone-700">
             <ShieldCheck className="w-3 h-3 flex-shrink-0 text-blue-600" />
             <span className="truncate">{ticket.team}</span>

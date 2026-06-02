@@ -3,10 +3,12 @@ import {
   ASSOCIATES,
   ASSIGNMENT_RULES,
   CATEGORIES,
+  DEPARTMENTS,
   PRIORITY_SLA,
   STUDIOS,
   getEmployee,
   getEscalationTarget,
+  normalizeDepartmentName,
   resolveTicketAssignee,
   resolveTicketDepartment,
 } from '@/lib/ticketing-data';
@@ -142,9 +144,9 @@ function locationColor(id: string, name: string, city?: string): string {
 }
 
 const SUPPLEMENTAL_EMPLOYEES: EmployeeSetting[] = [
-  { id: 'reyna', name: 'Reyna', email: '', department: 'Marketing', role: 'Marketing Lead', location: 'Physique 57, Mumbai', manager: 'Mitali Kumar', active: true },
-  { id: 'saachi-jr', name: 'Saachi Jr.', email: '', department: 'Marketing', role: 'Marketing Associate', location: 'Physique 57, Bengaluru', manager: 'Reyna', active: true },
-  { id: 'jhanvi', name: 'Jhanvi', email: '', department: 'Marketing', role: 'Social Media', location: 'Physique 57, Mumbai', manager: 'Reyna', active: true },
+  { id: 'reyna', name: 'Reyna', email: '', department: 'Marketing & PR', role: 'Marketing Lead', location: 'Physique 57, Mumbai', manager: 'Mitali Kumar', active: true },
+  { id: 'saachi-jr', name: 'Saachi Jr.', email: '', department: 'Marketing & PR', role: 'Marketing Associate', location: 'Physique 57, Bengaluru', manager: 'Reyna', active: true },
+  { id: 'jhanvi', name: 'Jhanvi', email: '', department: 'Marketing & PR', role: 'Social Media', location: 'Physique 57, Mumbai', manager: 'Reyna', active: true },
 ];
 
 const ROUTING_PRESET_GROUPS = {
@@ -243,19 +245,19 @@ export function physique57RoutingPresets(): RoutingRuleSetting[] {
   add(CLIENT_SERVICING_CATEGORIES, 'Kwality House, Kemps Corner', ROUTING_PRESET_GROUPS.kwalitySales, 'Sales & Client Servicing', 'Jimmeey Gondaa', 'High');
   add(CLIENT_SERVICING_CATEGORIES, 'Supreme HQ, Bandra', ROUTING_PRESET_GROUPS.bandraSales, 'Sales & Client Servicing', 'Jimmeey Gondaa', 'High');
   add(CLIENT_SERVICING_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruSales, 'Sales & Client Servicing', 'Shifa Ali', 'High');
-  add(OPS_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiOps, 'Operations', 'Saachi Shetty - Operations', 'High');
-  add(OPS_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruOps, 'Management', 'Saachi Shetty - Operations', 'High');
-  add(TRAINING_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiTraining, 'Training', 'Anisha Shah');
-  add(TRAINING_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruTraining, 'Training', 'Anisha Shah');
-  add(MARKETING_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiMarketing, 'Marketing', 'Reyna');
-  add(MARKETING_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruMarketing, 'Marketing', 'Reyna');
+  add(OPS_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiOps, 'Operations & Maintenance', 'Saachi Shetty - Operations', 'High');
+  add(OPS_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruOps, 'Operations & Maintenance', 'Saachi Shetty - Operations', 'High');
+  add(TRAINING_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiTraining, 'Training & Client Experience', 'Anisha Shah');
+  add(TRAINING_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruTraining, 'Training & Client Experience', 'Anisha Shah');
+  add(MARKETING_CATEGORIES, 'Mumbai', ROUTING_PRESET_GROUPS.mumbaiMarketing, 'Marketing & PR', 'Reyna');
+  add(MARKETING_CATEGORIES, 'Bengaluru', ROUTING_PRESET_GROUPS.bengaluruMarketing, 'Marketing & PR', 'Reyna');
   add(BRAND_CATEGORIES, '', ROUTING_PRESET_GROUPS.brand, 'Management', 'Mitali Kumar');
-  add(['Hosted Class & Partnerships'], '', ROUTING_PRESET_GROUPS.social, 'Marketing', 'Reyna');
+  add(['Hosted Class & Partnerships'], '', ROUTING_PRESET_GROUPS.social, 'Marketing & PR', 'Reyna');
   return mergeRoutingRules(rules);
 }
 
 export function defaultRoutingSettings(): RoutingSettings {
-  const departments = unique(ASSOCIATES.map((associate) => associate.team)).map((name) => ({
+  const departments = DEPARTMENTS.map((name) => ({
     id: slug(name),
     name,
     description: `${name} routing queue`,
@@ -267,7 +269,7 @@ export function defaultRoutingSettings(): RoutingSettings {
       id: slug(associate.email || associate.name),
       name: associate.name,
       email: associate.email,
-      department: associate.team,
+      department: normalizeDepartmentName(associate.team),
       role: associate.role,
       location: associate.location,
       manager: associate.manager,
@@ -292,7 +294,7 @@ export function defaultRoutingSettings(): RoutingSettings {
     ...Object.keys(CATEGORIES).flatMap((category) => {
       const owner = ASSIGNMENT_RULES[category] || resolveTicketAssignee(category);
       const employee = getEmployee(owner);
-      const department = employee?.team || resolveTicketDepartment(category, owner);
+      const department = normalizeDepartmentName(employee?.team || resolveTicketDepartment(category, owner));
       const escalation = getEscalationTarget(owner);
       const priority = category.includes('Safety') || category.includes('Billing') ? 'High' : 'Medium';
       return [{
@@ -385,11 +387,15 @@ function normalizeSettings(input: Partial<RoutingSettings> | null | undefined): 
     ...SUPPLEMENTAL_EMPLOYEES.filter((item) => !employees.some((employee) => employee.name === item.name)),
   ];
   return {
-    departments: input?.departments?.length ? input.departments : defaults.departments,
-    employees: withSupplementalEmployees,
+    departments: defaults.departments,
+    employees: withSupplementalEmployees.map((employee) => ({
+      ...employee,
+      department: normalizeDepartmentName(employee.department),
+    })),
     locations: input?.locations?.length ? input.locations : defaults.locations,
     routingRules: mergeRoutingRules((input?.routingRules?.length ? input.routingRules : defaults.routingRules).map((rule) => ({
       ...rule,
+      department: normalizeDepartmentName(rule.department),
       owners: rule.owners?.length ? rule.owners : rule.owner ? [rule.owner] : [],
     }))),
   };
@@ -410,9 +416,10 @@ export function saveLocalRoutingSettings(settings: RoutingSettings) {
 }
 
 function mapDepartment(row: Record<string, unknown>): DepartmentSetting {
+  const name = normalizeDepartmentName(String(row.name || ''));
   return {
-    id: String(row.id || slug(String(row.name || 'department'))),
-    name: String(row.name || ''),
+    id: String(row.id || slug(name || 'department')),
+    name,
     description: typeof row.description === 'string' ? row.description : '',
     active: row.active !== false,
   };
@@ -423,7 +430,7 @@ function mapEmployee(row: Record<string, unknown>): EmployeeSetting {
     id: String(row.id || slug(String(row.email || row.name || 'employee'))),
     name: String(row.name || ''),
     email: typeof row.email === 'string' ? row.email : '',
-    department: String(row.department || row.team || ''),
+    department: normalizeDepartmentName(String(row.department || row.team || '')),
     role: typeof row.role === 'string' ? row.role : '',
     location: typeof row.location === 'string' ? row.location : '',
     manager: typeof row.manager === 'string' ? row.manager : '',
@@ -459,7 +466,7 @@ function mapRoutingRule(row: Record<string, unknown>): RoutingRuleSetting {
     location: String(row.location || ''),
     owner: String(row.owner || row.assigned_to || owners[0] || ''),
     owners,
-    department: String(row.department || row.team || ''),
+    department: normalizeDepartmentName(String(row.department || row.team || '')),
     escalation: String(row.escalation || row.next_escalation || ''),
     priority: PRIORITY_SLA[priority] ? priority : 'Medium',
     slaHours: Number(row.sla_hours || row.slaHours || PRIORITY_SLA[PRIORITY_SLA[priority] ? priority : 'Medium'].hours),

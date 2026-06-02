@@ -43,6 +43,12 @@ interface MomenceSession {
   capacity?: number | null;
 }
 
+interface MomenceHostMembership {
+  id: number;
+  name?: string;
+  disabled?: boolean;
+}
+
 export interface MomenceMemberDetail extends MomenceMember {
   customerTags?: MomenceTag[];
 }
@@ -745,6 +751,25 @@ export async function searchMomenceSessions(query: string): Promise<MomenceSessi
 
 export async function getMomenceMember(memberId: string | number) {
   return callMomence<MomenceMemberDetail>(`/host/members/${memberId}`);
+}
+
+export async function listMomenceHostMembershipOptions(): Promise<string[]> {
+  const response = await callMomence<PaginatedMomenceResponse<MomenceHostMembership>>('/host/memberships', {
+    params: {
+      page: 0,
+      pageSize: 200,
+      sortBy: 'name',
+      sortOrder: 'ASC',
+      includeDisabled: false,
+    },
+  });
+
+  return Array.from(new Set(
+    payloadFrom(response)
+      .filter((membership) => membership.disabled !== true)
+      .map((membership) => membership.name?.trim() || '')
+      .filter(Boolean)
+  ));
 }
 
 export async function loadMomenceTicketContext({

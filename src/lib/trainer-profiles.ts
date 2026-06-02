@@ -31,13 +31,6 @@ export interface TrainerProfile {
 const STORAGE_KEY = 'p57_trainer_profiles_v1';
 const INACTIVE_TRAINER_NAMES = new Set([
   'Unspecified Instructor',
-  'Upasna Paranjpe',
-  'Kabir Varma',
-  'Janhavi Jain',
-  'Nishanth Raj',
-  'Poojitha Bhaskar',
-  'Veena Narasimhan',
-  'Saniya Jaiswal',
 ]);
 
 function isActiveTrainerName(trainer: string): boolean {

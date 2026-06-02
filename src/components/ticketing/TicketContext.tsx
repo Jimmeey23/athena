@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { ASSOCIATES, getEmployee, getEscalationTarget, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket } from '@/lib/ticketing-data';
+import { ASSOCIATES, getEmployee, getEscalationTarget, isRecordOnlyTicket, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket } from '@/lib/ticketing-data';
 import { backendSupabase } from '@/lib/backend-supabase';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import { ResolvedAssignment, resolveConfiguredAssignment } from '@/lib/routing-settings';
@@ -25,8 +25,16 @@ import {
   ticketEmailInFlightKey,
   TicketEmailEventType,
 } from '@/lib/ticket-email-notifications';
-import { buildApprovedTicketCreateRequest } from '@/lib/ticket-approved-creation';
+import {
+  RECORD_ONLY_ASSIGNEE,
+  applyResolutionRequirementToDraft,
+  applySimilarTicketGroupingToDraft,
+  buildApprovedTicketCreateRequest,
+  buildDuplicateMergePatch,
+  ticketRequiresResolution,
+} from '@/lib/ticket-approved-creation';
 import { invokeTicketingFunction } from '@/lib/ticketing-functions';
+import { findRelatedSubmittedTickets } from '@/lib/ticket-duplicate-matching';
 import {
   ApprovedTicketDraft,
   ManualTicketInput,
@@ -193,6 +201,7 @@ function buildHistoricTags(row: HistoricTicketRow): string[] {
 }
 
 function normalizeTicketOwner(category: string, studio?: string | null, assignedTo?: string | null): string {
+  if (assignedTo === RECORD_ONLY_ASSIGNEE) return RECORD_ONLY_ASSIGNEE;
   if (assignedTo && getEmployee(assignedTo)) return assignedTo;
   return resolveTicketAssignee(category, studio || undefined);
 }
@@ -240,7 +249,7 @@ function mapHistoricTicket(row: HistoricTicketRow): Ticket {
 // DB row → UI Ticket
 function fromRow(row: DbTicketRow): Ticket {
   const assignedTo = normalizeTicketOwner(row.category, row.studio, row.assigned_to);
-  const team = normalizeTicketTeam(row.category, assignedTo);
+  const team = assignedTo === RECORD_ONLY_ASSIGNEE && row.team ? row.team : normalizeTicketTeam(row.category, assignedTo);
   const createdAtMs = new Date(row.created_at).getTime();
   const existedBeforeEmailRollout = Number.isFinite(createdAtMs) && createdAtMs < EMAIL_ROLLOUT_CUTOFF_AT;
 
@@ -429,31 +438,38 @@ function buildSourceRef(draft: DraftTicket, context: Record<string, unknown> = {
 
 function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, assignment?: ResolvedAssignment): DbTicketPatch {
   const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
+  const recordOnly = !profileOnly && !ticketRequiresResolution(context);
   const assignedTo = assignment?.assignedTo || resolveTicketAssignee(draft.category, draft.studio);
-  const effectiveAssignedTo = profileOnly ? 'Trainer Profile' : assignedTo;
-  const team = profileOnly ? 'Training' : assignment?.team || draft.department || resolveTicketDepartment(draft.category, assignedTo);
-  const nextEscalation = assignment?.nextEscalation || getEscalationTarget(assignedTo);
+  const effectiveAssignedTo = profileOnly ? 'Trainer Profile' : recordOnly ? RECORD_ONLY_ASSIGNEE : assignedTo;
+  const team = profileOnly ? 'Training & Client Experience' : assignment?.team || draft.department || resolveTicketDepartment(draft.category, assignedTo);
+  const nextEscalation = recordOnly ? null : assignment?.nextEscalation || getEscalationTarget(assignedTo);
   const priority = (profileOnly ? 'Low' : assignment?.priority || draft.priority) as Ticket['priority'];
   const slaDueAt = profileOnly
     ? draft.classDateTime || new Date().toISOString()
+    : recordOnly
+    ? new Date().toISOString()
     : assignment?.slaHours
     ? new Date(Date.now() + assignment.slaHours * 60 * 60 * 1000).toISOString()
     : computeSlaDueAt(priority);
+  const status: Ticket['status'] = profileOnly || recordOnly ? 'Closed' : 'New';
   const formattedDescription = formatTicketBody(draft.description);
   const metadata = {
     ...(draft.metadata || {}),
+    resolution_required: !recordOnly,
+    no_sla: recordOnly,
     source_ref: buildSourceRef(draft, context),
     intake_context: context,
       routing: {
         department: team,
         assigned_to: effectiveAssignedTo,
-        owner_pool: profileOnly ? [] : assignment?.ownerPool || [assignedTo],
+        owner_pool: profileOnly || recordOnly ? [] : assignment?.ownerPool || [assignedTo],
         next_escalation: profileOnly ? null : nextEscalation,
       priority,
-      sla_due_at: slaDueAt,
-      status: profileOnly ? 'Closed' : 'New',
+      sla_due_at: recordOnly ? null : slaDueAt,
+      status,
       profile_only: profileOnly,
-      routing_source: profileOnly ? 'trainer_profile_record' : assignment?.source || 'athena_employee_directory',
+      resolution_required: !recordOnly,
+      routing_source: profileOnly ? 'trainer_profile_record' : recordOnly ? 'record_only' : assignment?.source || 'athena_employee_directory',
     },
     dynamic_fields: Object.fromEntries(
       Object.entries(context).filter(([key, value]) =>
@@ -484,7 +500,7 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     category: draft.category,
     sub_category: draft.subCategory,
     priority,
-    status: profileOnly ? 'Closed' : 'New',
+    status,
     studio: draft.studio || 'Unspecified Studio',
     trainer: draft.trainer || null,
     class_type: draft.classType || null,
@@ -494,7 +510,12 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     reported_by: draft.reportedBy || null,
     assigned_to: effectiveAssignedTo,
     team,
-    tags: Array.from(new Set([...(draft.tags || []), 'ai-approved', profileOnly ? 'profile-only' : assignment?.source || 'default-routing'])),
+    tags: Array.from(new Set([
+      ...(draft.tags || []),
+      'ai-approved',
+      profileOnly ? 'profile-only' : recordOnly ? 'record-only' : assignment?.source || 'default-routing',
+      recordOnly ? 'no-resolution-required' : '',
+    ].filter(Boolean))),
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || formattedDescription,
     sla_due_at: slaDueAt,
@@ -1000,12 +1021,13 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             ...configuredAssignment,
             team: contextDepartment || configuredAssignment.team,
           };
-      const draftForServer = {
+      const requiresResolution = ticketRequiresResolution(publishContext);
+      const baseDraftForServer = {
         ...publishDraft,
         assignedTo: publishAssignment.assignedTo,
         department: publishAssignment.team,
       };
-      const contextForServer = {
+      const baseContextForServer = {
         ...publishContext,
         assignedTo: publishAssignment.assignedTo,
         owner: publishAssignment.assignedTo,
@@ -1013,6 +1035,46 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         team: publishAssignment.team,
         conversationId,
       };
+      let contextForServer = requiresResolution
+        ? baseContextForServer
+        : {
+            ...baseContextForServer,
+            assignedTo: RECORD_ONLY_ASSIGNEE,
+            owner: RECORD_ONLY_ASSIGNEE,
+          };
+      let draftForServer = applyResolutionRequirementToDraft(baseDraftForServer, contextForServer);
+      const relatedTickets = findRelatedSubmittedTickets(
+        `${draftForServer.title}\n${draftForServer.description}`,
+        contextForServer,
+        tickets.filter((ticket) => !ticket.tags.includes('historic') && !ticket.tags.includes('profile-only'))
+      );
+
+      if (relatedTickets.exactDuplicate) {
+        const duplicatePatch = buildDuplicateMergePatch(
+          relatedTickets.exactDuplicate,
+          draftForServer,
+          contextForServer
+        );
+        await updateTicket(relatedTickets.exactDuplicate.id, duplicatePatch as Partial<Ticket>, signedInReporter);
+        const mergedTicket = {
+          ...relatedTickets.exactDuplicate,
+          ...duplicatePatch,
+          metadata: duplicatePatch.metadata as Ticket['metadata'],
+          tags: duplicatePatch.tags as string[],
+        };
+        await refresh();
+        return mergedTicket;
+      }
+
+      const similarTicketIds = relatedTickets.similarTickets.map((ticket) => ticket.id);
+      if (similarTicketIds.length > 0) {
+        draftForServer = applySimilarTicketGroupingToDraft(draftForServer, similarTicketIds);
+        contextForServer = {
+          ...contextForServer,
+          similarTicketIds,
+          groupedNotMerged: true,
+        };
+      }
       const { data, error } = await invokeTicketingFunction<CreateTicketFunctionResponse>('ticket-ai-chat', {
         body: buildApprovedTicketCreateRequest({
           draft: draftForServer,
@@ -1052,14 +1114,14 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const ticket = normalizeCreatedTicket(created as DbTicketRow | Ticket);
       setLiveTickets((prev) => dedupeAndSortTickets([ticket, ...prev]));
-      if (!ticket.tags.includes('profile-only')) {
+      if (!ticket.tags.includes('profile-only') && !isRecordOnlyTicket(ticket)) {
         setSelectedTicketState(ticket);
         await notifyTicketEmail('ticket_assigned', ticket, signedInReporter);
       }
       await refresh();
       return ticket;
     },
-    [notifyTicketEmail, refresh]
+    [notifyTicketEmail, refresh, tickets, updateTicket]
   );
 
   useEffect(() => {
