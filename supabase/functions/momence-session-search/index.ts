@@ -185,7 +185,7 @@ Deno.serve(async (request) => {
     let responseContentType = 'application/json';
 
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const url = new URL(`${MOMENCE_BASE_URL}/member/host/sessions`);
+      const url = new URL(`${MOMENCE_BASE_URL}/host/sessions`);
       url.searchParams.set('page', String(page));
       url.searchParams.set('pageSize', String(pageSize));
       url.searchParams.set('sortBy', 'startsAt');

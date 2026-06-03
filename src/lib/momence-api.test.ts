@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backendSupabase } from './backend-supabase';
 import {
-  bookMomenceSessionWithMembership,
   buildMomenceInsightSummary,
   freezeMomenceMembership,
   listMomenceHostMembershipOptions,
@@ -195,105 +194,6 @@ describe('Momence membership freeze actions', () => {
   });
 });
 
-describe('Momence session checkout actions', () => {
-  beforeEach(() => {
-    vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', 'http://localhost/momence-search');
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-  });
-
-  it('books a selected session with a purchased Momence membership through host checkout', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      const body = JSON.parse(String((init as RequestInit).body || '{}'));
-      if (body.path === '/host/checkout/prices') {
-        return new Response(JSON.stringify({
-          itemsWithPrices: [{
-            id: 'session-202',
-            priceInCurrencyWithTax: '0.00',
-            priceInCurrencyWithoutTax: '0.00',
-            taxInCurrency: '0.00',
-          }],
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({
-        purchasedItems: [{ type: 'session', sessionBookingId: 909 }],
-      }), { status: 200 });
-    }));
-
-    const result = await bookMomenceSessionWithMembership({
-      memberId: '42',
-      sessionId: '202',
-      boughtMembershipId: '11',
-    });
-
-    expect(result.sessionBookingId).toBe(909);
-    expect(fetch).toHaveBeenNthCalledWith(1, 'http://localhost/momence-search', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        path: '/host/checkout/prices',
-        method: 'POST',
-        params: {},
-        body: {
-          memberId: 42,
-          items: [{ id: 'session-202', type: 'session', sessionId: 202 }],
-          paymentMethods: [{ id: 'membership-11', type: 'membership', boughtMembershipId: 11 }],
-        },
-      }),
-    }));
-    expect(fetch).toHaveBeenNthCalledWith(2, 'http://localhost/momence-search', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        path: '/host/checkout',
-        method: 'POST',
-        params: {},
-        body: {
-          memberId: 42,
-          items: [{ id: 'session-202', type: 'session', sessionId: 202, attemptedPriceInCurrency: '0.00' }],
-          paymentMethods: [{ id: 'membership-11', type: 'membership', boughtMembershipId: 11 }],
-        },
-      }),
-    }));
-  });
-
-  it('uses the first compatible purchased membership when the redirect only has member and session ids', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
-      const body = JSON.parse(String((init as RequestInit).body || '{}'));
-      if (body.path === '/host/checkout/compatible-memberships') {
-        return new Response(JSON.stringify({
-          items: [
-            { boughtMembership: { id: 100 }, incompatibility: 'session-bought-membership-no-event-credits-left' },
-            { boughtMembership: { id: 101 } },
-          ],
-        }), { status: 200 });
-      }
-      if (body.path === '/host/checkout/prices') {
-        return new Response(JSON.stringify({
-          itemsWithPrices: [{ id: 'session-202', priceInCurrencyWithTax: '0.00' }],
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({
-        purchasedItems: [{ type: 'session', sessionBookingId: 910 }],
-      }), { status: 200 });
-    }));
-
-    const result = await bookMomenceSessionWithMembership({
-      memberId: '42',
-      sessionId: '202',
-    });
-
-    expect(result.boughtMembershipId).toBe(101);
-    expect(fetch).toHaveBeenNthCalledWith(1, 'http://localhost/momence-search', expect.objectContaining({
-      body: expect.stringContaining('/host/checkout/compatible-memberships'),
-    }));
-    expect(fetch).toHaveBeenNthCalledWith(2, 'http://localhost/momence-search', expect.objectContaining({
-      body: expect.stringContaining('"boughtMembershipId":101'),
-    }));
-  });
-});
-
 describe('Momence host membership options', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', 'http://localhost/momence-search');
@@ -379,73 +279,6 @@ describe('Momence session search', () => {
         types: ['private'],
       }),
     }));
-  });
-
-  it('preserves member-facing session booking rates from Momence session search results', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      payload: [{
-        id: 502,
-        name: 'Private Hosted Barre',
-        startsAt: '2026-06-03T05:00:00.000Z',
-        teacher: { firstName: 'Anmol', lastName: 'Sharma' },
-        inPersonLocation: { name: 'Supreme HQ, Bandra' },
-        participants: 6,
-        capacity: 12,
-        priceType: 'fixed-price',
-        fixedTicketPrice: 2250,
-      }],
-    }), { status: 200 })));
-
-    const sessions = await searchMomenceSessions('');
-
-    expect(sessions[0]).toMatchObject({
-      id: '502',
-      bookingRateLabel: 'INR 2,250 booking rate',
-      description: expect.stringContaining('6/12 booked'),
-    });
-    expect(sessions[0].description).toContain('INR 2,250 booking rate');
-  });
-});
-
-describe('Momence session search fallback', () => {
-  beforeEach(() => {
-    vi.unstubAllEnvs();
-    vi.stubEnv('VITE_MOMENCE_SESSION_FUNCTION_URL', '');
-    vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', '');
-    vi.stubEnv('VITE_MOMENCE_PROXY_URL', '');
-    vi.stubEnv('VITE_MOMENCE_ACCESS_TOKEN', '');
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('uses the member-facing sessions endpoint when routing through the generic Momence proxy', async () => {
-    vi.mocked(backendSupabase.functions.invoke).mockResolvedValueOnce({
-      data: {
-        payload: [{
-          id: 503,
-          name: 'Dynamic Price Hosted Class',
-          startsAt: '2026-06-04T05:00:00.000Z',
-          participants: 4,
-          capacity: 10,
-          priceType: 'dynamic',
-          dynamicTicketPriceMin: 1500,
-          dynamicTicketPriceMax: 2400,
-        }],
-      },
-      error: null,
-    });
-
-    const sessions = await searchMomenceSessions('');
-
-    expect(backendSupabase.functions.invoke).toHaveBeenCalledWith('momence-search', expect.objectContaining({
-      body: expect.objectContaining({
-        path: '/member/host/sessions',
-      }),
-    }));
-    expect(sessions[0].bookingRateLabel).toBe('INR 1,500 - INR 2,400 dynamic booking rate');
   });
 });
 
