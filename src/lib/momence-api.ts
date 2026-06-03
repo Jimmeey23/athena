@@ -40,7 +40,19 @@ interface MomenceSession {
   } | null;
   isCancelled?: boolean;
   bookingCount?: number;
+  participants?: number;
   capacity?: number | null;
+  priceType?: 'fixed-price' | 'dynamic' | string | null;
+  fixedTicketPrice?: number | string | null;
+  dynamicTicketPriceMin?: number | string | null;
+  dynamicTicketPriceMax?: number | string | null;
+  dynamicTicketFreeOptionEnabled?: boolean | null;
+  price?: number | string | null;
+  priceAfterProration?: number | string | null;
+  currency?: string | null;
+  host?: {
+    currency?: string | null;
+  } | null;
 }
 
 interface MomenceHostMembership {
@@ -153,6 +165,7 @@ export interface MomenceSessionOption {
   studio?: string;
   startsAt?: string;
   endsAt?: string;
+  bookingRateLabel?: string;
 }
 
 export interface MomenceInsightInput {
@@ -263,6 +276,66 @@ interface MomenceRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   params?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
+}
+
+interface HostCheckoutSessionItem {
+  id: string;
+  type: 'session';
+  sessionId: number;
+  appliedPriceRuleIds?: number[];
+}
+
+interface HostCheckoutSessionItemWithPrice extends HostCheckoutSessionItem {
+  attemptedPriceInCurrency: string;
+}
+
+interface HostCheckoutMembershipPaymentMethod {
+  id: string;
+  type: 'membership';
+  boughtMembershipId: number;
+}
+
+interface HostCheckoutCompatibleMembership {
+  boughtMembership?: {
+    id?: string | number;
+  } | null;
+  incompatibility?: string | null;
+}
+
+interface HostCheckoutCompatibleMembershipsResponse {
+  items?: HostCheckoutCompatibleMembership[];
+}
+
+interface HostCheckoutPricesResponse {
+  totalInCurrency?: string;
+  itemsWithPrices?: Array<{
+    id: string;
+    priceInCurrencyWithTax?: string;
+    priceInCurrencyWithoutTax?: string;
+    taxInCurrency?: string;
+  }>;
+}
+
+interface HostCheckoutResponse {
+  purchasedItems?: Array<{
+    type?: string;
+    sessionBookingId?: number;
+    boughtMembershipId?: number;
+  }>;
+}
+
+export interface BookMomenceSessionWithMembershipInput {
+  memberId: string | number;
+  sessionId: string | number;
+  boughtMembershipId?: string | number | null;
+  homeLocationId?: string | number | null;
+  appliedPriceRuleIds?: number[];
+}
+
+export interface BookMomenceSessionWithMembershipResult {
+  sessionBookingId?: number;
+  boughtMembershipId: number;
+  response: HostCheckoutResponse;
 }
 
 function compact(parts: Array<string | number | null | undefined>): string {
@@ -456,6 +529,55 @@ function formatDateTime(value?: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
+}
+
+function numberFromMomenceValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const number = Number(value.replace(/,/g, '').trim());
+    return Number.isFinite(number) ? number : undefined;
+  }
+  return undefined;
+}
+
+function requiredMomenceId(value: string | number | null | undefined, label: string): number {
+  const number = numberFromMomenceValue(value);
+  if (number == null || !Number.isInteger(number) || number <= 0) {
+    throw new Error(`Invalid Momence ${label}.`);
+  }
+  return number;
+}
+
+function formatCurrencyAmount(amount: number, currency = 'INR'): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency,
+    currencyDisplay: 'code',
+    maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+  }).format(amount).replace(/\u00a0/g, ' ');
+}
+
+function sessionBookingCount(session: MomenceSession): number | undefined {
+  return numberFromMomenceValue(session.bookingCount) ?? numberFromMomenceValue(session.participants);
+}
+
+function sessionBookingRateLabel(session: MomenceSession): string | undefined {
+  const currency = (session.currency || session.host?.currency || 'INR').toUpperCase();
+  const fixedPrice = numberFromMomenceValue(session.fixedTicketPrice)
+    ?? numberFromMomenceValue(session.priceAfterProration)
+    ?? numberFromMomenceValue(session.price);
+
+  if (fixedPrice != null) return `${formatCurrencyAmount(fixedPrice, currency)} booking rate`;
+
+  const minimumPrice = numberFromMomenceValue(session.dynamicTicketPriceMin);
+  const maximumPrice = numberFromMomenceValue(session.dynamicTicketPriceMax);
+  if (minimumPrice != null && maximumPrice != null) {
+    return `${formatCurrencyAmount(minimumPrice, currency)} - ${formatCurrencyAmount(maximumPrice, currency)} dynamic booking rate`;
+  }
+  if (minimumPrice != null) return `From ${formatCurrencyAmount(minimumPrice, currency)} booking rate`;
+  if (maximumPrice != null) return `Up to ${formatCurrencyAmount(maximumPrice, currency)} booking rate`;
+  if (session.dynamicTicketFreeOptionEnabled) return 'Free booking option available';
+  return undefined;
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -709,7 +831,7 @@ export async function searchMomenceSessions(query: string, options: SearchMomenc
     }
     response = await parseResponse<PaginatedMomenceResponse<MomenceSession>>(raw);
   } else {
-    response = await callMomence<PaginatedMomenceResponse<MomenceSession>>('/host/sessions', {
+    response = await callMomence<PaginatedMomenceResponse<MomenceSession>>('/member/host/sessions', {
       params: {
         page: 0,
         pageSize: 200,
@@ -742,15 +864,23 @@ export async function searchMomenceSessions(query: string, options: SearchMomenc
       const studio = session.inPersonLocation?.name;
       const dateLabel = formatDateTime(session.startsAt);
       const classType = session.name || session.type || `Momence session #${session.id}`;
+      const bookedCount = sessionBookingCount(session) || 0;
+      const bookingRateLabel = sessionBookingRateLabel(session);
       return {
         id: String(session.id),
         label: compact([classType, dateLabel && `- ${dateLabel}`]),
-        description: compact([trainer, studio, session.capacity != null ? `${session.bookingCount || 0}/${session.capacity} booked` : null]),
+        description: compact([
+          trainer,
+          studio,
+          session.capacity != null ? `${bookedCount}/${session.capacity} booked` : null,
+          bookingRateLabel,
+        ]),
         classType,
         trainer,
         studio,
         startsAt: session.startsAt,
         endsAt: session.endsAt,
+        bookingRateLabel,
       };
     });
 }
@@ -891,6 +1021,94 @@ export async function addMomenceMemberToWaitlist(memberId: string | number, sess
     method: 'POST',
     body: { memberId: Number(memberId) },
   });
+}
+
+async function findCompatibleBoughtMembershipId(memberId: number, item: HostCheckoutSessionItem, homeLocationId?: number) {
+  const response = await callMomence<HostCheckoutCompatibleMembershipsResponse>(
+    '/host/checkout/compatible-memberships',
+    {
+      method: 'POST',
+      body: {
+        memberId,
+        items: [item],
+        ...(homeLocationId ? { homeLocationId } : {}),
+      },
+    }
+  );
+
+  const compatible = (response.items || []).find((membership) => {
+    return !membership.incompatibility && requiredCompatibleMembershipId(membership.boughtMembership?.id) != null;
+  });
+  const boughtMembershipId = requiredCompatibleMembershipId(compatible?.boughtMembership?.id);
+  if (boughtMembershipId == null) {
+    throw new Error('No compatible purchased Momence membership was found for this session.');
+  }
+  return boughtMembershipId;
+}
+
+function requiredCompatibleMembershipId(value: string | number | null | undefined): number | undefined {
+  try {
+    return requiredMomenceId(value, 'bought membership ID');
+  } catch {
+    return undefined;
+  }
+}
+
+export async function bookMomenceSessionWithMembership(
+  input: BookMomenceSessionWithMembershipInput
+): Promise<BookMomenceSessionWithMembershipResult> {
+  const memberId = requiredMomenceId(input.memberId, 'member ID');
+  const sessionId = requiredMomenceId(input.sessionId, 'session ID');
+  const homeLocationId = input.homeLocationId == null || input.homeLocationId === ''
+    ? undefined
+    : requiredMomenceId(input.homeLocationId, 'home location ID');
+  const sessionItem: HostCheckoutSessionItem = {
+    id: `session-${sessionId}`,
+    type: 'session',
+    sessionId,
+    ...(input.appliedPriceRuleIds?.length ? { appliedPriceRuleIds: input.appliedPriceRuleIds } : {}),
+  };
+
+  const boughtMembershipId = input.boughtMembershipId == null || input.boughtMembershipId === ''
+    ? await findCompatibleBoughtMembershipId(memberId, sessionItem, homeLocationId)
+    : requiredMomenceId(input.boughtMembershipId, 'bought membership ID');
+  const paymentMethod: HostCheckoutMembershipPaymentMethod = {
+    id: `membership-${boughtMembershipId}`,
+    type: 'membership',
+    boughtMembershipId,
+  };
+  const commonBody = {
+    memberId,
+    items: [sessionItem],
+    paymentMethods: [paymentMethod],
+    ...(homeLocationId ? { homeLocationId } : {}),
+  };
+
+  const prices = await callMomence<HostCheckoutPricesResponse>('/host/checkout/prices', {
+    method: 'POST',
+    body: commonBody,
+  });
+  const sessionPrice = prices.itemsWithPrices?.find((item) => item.id === sessionItem.id);
+  const attemptedPriceInCurrency = sessionPrice?.priceInCurrencyWithTax
+    || sessionPrice?.priceInCurrencyWithoutTax
+    || '0.00';
+  const checkoutItem: HostCheckoutSessionItemWithPrice = {
+    ...sessionItem,
+    attemptedPriceInCurrency,
+  };
+  const response = await callMomence<HostCheckoutResponse>('/host/checkout', {
+    method: 'POST',
+    body: {
+      ...commonBody,
+      items: [checkoutItem],
+    },
+  });
+
+  return {
+    sessionBookingId: response.purchasedItems?.find((item) => item.type === 'session')?.sessionBookingId,
+    boughtMembershipId,
+    response,
+  };
 }
 
 export async function freezeMomenceMembership(

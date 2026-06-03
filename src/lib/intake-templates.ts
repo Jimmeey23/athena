@@ -27,6 +27,7 @@ export interface HostedClassSessionSummary {
   trainer?: string;
   studio?: string;
   startsAt?: string;
+  bookingRateLabel?: string;
 }
 
 export interface HostedClassAttendeeFeedback {
@@ -255,6 +256,7 @@ export function buildHostedClassFeedbackText(input: HostedClassFeedbackInput): s
     input.session.startsAt ? `Session date/time: ${input.session.startsAt}` : '',
     input.session.studio ? `Studio space: ${input.session.studio}` : '',
     input.session.trainer ? `Instructor: ${input.session.trainer}` : '',
+    input.session.bookingRateLabel ? `Booking rate: ${input.session.bookingRateLabel}` : '',
     input.partnerName ? `Partner / host name: ${input.partnerName}` : '',
     input.partnerType ? `Partner type: ${input.partnerType}` : '',
     input.acquisitionSource ? `Attendance source: ${input.acquisitionSource}` : '',

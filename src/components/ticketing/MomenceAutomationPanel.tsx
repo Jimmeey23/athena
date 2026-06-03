@@ -3,6 +3,7 @@ import {
   addMomenceMemberToSessionForFree,
   addMomenceMemberToWaitlist,
   assignMomenceTag,
+  bookMomenceSessionWithMembership,
   cancelMomenceBooking,
   checkInMomenceBooking,
   freezeMomenceMembership,
@@ -316,6 +317,21 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
               </div>
               {selectedMember && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
+                  {selectedSession && membership.status === 'Active' && (
+                    <ActionButton disabled={Boolean(matchingSessionBooking)} loading={actionLoading === `book-membership-${membership.id}`} onClick={() => {
+                      runAction(
+                        `book-membership-${membership.id}`,
+                        `Book ${selectedMember.label} into ${selectedSession.classType} using ${membership.name}?`,
+                        () => bookMomenceSessionWithMembership({
+                          memberId: selectedMember.id,
+                          sessionId: selectedSession.id,
+                          boughtMembershipId: membership.id,
+                        })
+                      );
+                    }}>
+                      Book With Membership
+                    </ActionButton>
+                  )}
                   <ActionButton loading={actionLoading === `freeze-now-${membership.id}`} onClick={() => {
                     runAction(
                       `freeze-now-${membership.id}`,

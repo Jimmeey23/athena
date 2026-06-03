@@ -51,6 +51,7 @@ describe('context intake templates', () => {
         trainer: 'Anisha Shah',
         studio: 'Supreme HQ, Bandra',
         startsAt: '2026-06-01T10:00:00+05:30',
+        bookingRateLabel: 'INR 2,250 booking rate',
       },
       attendees: [
         {
@@ -69,6 +70,7 @@ describe('context intake templates', () => {
     });
 
     expect(text).toContain('Momence session ID: session-123');
+    expect(text).toContain('Booking rate: INR 2,250 booking rate');
     expect(text).toContain('Partner / host name: Wellness Collective');
     expect(text).toContain('Asha Rao');
     expect(text).toContain('Status: Interested in continuing');

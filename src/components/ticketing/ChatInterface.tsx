@@ -2709,6 +2709,7 @@ function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSes
     trainer: session.trainer,
     studio: session.studio,
     startsAt: session.startsAt,
+    bookingRateLabel: session.bookingRateLabel,
   };
 }
 
@@ -2974,6 +2975,7 @@ const HostedClassTemplateForm: React.FC<{
                   { label: 'Date', value: formatHostedSessionDateTime(selectedSession.startsAt) },
                   { label: 'Studio', value: selectedSession.studio || 'Studio not returned' },
                   { label: 'Instructor', value: selectedSession.trainer || 'Instructor not returned' },
+                  { label: 'Booking rate', value: selectedSession.bookingRateLabel || 'Rate not returned' },
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
                     <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>

@@ -41,6 +41,7 @@ describe('template form dialog layout', () => {
 
     expect(source).toContain('Hosted template progress');
     expect(source).toContain('Selected session');
+    expect(source).toContain('Booking rate');
     expect(source).toContain('Partnership context');
     expect(source).toContain('Feedback and follow-up');
     expect(source).toContain('grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]');
