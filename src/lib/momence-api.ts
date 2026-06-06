@@ -6,6 +6,8 @@ const SESSION_RESULT_LIMIT = 120;
 const SESSION_LOOKAHEAD_DAYS = 45;
 const SESSION_LOOKBACK_DAYS = 180;
 const SESSION_SEARCH_TYPE = 'private';
+const SESSION_PAGE_SIZE = 40;
+const SESSION_MAX_PAGES = 12;
 
 interface PaginatedMomenceResponse<T> {
   payload?: T[];
@@ -257,6 +259,17 @@ export interface LoadMomenceTicketContextOptions {
 
 export interface SearchMomenceSessionsOptions {
   types?: string[];
+}
+
+interface MomenceSessionPageResponse extends PaginatedMomenceResponse<MomenceSession> {
+  page?: number;
+  pageSize?: number;
+  hasMore?: boolean;
+}
+
+interface MomenceSessionPageResult {
+  sessions: MomenceSessionOption[];
+  hasMore: boolean;
 }
 
 interface MomenceRequestOptions {
@@ -670,59 +683,10 @@ export async function searchMomenceMembers(query: string): Promise<MomenceMember
   });
 }
 
-export async function searchMomenceSessions(query: string, options: SearchMomenceSessionsOptions = {}): Promise<MomenceSessionOption[]> {
-  const now = new Date();
-  const lookback = new Date(now);
-  lookback.setDate(lookback.getDate() - SESSION_LOOKBACK_DAYS);
-  const lookahead = new Date(now);
-  lookahead.setDate(lookahead.getDate() + SESSION_LOOKAHEAD_DAYS);
-  const sessionFunctionUrl = resolveSessionFunctionUrl();
-  const sessionFunctionAnonKey = resolveSessionFunctionAnonKey();
-  const normalizedQuery = normalizeSearchValue(query);
-  const sessionTypes = options.types?.map((type) => type.trim()).filter(Boolean);
-  const requestedSessionTypes = sessionTypes?.length ? sessionTypes : [SESSION_SEARCH_TYPE];
-
-  let response: PaginatedMomenceResponse<MomenceSession>;
-  if (sessionFunctionUrl) {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (sessionFunctionAnonKey) {
-      headers.apikey = sessionFunctionAnonKey;
-      headers.Authorization = `Bearer ${sessionFunctionAnonKey}`;
-    }
-    const raw = await fetch(sessionFunctionUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        query,
-        pastDays: SESSION_LOOKBACK_DAYS,
-        futureDays: SESSION_LOOKAHEAD_DAYS,
-        pageSize: 200,
-        includeCancelled: false,
-        types: requestedSessionTypes,
-      }),
-    });
-    if (!raw.ok) {
-      const detail = await raw.text();
-      throw new Error(`Momence session function returned ${raw.status}: ${detail}`);
-    }
-    response = await parseResponse<PaginatedMomenceResponse<MomenceSession>>(raw);
-  } else {
-    response = await callMomence<PaginatedMomenceResponse<MomenceSession>>('/host/sessions', {
-      params: {
-        page: 0,
-        pageSize: 200,
-        sortBy: 'startsAt',
-        sortOrder: 'DESC',
-        includeCancelled: false,
-        types: requestedSessionTypes[0] || SESSION_SEARCH_TYPE,
-        startAfter: lookback.toISOString(),
-        startBefore: lookahead.toISOString(),
-      },
-    });
-  }
-
+function momenceSessionOptionsFromResponse(
+  response: PaginatedMomenceResponse<MomenceSession> | MomenceSession[],
+  normalizedQuery: string,
+): MomenceSessionOption[] {
   return payloadFrom(response)
     .filter((session) => {
       if (!normalizedQuery) return true;
@@ -736,7 +700,6 @@ export async function searchMomenceSessions(query: string, options: SearchMomenc
       ]));
       return sessionMatchesSearch(haystack, normalizedQuery);
     })
-    .slice(0, SESSION_RESULT_LIMIT)
     .map((session) => {
       const trainer = compact([session.teacher?.firstName, session.teacher?.lastName]) || undefined;
       const studio = session.inPersonLocation?.name;
@@ -753,6 +716,102 @@ export async function searchMomenceSessions(query: string, options: SearchMomenc
         endsAt: session.endsAt,
       };
     });
+}
+
+async function searchMomenceSessionPage(
+  query: string,
+  options: SearchMomenceSessionsOptions = {},
+  page = 0,
+): Promise<MomenceSessionPageResult> {
+  const now = new Date();
+  const lookback = new Date(now);
+  lookback.setDate(lookback.getDate() - SESSION_LOOKBACK_DAYS);
+  const lookahead = new Date(now);
+  lookahead.setDate(lookahead.getDate() + SESSION_LOOKAHEAD_DAYS);
+  const sessionFunctionUrl = resolveSessionFunctionUrl();
+  const sessionFunctionAnonKey = resolveSessionFunctionAnonKey();
+  const normalizedQuery = normalizeSearchValue(query);
+  const sessionTypes = options.types?.map((type) => type.trim()).filter(Boolean);
+  const requestedSessionTypes = sessionTypes?.length ? sessionTypes : [SESSION_SEARCH_TYPE];
+
+  let response: MomenceSessionPageResponse;
+  if (sessionFunctionUrl) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (sessionFunctionAnonKey) {
+      headers.apikey = sessionFunctionAnonKey;
+      headers.Authorization = `Bearer ${sessionFunctionAnonKey}`;
+    }
+    const raw = await fetch(sessionFunctionUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        query,
+        pastDays: SESSION_LOOKBACK_DAYS,
+        futureDays: SESSION_LOOKAHEAD_DAYS,
+        pageSize: SESSION_PAGE_SIZE,
+        includeCancelled: false,
+        types: requestedSessionTypes,
+        page,
+        maxPages: 1,
+      }),
+    });
+    if (!raw.ok) {
+      const detail = await raw.text();
+      throw new Error(`Momence session function returned ${raw.status}: ${detail}`);
+    }
+    response = await parseResponse<MomenceSessionPageResponse>(raw);
+  } else {
+    response = await callMomence<MomenceSessionPageResponse>('/host/sessions', {
+      params: {
+        page,
+        pageSize: SESSION_PAGE_SIZE,
+        sortBy: 'startsAt',
+        sortOrder: 'DESC',
+        includeCancelled: false,
+        types: requestedSessionTypes[0] || SESSION_SEARCH_TYPE,
+        startAfter: lookback.toISOString(),
+        startBefore: lookahead.toISOString(),
+      },
+    });
+  }
+
+  const rawPayload = payloadFrom(response);
+  const hasMore = typeof response.hasMore === 'boolean' ? response.hasMore : rawPayload.length >= SESSION_PAGE_SIZE;
+  return {
+    sessions: momenceSessionOptionsFromResponse(rawPayload, normalizedQuery),
+    hasMore,
+  };
+}
+
+function dedupeMomenceSessionOptions(options: MomenceSessionOption[]): MomenceSessionOption[] {
+  const byKey = new Map<string, MomenceSessionOption>();
+  for (const option of options) {
+    byKey.set(option.id || `${option.label}__${option.startsAt || ''}`, option);
+  }
+  return Array.from(byKey.values());
+}
+
+export async function loadMomenceSessionsProgressively(
+  query: string,
+  options: SearchMomenceSessionsOptions = {},
+  onPage?: (sessions: MomenceSessionOption[], page: number) => void,
+): Promise<MomenceSessionOption[]> {
+  const collected: MomenceSessionOption[] = [];
+  for (let page = 0; page < SESSION_MAX_PAGES && collected.length < SESSION_RESULT_LIMIT; page += 1) {
+    const result = await searchMomenceSessionPage(query, options, page);
+    const nextPage = result.sessions.slice(0, Math.max(0, SESSION_RESULT_LIMIT - collected.length));
+    collected.push(...nextPage);
+    const deduped = dedupeMomenceSessionOptions(collected).slice(0, SESSION_RESULT_LIMIT);
+    onPage?.(nextPage, page);
+    if (!result.hasMore || deduped.length >= SESSION_RESULT_LIMIT) return deduped;
+  }
+  return dedupeMomenceSessionOptions(collected).slice(0, SESSION_RESULT_LIMIT);
+}
+
+export async function searchMomenceSessions(query: string, options: SearchMomenceSessionsOptions = {}): Promise<MomenceSessionOption[]> {
+  return loadMomenceSessionsProgressively(query, options);
 }
 
 export async function getMomenceMember(memberId: string | number) {

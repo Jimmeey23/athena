@@ -1,4 +1,5 @@
 import {
+  CLASS_TYPES,
   REPORTING_ASSOCIATES,
   STUDIOS,
   TRAINERS,
@@ -496,6 +497,39 @@ export function isMissingIntakeValue(value: unknown): boolean {
 const HVAC_TEXT_PATTERN = /\b(?:ac|hvac)\b|air\s?con|air conditioning|not cooling|not heating|no airflow/i;
 const PHYSICAL_ISSUE_TEXT_PATTERN = /repair|maintenance|broken|not working|not closing|not opening|stopped working|won't close|won't open|not cooling|not heating|too hot|too cold|very hot|very cold|temperature|malfunction|faulty|damaged|come off|came off|loose|leak|leaking|plumbing|drain|clog|flush|sewage|socket|electrical|bulb|fused|flickering|machine|washing|dryer|pump|pest|mold|damp|\bdoor\b|\block\b|\bhandle\b|hinge|ceiling|wall|skirting|baseboard|trim|panel|crack|odour|odor|smell|stench|ventilation|locker|shower|washroom|toilet|steam|\bac\b|hvac|air\s?con|app crash|login issue|website down/i;
 
+const STUDIO_ALIAS_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:bandra|supreme|supreme hq|hq)\b/i, 'Supreme HQ, Bandra'],
+  [/\b(?:kemps|kemps corner|kc|kwality|kwality house)\b/i, 'Kwality House, Kemps Corner'],
+  [/\b(?:kenkere|blr|bangalore|bengaluru)\b/i, 'Kenkere House, Bengaluru'],
+  [/\b(?:copper|cloves|copper and cloves|copper & cloves)\b/i, 'the Studio by Copper & Cloves, Bengaluru'],
+  [/\b(?:courtside|court side)\b/i, 'Courtside, Mumbai'],
+];
+
+const CLASS_ALIAS_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:mat|mat57|mat\s*57)\b(?:\s+(?:class|session))?/i, 'Studio Mat 57'],
+  [/\b(?:barre|barre57|barre\s*57|signature)\b(?:\s+(?:class|session))?/i, 'Studio Barre 57'],
+  [/\b(?:pc|power\s*cycle|powercycle|cycle|spin)\b(?:\s+(?:class|session|room|studio))?/i, 'Studio PowerCycle'],
+  [/\b(?:bb|bbb|back\s*body|back\s*body\s*blaze)\b(?:\s+(?:class|session))?/i, 'Studio Back Body Blaze'],
+  [/\b(?:strength|strength\s*lab|sl)\b(?:\s+(?:class|session))?/i, 'Studio Strength Lab'],
+  [/\b(?:hiit)\b(?:\s+(?:class|session))?/i, 'Studio HIIT'],
+  [/\b(?:fit)\b(?:\s+(?:class|session))?/i, 'Studio FIT'],
+  [/\b(?:recovery|stretch)\b(?:\s+(?:class|session))?/i, 'Studio Recovery'],
+  [/\b(?:foundations|foundation)\b(?:\s+(?:class|session))?/i, 'Studio Foundations'],
+];
+
+const AREA_ALIAS_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:studio\s*1|s1|main studio)\b/i, 'Studio 1'],
+  [/\b(?:studio\s*2|s2|second studio)\b/i, 'Studio 2'],
+  [/\b(?:studio\s*3|s3|third studio)\b/i, 'Studio 3'],
+  [/\b(?:strength room|strength studio|strength lab)\b/i, 'Strength Studio'],
+  [/\b(?:pc room|power\s*cycle room|powercycle room|cycle room|power\s*cycle studio|powercycle studio)\b/i, 'powerCycle studio'],
+  [/\b(?:his washroom|mens washroom|men's washroom|his space)\b/i, 'his space'],
+  [/\b(?:her washroom|ladies washroom|women's washroom|her space)\b/i, 'her space'],
+  [/\b(?:reception|front desk|fd)\b/i, 'reception'],
+  [/\b(?:entrance|studio entrance)\b/i, 'studio entrance'],
+  [/\b(?:lift|lift area|elevator)\b/i, 'lift area'],
+];
+
 function buildIssueText(context: IntakeContext, extraText = ''): string {
   return [
     extraText,
@@ -505,6 +539,56 @@ function buildIssueText(context: IntakeContext, extraText = ''): string {
     context.subCategory,
     context.description,
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function findPatternValue(patterns: Array<[RegExp, string]>, text: string): string | undefined {
+  return patterns.find(([pattern]) => pattern.test(text))?.[1];
+}
+
+function normalizeAliasText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function inferTrainerAlias(text: string): string | undefined {
+  const normalizedText = ` ${normalizeAliasText(text)} `;
+  const matches = TRAINERS.filter((trainer) => {
+    const [firstName, ...rest] = trainer.split(/\s+/);
+    const first = normalizeAliasText(firstName || '');
+    const full = normalizeAliasText(trainer);
+    const surname = normalizeAliasText(rest.join(' '));
+    return (first && normalizedText.includes(` ${first} `)) ||
+      (surname && normalizedText.includes(` ${surname} `)) ||
+      (full && normalizedText.includes(` ${full} `));
+  });
+  if (matches.length === 1) return matches[0];
+
+  const exactFull = TRAINERS.find((trainer) => normalizedText.includes(` ${normalizeAliasText(trainer)} `));
+  return exactFull;
+}
+
+function normalizeAreaForStudio(area: string, studio?: string): string {
+  const options = getStudioAreaOptions(studio);
+  const exact = options.find((option) => normalizeAliasText(option) === normalizeAliasText(area));
+  if (exact) return exact;
+  if (/powercycle|power cycle/i.test(area)) {
+    return options.find((option) => /powercycle|power cycle/i.test(option)) || area;
+  }
+  if (/studio 1/i.test(area)) {
+    return options.find((option) => /^studio 1$/i.test(option)) || area;
+  }
+  if (/studio 2/i.test(area)) {
+    return options.find((option) => /studio\s*(?:-|2)|studio 2/i.test(option)) || area;
+  }
+  if (/studio 3/i.test(area)) {
+    return options.find((option) => /^studio 3$/i.test(option)) || area;
+  }
+  return area;
+}
+
+function inferClassAlias(text: string): string | undefined {
+  const alias = findPatternValue(CLASS_ALIAS_PATTERNS, text);
+  if (!alias) return undefined;
+  return CLASS_TYPES.find((classType) => classType === alias) || alias;
 }
 
 function hasAffectedClassSignal(context: IntakeContext, issueText: string): boolean {
@@ -625,7 +709,7 @@ function getIssueProfileFieldIds(context: IntakeContext): string[] {
   return [];
 }
 
-export function captureMemberVoiceFromText(text: string, context: IntakeContext): string | null {
+export function captureMemberFeedbackFromText(text: string, context: IntakeContext): string | null {
   const value = text.trim();
 
   if (!isMissingIntakeValue(context.description)) return null;
@@ -655,11 +739,11 @@ export function captureMemberVoiceFromText(text: string, context: IntakeContext)
     if (!isDetailed) return null; // leave description empty — AI will collect proper operational detail
   }
 
-  const looksLikeMemberVoice =
+  const looksLikeMemberFeedback =
     value.length > 15 ||
     /member|client|community|reported|said|stated|requested|complain|feedback|concern|issue|class|studio|refund|freeze|roll|trainer|instructor|billing|payment|booking|temperature|\bac\b|hvac|air\s?con|broken|repair|maintenance|not working|malfunction|leak|clean|smell|odour|locker|washroom|shower/i.test(value);
 
-  return looksLikeMemberVoice ? value : null;
+  return looksLikeMemberFeedback ? value : null;
 }
 
 export function inferIntakeContextFromText(text: string, context: IntakeContext = {}): Partial<IntakeContext> {
@@ -771,11 +855,23 @@ export function inferIntakeContextFromText(text: string, context: IntakeContext 
   }
 
   if (isMissingIntakeValue(context.studio)) {
-    if (/bandra|supreme hq/.test(lower)) inferred.studio = 'Supreme HQ, Bandra';
-    else if (/kemps|kwality/.test(lower)) inferred.studio = 'Kwality House, Kemps Corner';
-    else if (/kenkere/.test(lower)) inferred.studio = 'Kenkere House, Bengaluru';
-    else if (/copper|cloves/.test(lower)) inferred.studio = 'the Studio by Copper & Cloves, Bengaluru';
-    else if (/courtside/.test(lower)) inferred.studio = 'Courtside, Mumbai';
+    const studio = findPatternValue(STUDIO_ALIAS_PATTERNS, lower);
+    if (studio) inferred.studio = studio;
+  }
+
+  if (isMissingIntakeValue(context.classType)) {
+    const classType = inferClassAlias(lower);
+    if (classType) inferred.classType = classType;
+  }
+
+  if (isMissingIntakeValue(context.trainer)) {
+    const trainer = inferTrainerAlias(lower);
+    if (trainer) inferred.trainer = trainer;
+  }
+
+  if (isMissingIntakeValue(context.affectedArea)) {
+    const area = findPatternValue(AREA_ALIAS_PATTERNS, lower);
+    if (area) inferred.affectedArea = normalizeAreaForStudio(area, inferred.studio || context.studio);
   }
 
   return inferred;

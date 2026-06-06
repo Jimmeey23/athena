@@ -1,3 +1,4 @@
+import { backendSupabase } from '@/lib/backend-supabase';
 import { getEmployee, getEscalationTarget, isClosedTicket, Ticket } from '@/lib/ticketing-data';
 
 export type TicketEmailEventType =
@@ -48,7 +49,6 @@ export async function sendTicketLifecycleEmail(
   ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'assignedTo'>>,
   actor?: string
 ): Promise<void> {
-  const { backendSupabase } = await import('@/lib/backend-supabase');
   const recipientHints = ticketEmailRecipientHints(ticket);
   const { error } = await backendSupabase.functions.invoke('ticket-email-notifications', {
     body: {

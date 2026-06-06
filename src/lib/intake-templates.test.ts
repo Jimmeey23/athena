@@ -13,7 +13,7 @@ describe('context intake templates', () => {
     ]));
   });
 
-  it('builds member-voice prompts with routing context', () => {
+  it('builds member-feedback prompts with routing context', () => {
     const text = buildContextTemplateText(CONTEXT_TEMPLATES[0]);
 
     expect(text).toContain('Intake route: Feedback');
@@ -55,16 +55,12 @@ describe('context intake templates', () => {
   it('defines the instructor assessment template around Momence session context and expanded method rubrics', () => {
     const assessment = CONTEXT_TEMPLATES.find((template) => template.id === 'trainer-class-assessment');
 
-    expect(assessment?.fields?.map((field) => field.id).slice(0, 4)).toEqual([
-      'sessionMode',
+    expect(assessment?.fields?.map((field) => field.id).slice(0, 3)).toEqual([
       'classType',
       'studio',
       'trainer',
     ]);
-    expect(assessment?.fields?.find((field) => field.id === 'sessionMode')?.options).toEqual([
-      'Momence session',
-      'Custom practice session',
-    ]);
+    expect(assessment?.fields?.some((field) => field.id === 'sessionMode')).toBe(false);
     expect(assessment?.fields?.find((field) => field.id === 'templateType')?.options).toEqual([
       'PowerCycle',
       'Strength/Fit',

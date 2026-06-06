@@ -14,8 +14,8 @@ describe('template form dialog layout', () => {
   it('uses a short warm personalized first message', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
 
-    expect(source).toContain('`Hi ${firstName}, happy to help. What should we log today?`');
-    expect(source).toContain('"Hi, happy to help. What should we log today?"');
+    expect(source).toContain('`Hi ${firstName}, happy to help. What should we log today? 🙂`');
+    expect(source).toContain('"Hi, happy to help. What should we log today? 🙂"');
     expect(source).not.toContain('your ticket intake assistant.\\n\\nTell me what happened');
   });
 
@@ -24,6 +24,9 @@ describe('template form dialog layout', () => {
 
     expect(source).toContain('const MomenceSessionDropdownField: React.FC');
     expect(source).toContain('<MultiSelectDropdown');
+    expect(source).toContain('loading && dropdownOptions.length === 0');
+    expect(source).toContain('First sessions ready');
+    expect(source).not.toContain('disabled={dropdownOptions.length === 0}');
     expect(source).not.toContain('placeholder="Search Momence sessions by class, instructor, studio, or date"');
   });
 
@@ -32,7 +35,7 @@ describe('template form dialog layout', () => {
 
     expect(source).toContain("const HOSTED_CLASS_SESSION_TYPES = ['private']");
     expect(source).toContain('sessionTypes={HOSTED_CLASS_SESSION_TYPES}');
-    expect(source).toContain("searchMomenceSessions('', { types: sessionTypes })");
+    expect(source).toContain("loadMomenceSessionsProgressively('', { types: sessionTypes }");
     expect(source).toContain('momenceSessionDropdownCacheKey(sessionTypes)');
   });
 
@@ -45,7 +48,7 @@ describe('template form dialog layout', () => {
     expect(source).toContain('Feedback and follow-up');
     expect(source).toContain('grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]');
     expect(source).toContain('Session required');
-    expect(source).toContain('Member voice required');
+    expect(source).toContain('Member feedback required');
   });
 
   it('routes generic templates through Momence-aware member and session controls', () => {
@@ -70,15 +73,74 @@ describe('template form dialog layout', () => {
     expect(source).toContain('Select members booked into this Momence session');
   });
 
-  it('renders instructor assessments with custom session entry, sections, rating controls, and a weighted score', () => {
+  it('renders instructor assessments with Momence session mapping, sections, rating controls, and a weighted score', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
 
     expect(source).toContain("form.id === 'trainer-class-assessment'");
     expect(source).toContain('const AssessmentSessionDetailsField: React.FC');
-    expect(source).toContain('Custom practice session');
-    expect(source).toContain('Class date and start time *');
+    expect(source).toContain('Momence mapped');
+    expect(source).not.toContain('Custom practice session');
+    expect(source).not.toContain('Class date and start time *');
     expect(source).toContain('const RatingControl: React.FC');
     expect(source).toContain('scoreOutOf100');
     expect(source).toContain('evaluationScore');
+  });
+
+  it('keeps ticket capture surfaces on Momence-backed member and session fields', () => {
+    const files = [
+      'src/components/ticketing/ContextPicker.tsx',
+      'src/components/ticketing/TicketDashboard.tsx',
+      'src/components/ticketing/TicketDetailDrawer.tsx',
+      'src/components/ticketing/TicketPreviewCard.tsx',
+      'src/components/ticketing/ChatInterface.tsx',
+    ].map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'));
+    const source = files.join('\n');
+
+    expect(source).toContain('MomenceMemberTicketField');
+    expect(source).toContain('MomenceSessionTicketField');
+    expect(source).toContain('MomenceSessionDropdownField');
+    expect(source).not.toContain('options={CLASS_TYPES}');
+    expect(source).not.toContain('values={[\'\', ...CLASS_TYPES]}');
+    expect(source).not.toContain('EditInput label="Class / Session"');
+    expect(source).not.toContain('EditInput label="Member"');
+    expect(source).not.toContain('EditInput label="Member contact"');
+  });
+
+  it('gives every template text input and textarea at least three suggestions', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('suggestionsForTemplateTextField');
+    expect(source).toContain('SuggestionChips');
+    expect(source).toContain('<SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />');
+    expect(source).toContain('<SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />');
+  });
+
+  it('keeps the ticket review structure compact and grouped by decision area', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/TicketPreviewCard.tsx'), 'utf8');
+
+    expect(source).toContain('Decision Summary');
+    expect(source).toContain('SmartOpsReviewStrip');
+    expect(source).toContain('grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.6fr)]');
+    expect(source).not.toContain('lg:grid-cols-[180px_minmax(0,1fr)]');
+  });
+
+  it('keeps live context controls before template and text-to-ticket actions', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+    const contextIndex = source.indexOf('<ContextPicker');
+    const templateIndex = source.indexOf('<TemplatePicker onSelect={applyTemplate} />', contextIndex);
+    const textToTicketIndex = source.indexOf('Text to ticket', templateIndex);
+
+    expect(contextIndex).toBeGreaterThan(-1);
+    expect(templateIndex).toBeGreaterThan(contextIndex);
+    expect(textToTicketIndex).toBeGreaterThan(templateIndex);
+  });
+
+  it('uses an inline optimize prompt icon instead of a visible copilot suggestion strip', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('optimizeIntakePromptForAthena(input');
+    expect(source).toContain('aria-label="Optimize prompt for Athena"');
+    expect(source).not.toContain('>Copilot</span>');
+    expect(source).not.toContain('intakeCopilot.suggestions');
   });
 });

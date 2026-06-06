@@ -925,8 +925,9 @@ export interface Ticket {
 export type SlaState = 'Breached' | 'At Risk' | 'On Track' | 'Closed' | 'Not Required';
 
 export function isRecordOnlyTicket(ticket: Ticket): boolean {
-  return ticket.tags.includes('record-only') ||
-    ticket.tags.includes('no-resolution-required') ||
+  const tags = Array.isArray(ticket.tags) ? ticket.tags : [];
+  return tags.includes('record-only') ||
+    tags.includes('no-resolution-required') ||
     ticket.metadata?.resolution_required === false ||
     ticket.metadata?.no_sla === true;
 }

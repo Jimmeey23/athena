@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { ASSOCIATES, getEmployee, getEscalationTarget, isRecordOnlyTicket, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket } from '@/lib/ticketing-data';
+import { getEmployee, getEscalationTarget, isRecordOnlyTicket, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket, TicketMetadata } from '@/lib/ticketing-data';
 import { backendSupabase } from '@/lib/backend-supabase';
+import { getErrorMessage } from '@/lib/error-formatting';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import { ResolvedAssignment, resolveConfiguredAssignment } from '@/lib/routing-settings';
 import {
@@ -34,7 +35,7 @@ import {
   ticketRequiresResolution,
 } from '@/lib/ticket-approved-creation';
 import { invokeTicketingFunction } from '@/lib/ticketing-functions';
-import { findRelatedSubmittedTickets } from '@/lib/ticket-duplicate-matching';
+import { findRelatedSubmittedTickets, type DuplicateTicketContext } from '@/lib/ticket-duplicate-matching';
 import {
   ApprovedTicketDraft,
   ManualTicketInput,
@@ -118,27 +119,6 @@ const ATTACHMENT_BUCKET = 'ticket-attachments';
 
 type DbTicketPatch = Record<string, unknown>;
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object') {
-    const value = error as Record<string, unknown>;
-    const parts = [
-      typeof value.message === 'string' ? value.message : '',
-      typeof value.details === 'string' ? value.details : '',
-      typeof value.hint === 'string' ? value.hint : '',
-      typeof value.code === 'string' ? `Code: ${value.code}` : '',
-    ].filter(Boolean);
-    if (parts.length) return parts.join(' ');
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return fallback;
-    }
-  }
-  if (typeof error === 'string' && error.trim()) return error;
-  return fallback;
-}
-
 function throwSupabaseError(error: unknown, fallback: string): never {
   throw new Error(getErrorMessage(error, fallback));
 }
@@ -198,6 +178,10 @@ function buildHistoricTags(row: HistoricTicketRow): string[] {
   ].filter(Boolean) as string[];
 
   return Array.from(new Set(tags));
+}
+
+function normalizeTicketTags(tags?: string[] | null): string[] {
+  return Array.from(new Set((Array.isArray(tags) ? tags : []).filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)));
 }
 
 function normalizeTicketOwner(category: string, studio?: string | null, assignedTo?: string | null): string {
@@ -271,8 +255,8 @@ function fromRow(row: DbTicketRow): Ticket {
     assignedTo,
     team,
     tags: existedBeforeEmailRollout
-      ? Array.from(new Set([...(row.tags || []), 'closed-before-email-rollout']))
-      : row.tags || [],
+      ? Array.from(new Set([...normalizeTicketTags(row.tags), 'closed-before-email-rollout']))
+      : normalizeTicketTags(row.tags),
     sentiment: row.sentiment || undefined,
     conversationSummary: row.conversation_summary || undefined,
     createdAt: row.created_at,
@@ -309,7 +293,10 @@ function dedupeAndSortTickets(tickets: Ticket[]): Ticket[] {
 
 function normalizeCreatedTicket(created: DbTicketRow | Ticket): Ticket {
   if ('sub_category' in created) return fromRow(created);
-  return created;
+  return {
+    ...created,
+    tags: normalizeTicketTags(created.tags),
+  };
 }
 
 function getReporterNameFromAuthUser(user?: { email?: string; user_metadata?: Record<string, unknown> } | null): string {
@@ -384,13 +371,20 @@ function sanitizeAttachmentFileName(fileName: string): string {
   return cleaned || 'attachment';
 }
 
+function attachmentPathNonce(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function uploadTicketAttachments(ticketId: string, files: File[]): Promise<TicketAttachmentRecord[]> {
   if (!files.length) return [];
   const uploaded: TicketAttachmentRecord[] = [];
 
   for (const file of files) {
     const safeName = sanitizeAttachmentFileName(file.name);
-    const path = `${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+    const path = `${ticketId}/${attachmentPathNonce()}-${safeName}`;
     const { error } = await backendSupabase.storage
       .from(ATTACHMENT_BUCKET)
       .upload(path, file, {
@@ -1027,7 +1021,7 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         assignedTo: publishAssignment.assignedTo,
         department: publishAssignment.team,
       };
-      const baseContextForServer = {
+      const baseContextForServer: Record<string, unknown> & DuplicateTicketContext = {
         ...publishContext,
         assignedTo: publishAssignment.assignedTo,
         owner: publishAssignment.assignedTo,
@@ -1035,7 +1029,7 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         team: publishAssignment.team,
         conversationId,
       };
-      let contextForServer = requiresResolution
+      let contextForServer: Record<string, unknown> & DuplicateTicketContext = requiresResolution
         ? baseContextForServer
         : {
             ...baseContextForServer,

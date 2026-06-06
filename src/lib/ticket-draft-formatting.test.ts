@@ -37,7 +37,7 @@ describe('ticket draft formatting', () => {
     });
   });
 
-  it('formats internal reports as actionable summaries, not member voice', () => {
+  it('formats internal reports as actionable summaries, not member feedback', () => {
     const context = normalizeDraftContextForSource({
       intakeRoute: 'Internal Reporting',
       category: 'Trainer Feedback',
@@ -60,13 +60,13 @@ describe('ticket draft formatting', () => {
     expect(description).toContain('- Instructor: Siddhartha Kusuma');
     expect(description).not.toContain('Hi All');
     expect(description).not.toContain('Best,');
-    expect(description).not.toContain('Member voice summary');
+    expect(description).not.toContain('Member feedback summary');
     expect(description).not.toContain('Kwality House, Kemps Corner | Supreme HQ, Bandra');
     expect(description).not.toContain('Studio Mat 57 | Studio PowerCycle');
   });
 
-  it('flags raw email and member-voice labels for rewrite on internal reports', () => {
-    expect(draftDescriptionNeedsRewrite(`Member voice summary: ${lateInstructorEmail}`, 'Internal Reporting')).toBe(true);
+  it('flags raw email and member-feedback labels for rewrite on internal reports', () => {
+    expect(draftDescriptionNeedsRewrite(`Member feedback summary: ${lateInstructorEmail}`, 'Internal Reporting')).toBe(true);
     expect(draftDescriptionNeedsRewrite(`Summary: ${lateInstructorEmail}`, 'Internal Reporting', lateInstructorEmail)).toBe(true);
     expect(draftDescriptionNeedsRewrite('Internal report summary: Instructor was late.', 'Internal Reporting')).toBe(false);
   });

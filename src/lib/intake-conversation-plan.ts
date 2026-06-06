@@ -1,6 +1,6 @@
 import type { IntakeContext } from './intake-rules';
 
-type ConversationFieldType = 'select' | 'text' | 'textarea' | 'date' | 'datetime-local' | 'number';
+type ConversationFieldType = 'select' | 'text' | 'textarea' | 'date' | 'datetime-local' | 'number' | 'rating';
 
 export interface ConversationPlanField {
   id: string;

@@ -159,6 +159,12 @@ describe('trainer profile evaluation engine', () => {
         trainerReview: { trainer: 'Pranjali Jain', template: 'Barre', scores: [] },
       },
     })).toBe(true);
+
+    expect(isTrainerEvaluationProfileOnly({
+      category: 'General Feedback',
+      tags: undefined as unknown as string[],
+      metadata: {},
+    })).toBe(false);
   });
 
   it('formats trainer evaluation descriptions as structured operating briefs', () => {

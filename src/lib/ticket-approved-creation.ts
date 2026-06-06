@@ -21,7 +21,7 @@ export function ticketRequiresResolution(context?: Record<string, unknown>): boo
 export function applyResolutionRequirementToDraft<TDraft extends Record<string, unknown>>(
   draft: TDraft,
   context: Record<string, unknown> = {},
-): TDraft {
+): TDraft & Record<string, unknown> {
   if (ticketRequiresResolution(context)) return draft;
 
   const tags = Array.from(new Set([
@@ -67,20 +67,21 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-export function buildDuplicateMergePatch<TDraft extends Record<string, unknown>, TTicket extends Record<string, unknown>>(
+export function buildDuplicateMergePatch<TDraft extends Record<string, unknown>, TTicket extends object>(
   existingTicket: TTicket,
   draft: TDraft,
   context: Record<string, unknown> = {},
   mergedAt = new Date().toISOString(),
-): Partial<TTicket> {
-  const existingDescription = typeof existingTicket.description === 'string' ? existingTicket.description : '';
+): Partial<TTicket> & Record<string, unknown> {
+  const existing = existingTicket as Record<string, unknown>;
+  const existingDescription = typeof existing.description === 'string' ? existing.description : '';
   const draftDescription = typeof draft.description === 'string' ? draft.description.trim() : '';
   const mergeNote = [
     `Merged duplicate intake - ${mergedAt}`,
     typeof draft.title === 'string' && draft.title.trim() ? `Title: ${draft.title.trim()}` : '',
     draftDescription ? `Details: ${draftDescription}` : '',
   ].filter(Boolean).join('\n');
-  const metadata = objectRecord(existingTicket.metadata);
+  const metadata = objectRecord(existing.metadata);
   const duplicateMerges = Array.isArray(metadata.duplicate_merges) ? metadata.duplicate_merges : [];
   const nextDuplicateMerges = [
     ...duplicateMerges,
@@ -95,20 +96,20 @@ export function buildDuplicateMergePatch<TDraft extends Record<string, unknown>,
 
   return {
     description: [existingDescription, mergeNote].filter(Boolean).join('\n\n'),
-    conversationSummary: [typeof existingTicket.conversationSummary === 'string' ? existingTicket.conversationSummary : '', mergeNote].filter(Boolean).join('\n\n'),
-    tags: Array.from(new Set([...stringArray(existingTicket.tags), DUPLICATE_MERGED_TAG])),
+    conversationSummary: [typeof existing.conversationSummary === 'string' ? existing.conversationSummary : '', mergeNote].filter(Boolean).join('\n\n'),
+    tags: Array.from(new Set([...stringArray(existing.tags), DUPLICATE_MERGED_TAG])),
     metadata: {
       ...metadata,
       duplicate_merge_count: nextDuplicateMerges.length,
       duplicate_merges: nextDuplicateMerges,
     },
-  } as Partial<TTicket>;
+  } as unknown as Partial<TTicket> & Record<string, unknown>;
 }
 
 export function applySimilarTicketGroupingToDraft<TDraft extends Record<string, unknown>>(
   draft: TDraft,
   similarTicketIds: string[],
-): TDraft {
+): TDraft & Record<string, unknown> {
   const uniqueIds = Array.from(new Set(similarTicketIds.map((id) => id.trim()).filter(Boolean)));
   if (uniqueIds.length === 0) return draft;
 

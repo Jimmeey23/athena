@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap, LayoutTemplate, Download, FileText, FileCode2, ImageDown } from 'lucide-react';
 import InteractiveRobotSpline from '@/components/InteractiveRobotSpline';
 import { ROBOT_SPLINE_URL } from '@/lib/galleryImages';
+import { getErrorMessage } from '@/lib/error-formatting';
 import { TicketPreviewCard } from './TicketPreviewCard';
 import { ContextPicker, Context } from './ContextPicker';
 import { useTickets } from './useTickets';
@@ -10,6 +11,7 @@ import {
   getMomenceMemberMemberships,
   getMomenceSessionBookings,
   listMomenceHostMembershipOptions,
+  loadMomenceSessionsProgressively,
   loadMomenceTicketContext,
   MomenceInsightSummary,
   MomenceMemberOption,
@@ -22,7 +24,7 @@ import {
 import {
   CLASS_IMPACT_TYPE_OPTIONS,
   CLIENTS_AFFECTED_OPTIONS,
-  captureMemberVoiceFromText,
+  captureMemberFeedbackFromText,
   getIntakeFieldDefinition,
   getMissingIntakeFields,
   inferIntakeContextFromText,
@@ -38,7 +40,6 @@ import {
 } from '@/lib/intake-response-state';
 import {
   CATEGORIES,
-  CLASS_TYPES,
   FREEZE_REASONS,
   HOSTED_CLASS_FEEDBACK_AREAS,
   INTAKE_ROUTES,
@@ -62,6 +63,7 @@ import {
   summarizeOperationalReport,
 } from '@/lib/ticket-draft-formatting';
 import { buildTicketReviewInsights } from '@/lib/ticket-review';
+import { buildDuplicatePatternInsights, buildVoiceExtractionHints, optimizeIntakePromptForAthena } from '@/lib/smart-ops-intelligence';
 import { getGreetingQuickActions, isCasualGreeting } from '@/lib/athena-chat-intent';
 import { shouldUseOptionButtons } from '@/lib/intake-option-buttons';
 import {
@@ -218,7 +220,7 @@ interface AiIntakeResponse {
 const GREETING: Message = {
   id: 'greet',
   role: 'assistant',
-  content: "Hi, happy to help. What should we log today?",
+  content: "Hi, happy to help. What should we log today? 🙂",
 };
 
 function buildGreetingMessage(reporterName?: string): Message {
@@ -226,8 +228,8 @@ function buildGreetingMessage(reporterName?: string): Message {
   return {
     ...GREETING,
     content: firstName
-      ? `Hi ${firstName}, happy to help. What should we log today?`
-      : "Hi, happy to help. What should we log today?",
+      ? `Hi ${firstName}, happy to help. What should we log today? 🙂`
+      : "Hi, happy to help. What should we log today? 🙂",
   };
 }
 
@@ -266,26 +268,7 @@ const USER_TONES = [
   },
 ];
 
-function getDisplayError(error: unknown, fallback = 'Unknown error'): string {
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object') {
-    const value = error as Record<string, unknown>;
-    const parts = [
-      typeof value.message === 'string' ? value.message : '',
-      typeof value.details === 'string' ? value.details : '',
-      typeof value.hint === 'string' ? value.hint : '',
-      typeof value.code === 'string' ? `Code: ${value.code}` : '',
-    ].filter(Boolean);
-    if (parts.length) return parts.join(' ');
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return fallback;
-    }
-  }
-  if (typeof error === 'string' && error.trim()) return error;
-  return fallback;
-}
+const getDisplayError = getErrorMessage;
 
 function getReporterName(user: ReturnType<typeof useBackendAuth>['user']): string {
   const metadata = user?.user_metadata || {};
@@ -349,7 +332,7 @@ const DETAIL_FORM_FIELD_LIBRARY: Record<string, DetailFormField> = {
     label: 'Class / Session',
     type: 'select',
     required: true,
-    options: CLASS_TYPES,
+    options: [],
   },
   membership: {
     id: 'membership',
@@ -538,7 +521,7 @@ function absoluteImageSources(root: HTMLElement) {
 }
 
 async function imageLoaded(image: HTMLImageElement): Promise<void> {
-  if ('decode' in image) {
+  if (typeof image.decode === 'function') {
     await image.decode();
     return;
   }
@@ -595,7 +578,16 @@ async function pngDataUrlForElementScreenshot(node: HTMLElement): Promise<string
   return canvas.toDataURL('image/png');
 }
 
-function normalizeDetailForm(input: unknown): DetailForm | null {
+function detailFieldWithContext(base: DetailFormField, ctx?: DetailContext): DetailFormField {
+  if (base.id === 'subCategory') {
+    const category = ctx?.category;
+    const options = category && CATEGORIES[category]?.length ? CATEGORIES[category] : base.options;
+    return { ...base, options };
+  }
+  return base;
+}
+
+function normalizeDetailForm(input: unknown, ctx?: DetailContext): DetailForm | null {
   if (!input || typeof input !== 'object') return null;
   const form = input as Partial<DetailForm> & { fields?: Array<Partial<DetailFormField> | string> };
   const seen = new Set<string>();
@@ -607,7 +599,7 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
         if (seen.has(normalizedId)) return null;
         seen.add(normalizedId);
         const base = getDetailField(normalizedId);
-        return base ? { ...base, required: true } : undefined;
+        return base ? { ...detailFieldWithContext(base, ctx), required: true } : undefined;
       }
       const id = field.id ? (String(field.id) === 'requestType' ? 'intakeRoute' : String(field.id)) : '';
       if (id === 'reportedBy') return null;
@@ -615,6 +607,7 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
       if (seen.has(id)) return null;
       seen.add(id);
       if (base) {
+        const contextualBase = detailFieldWithContext(base, ctx);
         // AI-provided labels can be contextual, but known fields keep the app's
         // standard option lists so irrelevant choices do not leak into the form.
         const aiLabel = typeof (field as Partial<DetailFormField>).label === 'string' && (field as Partial<DetailFormField>).label!.trim()
@@ -624,14 +617,14 @@ function normalizeDetailForm(input: unknown): DetailForm | null {
         const aiOptions = Array.isArray(rawAiOptions) && rawAiOptions.length > 0
           ? rawAiOptions.map(String).filter(Boolean).slice(0, 30)
           : null;
-        const standardOptions = base.options?.length ? base.options : null;
+        const standardOptions = contextualBase.options?.length ? contextualBase.options : null;
         return {
-          ...base,
+          ...contextualBase,
           ...field,
-          id: base.id,
-          label: aiLabel || base.label,
-          options: standardOptions || aiOptions || base.options,
-          required: field.required ?? base.required,
+          id: contextualBase.id,
+          label: aiLabel || contextualBase.label,
+          options: standardOptions || aiOptions || contextualBase.options,
+          required: field.required ?? contextualBase.required,
         } as DetailFormField;
       }
 
@@ -1164,8 +1157,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const [textToTicketOpen, setTextToTicketOpen] = useState(false);
   const [textToTicketText, setTextToTicketText] = useState('');
   const [activeTemplate, setActiveTemplate] = useState<ContextTemplate | null>(null);
-  const [now, setNow] = useState<Date>(new Date());
   const [exportingFormat, setExportingFormat] = useState<'png' | null>(null);
+  const [loadDecorativeRobot, setLoadDecorativeRobot] = useState(false);
   const publishingRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1185,6 +1178,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       .slice(0, 2),
     [tickets]
   );
+  const smartVoiceHints = useMemo(() => {
+    const source = voiceLiveText || input;
+    return source.trim() ? buildVoiceExtractionHints(source) : [];
+  }, [input, voiceLiveText]);
   const activeDraftReviewMessage = useMemo(
     () => messages.find((message) => message.id === activeDraftReviewMessageId && message.ticket) || null,
     [activeDraftReviewMessageId, messages]
@@ -1272,8 +1269,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   }, [messages, loading]);
 
   useEffect(() => {
-    const handle = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(handle);
+    const idle = window.requestIdleCallback?.(() => setLoadDecorativeRobot(true), { timeout: 2_500 });
+    if (idle != null) return () => window.cancelIdleCallback?.(idle);
+    const handle = window.setTimeout(() => setLoadDecorativeRobot(true), 1_500);
+    return () => window.clearTimeout(handle);
   }, []);
 
   useEffect(() => {
@@ -1447,8 +1446,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
           role: 'assistant',
           aiGenerated: true,
           content: reporterFirstName
-            ? `Hi ${reporterFirstName}, what are we logging?`
-            : "Hi, what are we logging?",
+            ? `Hi ${reporterFirstName}, I’m ready. What are we logging? 🙂`
+            : "Hi, I’m ready. What are we logging? 🙂",
           suggestedChips: getGreetingQuickActions(),
         },
       ]);
@@ -1462,16 +1461,16 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       setContext(activeContext);
       setPendingSingleField(null);
     }
-    const capturedVoice = !contextOverride && !pendingSingleField
-      ? captureMemberVoiceFromText(text, activeContext)
+    const capturedFeedback = !contextOverride && !pendingSingleField
+      ? captureMemberFeedbackFromText(text, activeContext)
       : null;
 
-    if (capturedVoice) {
-      activeContext = applyDetailValue(activeContext, 'description', capturedVoice);
+    if (capturedFeedback) {
+      activeContext = applyDetailValue(activeContext, 'description', capturedFeedback);
       activeContext.reportedBy = reporterName;
       setContext(activeContext);
     }
-    const issueText = capturedVoice || text;
+    const issueText = capturedFeedback || text;
     if (!activeContext.initialReport && !/^here are the missing details:/i.test(text.trim())) {
       activeContext = { ...activeContext, initialReport: issueText };
     }
@@ -1518,7 +1517,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     const requestEpoch = activeChatEpochRef.current;
     try {
       setLoading(true);
-      const relatedTickets = findRelatedSubmittedTickets(capturedVoice || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
+      const relatedTickets = findRelatedSubmittedTickets(capturedFeedback || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
       if (relatedTickets.exactDuplicate) {
         setMessages((prev) => [
           ...prev,
@@ -1587,7 +1586,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       });
       const normalizedForm = acceptsAiDetailForm
         ? pruneDetailForm(
-            filterAiDetailForm(normalizeDetailForm(data?.detailForm), responseContext, requiredFieldSet),
+            filterAiDetailForm(normalizeDetailForm(data?.detailForm, responseContext), responseContext, requiredFieldSet),
             responseContext
           )
         : null;
@@ -1642,10 +1641,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             reporterFirstName,
           })
         : finalDetailForm
-          ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}I need the remaining required details before drafting this ticket.`
+          ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}I just need the remaining required details before I draft this.`
           : ticket
             ? 'I drafted the ticket below. Please review it before publishing.'
-            : data?.reply || "Hmm, I didn't catch that. Could you rephrase?";
+            : data?.reply || "I didn't quite catch that. Could you rephrase it?";
       setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
       await sleep(writingPauseMs(assistantContent));
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
@@ -1689,8 +1688,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         const fallbackContent = singleField
           ? buildNaturalSingleFieldPrompt({ field: singleField, reporterFirstName })
           : timeoutForm
-            ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}the AI is taking too long, so I'll continue with the local intake flow.`
-            : 'The AI is taking too long, so I prepared a local draft for review.';
+            ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}Athena is taking a little longer than expected, so I’ll continue with the local intake flow.`
+            : 'Athena is taking a little longer than expected, so I prepared a local draft for review.';
 
         setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
         const fallbackMessage: Message = {
@@ -1850,7 +1849,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         {
           id: `published-${Date.now()}`,
           role: 'assistant',
-          content: `Approved. Ticket **${created.id}** has been published to Submitted Tickets.`,
+          content: `Done. Ticket **${created.id}** has been published to Submitted Tickets. ✅`,
           published: true,
           ticketId: created.id,
           publishedTicket: created,
@@ -2048,12 +2047,18 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         <div className="absolute -left-12 top-16 h-56 w-56 rounded-full bg-blue-400/20 blur-3xl" />
         <div className="absolute -right-12 bottom-10 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(100,116,139,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(100,116,139,0.08)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_78%_56%_at_50%_50%,#000_68%,transparent_110%)]" />
-        <InteractiveRobotSpline
-          key={instructorEvaluationMode ? 'athena-trainer-blue' : 'athena-ticket-blue'}
-          scene={ROBOT_SPLINE_URL}
-          className="athena-bot-tint-blue absolute inset-0 h-full w-full transition duration-500"
-          smile
-        />
+        {loadDecorativeRobot ? (
+          <InteractiveRobotSpline
+            key={instructorEvaluationMode ? 'athena-trainer-blue' : 'athena-ticket-blue'}
+            scene={ROBOT_SPLINE_URL}
+            className="athena-bot-tint-blue absolute inset-0 h-full w-full transition duration-500"
+            smile
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center opacity-70">
+            <img src="/download-1.png" alt="Athena" className="-scale-x-100 h-56 w-56 rounded-[2rem] object-contain blur-[0.2px]" />
+          </div>
+        )}
         <div className="absolute left-3 right-3 top-3 z-10">
           <div className="flex items-center justify-between rounded-2xl border border-white/50 bg-white/40 px-3 py-2 shadow-[0_18px_54px_rgba(15,23,42,0.12)] backdrop-blur-2xl">
             <div className="min-w-0">
@@ -2327,14 +2332,23 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 
         {!instructorEvaluationMode && (
         <>
-        <div className="z-10 flex-shrink-0 border-t border-border/50 bg-[#f0f2f5] px-4 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.04)] sm:px-6">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+        <div className="z-10 flex-shrink-0 border-t border-border/50 bg-[#f0f2f5] px-4 py-2.5 shadow-[0_-12px_30px_rgba(15,23,42,0.04)] sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
             <div className="flex shrink-0 items-center gap-3">
               <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700">
                 Context
               </span>
               <div className="hidden h-5 w-px bg-slate-200 sm:block" />
             </div>
+            <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
+              <ContextPicker
+                context={context}
+                attachmentCount={pendingAttachments.length}
+                accent="blue"
+                onChange={(next) => setContext((current) => ({ ...current, ...next }))}
+              />
+            </div>
+            <TemplatePicker onSelect={applyTemplate} />
             <button
               type="button"
               onClick={() => setTextToTicketOpen(true)}
@@ -2347,15 +2361,6 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
               <ClipboardCheck className="h-3.5 w-3.5" />
               Text to ticket
             </button>
-            <TemplatePicker onSelect={applyTemplate} />
-            <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
-              <ContextPicker
-                context={context}
-                attachmentCount={pendingAttachments.length}
-                accent="blue"
-                onChange={(next) => setContext((current) => ({ ...current, ...next }))}
-              />
-            </div>
           </div>
         </div>
 
@@ -2396,14 +2401,37 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   }
                 }}
                 placeholder="Describe the incident, feedback or complaint…"
-              className={`max-h-28 w-full resize-none rounded-full border border-slate-200 bg-white px-4 py-3 pr-4 text-sm text-slate-950 shadow-[0_12px_34px_rgba(15,23,42,0.07)] outline-none transition duration-200 placeholder:text-slate-400 focus:ring-4 ${
+              className={`max-h-28 w-full resize-none rounded-full border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-950 shadow-[0_12px_34px_rgba(15,23,42,0.07)] outline-none transition duration-200 placeholder:text-slate-400 focus:ring-4 ${
                 instructorEvaluationMode ? 'focus:border-blue-400 focus:ring-blue-500/15' : 'focus:border-blue-400 focus:ring-blue-500/15'
               }`}
                 style={{ minHeight: '48px' }}
               />
+              <button
+                type="button"
+                disabled={!input.trim() || loading}
+                onClick={() => {
+                  const optimized = optimizeIntakePromptForAthena(input);
+                  if (optimized) setInput(optimized);
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }}
+                className="absolute right-2 top-1.5 flex h-9 w-9 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:translate-y-0"
+                title="Optimize prompt for Athena"
+                aria-label="Optimize prompt for Athena"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
               {listening && (
                 <div className="mt-1 text-[10px] font-medium text-blue-700">
                   {voiceHint || (voiceLiveText ? 'Listening… capturing your description' : 'Listening… start speaking')}
+                </div>
+              )}
+              {smartVoiceHints.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {smartVoiceHints.map((hint) => (
+                    <span key={hint} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                      {hint}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -2758,104 +2786,8 @@ const templateDetailFormFromTemplate = (template: ContextTemplate): DetailForm =
 function templateFieldOptions(fieldId: string): string[] | undefined {
   if (fieldId === 'studio') return STUDIOS;
   if (fieldId === 'trainer') return TRAINERS;
-  if (fieldId === 'classType') return CLASS_TYPES;
   return undefined;
 }
-
-const GenericTemplateForm: React.FC<{
-  template: ContextTemplate;
-  disabled?: boolean;
-  onCancel: () => void;
-  onSubmit: (values: Record<string, string>) => void;
-}> = ({ template, disabled = false, onCancel, onSubmit }) => {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const fields = template.fields || template.prompts.map((prompt): ContextTemplateField => ({
-    id: prompt,
-    label: prompt.replace(/:\s*$/, ''),
-    type: /feedback|concern|impact|action|notes|comment|resolution/i.test(prompt) ? 'textarea' : 'text',
-    required: true,
-  }));
-  const requiredFields = fields.filter((field) => field.required);
-  const canSubmit = requiredFields.every((field) => values[field.id]?.trim());
-
-  return (
-    <form
-      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.08)]"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (canSubmit && !disabled) onSubmit(values);
-      }}
-    >
-      <div className="flex flex-col gap-2 border-b border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Template form</div>
-          <h3 className="mt-1 text-sm font-semibold text-slate-950">{template.label}</h3>
-          <p className="mt-1 text-xs text-slate-500">{template.description}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-        >
-          Close
-        </button>
-      </div>
-      <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
-        {fields.map((field, index) => {
-          const isLong = field.type === 'textarea';
-          return (
-            <label key={field.id} className={`${isLong ? 'md:col-span-2 xl:col-span-3' : ''} block rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100`}>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                {index + 1}. {field.label}
-                {field.required ? <span className="text-blue-700"> *</span> : null}
-              </span>
-              {field.type === 'select' ? (
-                <select
-                  value={values[field.id] || ''}
-                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
-                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                >
-                  <option value="">Select {field.label.toLowerCase()}</option>
-                  {(field.options || []).map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              ) : field.type === 'textarea' ? (
-                <textarea
-                  value={values[field.id] || ''}
-                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
-                  rows={3}
-                  className="mt-2 min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  placeholder={field.placeholder || field.label}
-                />
-              ) : (
-                <input
-                  type={field.type}
-                  value={values[field.id] || ''}
-                  onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
-                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  placeholder={field.placeholder || field.label}
-                />
-              )}
-            </label>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4">
-        <span className="text-[11px] font-medium text-slate-500">
-          {requiredFields.filter((field) => values[field.id]?.trim()).length}/{requiredFields.length} required complete
-        </span>
-        <button
-          type="submit"
-          disabled={!canSubmit || disabled}
-          className="h-9 rounded-xl bg-blue-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          Generate ticket draft
-        </button>
-      </div>
-    </form>
-  );
-};
 
 const HostedClassTemplateForm: React.FC<{
   template: ContextTemplate;
@@ -2882,7 +2814,7 @@ const HostedClassTemplateForm: React.FC<{
   const canSubmit = Boolean(selectedSession && classFeedback.trim()) && !disabled;
   const hostedTemplateProgress = [
     { label: 'Session', value: selectedSession ? 'Selected' : 'Required', complete: Boolean(selectedSession) },
-    { label: 'Member voice', value: classFeedback.trim() ? 'Captured' : 'Required', complete: Boolean(classFeedback.trim()) },
+    { label: 'Member feedback', value: classFeedback.trim() ? 'Captured' : 'Required', complete: Boolean(classFeedback.trim()) },
     { label: 'Follow-up', value: followUpPlan || 'Pending', complete: Boolean(followUpPlan) },
   ];
 
@@ -3074,7 +3006,7 @@ const HostedClassTemplateForm: React.FC<{
                       <input
                         value={attendee.comment || ''}
                         onChange={(event) => updateAttendee(attendee.bookingId, { comment: event.target.value })}
-                        placeholder="Optional member voice note"
+                        placeholder="Optional member feedback note"
                         className="mt-2 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                       />
                     </div>
@@ -3131,7 +3063,7 @@ const HostedClassTemplateForm: React.FC<{
               <TemplateSelect label="Conversion signal" value={conversionSummary} options={HOSTED_CONVERSION_OPTIONS} onChange={setConversionSummary} />
               <TemplateSelect label="Social opportunity" value={socialAmplification} options={HOSTED_SOCIAL_OPTIONS} onChange={setSocialAmplification} />
               <TemplateSelect label="Follow-up plan" value={followUpPlan} options={HOSTED_FOLLOW_UP_PLAN_OPTIONS} onChange={setFollowUpPlan} />
-              <TemplateTextarea label="Member voice highlights" required value={classFeedback} onChange={setClassFeedback} />
+              <TemplateTextarea label="Member feedback highlights" required value={classFeedback} onChange={setClassFeedback} />
               <TemplateTextarea label="Additional context" value={otherFeedback} onChange={setOtherFeedback} />
             </div>
           </section>
@@ -3145,7 +3077,7 @@ const HostedClassTemplateForm: React.FC<{
           </span>
           <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${classFeedback.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
             <CheckCircle2 className="h-3 w-3" />
-            {classFeedback.trim() ? 'Member voice captured' : 'Member voice required'}
+            {classFeedback.trim() ? 'Member feedback captured' : 'Member feedback required'}
           </span>
         </div>
         <button
@@ -3178,6 +3110,7 @@ const TemplateTextarea: React.FC<{
       rows={3}
       className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
+    <SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />
   </label>
 );
 
@@ -3197,7 +3130,81 @@ const TemplateTextInput: React.FC<{
       onChange={(event) => onChange(event.target.value)}
       className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
+    <SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />
   </label>
+);
+
+function suggestionsForTemplateTextField(label: string): string[] {
+  const normalized = label.toLowerCase();
+  if (/member feedback|feedback|highlight|comment/.test(normalized)) {
+    return [
+      'Member reported that the touchpoint affected their overall studio journey.',
+      'Member expressed appreciation for the instructor support and class energy.',
+      'Member stated that they would like a follow-up before their next visit.',
+    ];
+  }
+  if (/partner|influencer|host/.test(normalized)) {
+    return [
+      'Partner audience showed strong alignment with the P57 community.',
+      'Partner requested follow-up on future Signature Partnership Experiences.',
+      'Attendees mentioned discovering Physique 57 through the partner invitation.',
+    ];
+  }
+  if (/context|note|detail|reason|concern|issue|resolution|action/.test(normalized)) {
+    return [
+      'Member reported the concern in person after the studio session.',
+      'Team member offered an immediate workaround and member accepted follow-up.',
+      'Member requested a clear resolution timeline and preferred WhatsApp follow-up.',
+    ];
+  }
+  return [
+    'Member reported this during a studio touchpoint.',
+    'Member requested follow-up from the appropriate team.',
+    'Team member documented the member feedback for internal resolution.',
+  ];
+}
+
+function suggestionsForDetailField(field: DetailFormField): string[] {
+  const id = field.id.toLowerCase();
+  const label = field.label.toLowerCase();
+  if (id.includes('description') || /describe|issue|details/.test(label)) {
+    return [
+      'Member reported the concern during a studio touchpoint and requested follow-up.',
+      'Member stated the issue affected their session experience and wants a resolution timeline.',
+      'Team member documented the concern with studio, session, and member impact context.',
+    ];
+  }
+  if (id.includes('resolution') || /resolution|outcome|action/.test(label)) {
+    return [
+      'Member requested a callback with the confirmed next step.',
+      'Member requested written confirmation by WhatsApp or email.',
+      'Team member offered an interim solution while the issue is reviewed.',
+    ];
+  }
+  if (id.includes('feedback') || /feedback|comment/.test(label)) {
+    return [
+      'Member expressed mixed feedback and asked that the concern be shared internally.',
+      'Member complimented the instructor and noted the class energy felt strong.',
+      'Member stated the touchpoint did not meet their expected Physique 57 standard.',
+    ];
+  }
+  return suggestionsForTemplateTextField(field.label);
+}
+
+const SuggestionChips: React.FC<{ suggestions: string[]; onPick: (value: string) => void }> = ({ suggestions, onPick }) => (
+  <div className="mt-2 flex flex-wrap gap-1.5">
+    {suggestions.slice(0, 3).map((suggestion) => (
+      <button
+        key={suggestion}
+        type="button"
+        onClick={() => onPick(suggestion)}
+        className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-left text-[10px] font-medium leading-snug text-blue-800 transition hover:border-blue-200 hover:bg-white"
+        title={suggestion}
+      >
+        {suggestion}
+      </button>
+    ))}
+  </div>
 );
 
 const TemplateSelect: React.FC<{
@@ -3450,6 +3457,28 @@ const DraftTicketReviewPreview: React.FC<{
     () => buildTicketReviewInsights({ draft, context: reviewContext, momenceSummary, duplicateTicket }),
     [draft, duplicateTicket, momenceSummary, reviewContext]
   );
+  const duplicatePatternInsights = useMemo(() => buildDuplicatePatternInsights({
+    id: '__draft__',
+    title: draft.title,
+    description: draft.description,
+    category: draft.category,
+    subCategory: draft.subCategory,
+    priority: draft.priority,
+    status: 'New',
+    studio: draft.studio,
+    trainer: draft.trainer || undefined,
+    classType: draft.classType || undefined,
+    classDateTime: draft.classDateTime || undefined,
+    memberName: draft.memberName || undefined,
+    memberContact: draft.memberContact || undefined,
+    reportedBy: draft.reportedBy || undefined,
+    assignedTo: draft.assignedTo || 'Unassigned',
+    team: draft.department || 'Management',
+    tags: draft.tags,
+    createdAt: new Date(0).toISOString(),
+    slaDueAt: new Date(0).toISOString(),
+    sentiment: draft.sentiment as Ticket['sentiment'] | undefined,
+  }, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket))), [draft, tickets]);
 
   return (
     <TicketPreviewCard
@@ -3463,6 +3492,7 @@ const DraftTicketReviewPreview: React.FC<{
       confirmedTicket={confirmedTicket}
       publishing={publishing}
       reviewInsights={reviewInsights}
+      duplicatePatternInsights={duplicatePatternInsights}
       momenceLoading={momenceLoading}
       momenceError={momenceError}
     />
@@ -3503,6 +3533,7 @@ const InstructorEvaluationChatbox: React.FC<{
   const [instructor, setInstructor] = useState('');
   const [studio, setStudio] = useState('');
   const [classType, setClassType] = useState('');
+  const [sessionId, setSessionId] = useState('');
   const [reviewPeriod, setReviewPeriod] = useState('');
   const [scores, setScores] = useState<TrainerEvaluationScore[]>(
     TRAINER_REVIEW_TEMPLATES.Barre.map((item) => ({ ...item, score: 0 }))
@@ -3514,16 +3545,6 @@ const InstructorEvaluationChatbox: React.FC<{
   const [showScoring, setShowScoring] = useState(false);
   const [trainerMenuOpen, setTrainerMenuOpen] = useState(false);
   const selectedTrainerImage = trainerImageUrl(instructor);
-
-  const classOptions = useMemo(() => {
-    const matcher = template === 'PowerCycle'
-      ? /cycle|power/i
-      : template === 'StrengthFit'
-        ? /strength|lab|fit/i
-        : /barre|mat|amped|signature|foundations|sculpt|stretch|recovery/i;
-    const filtered = CLASS_TYPES.filter((item) => matcher.test(item));
-    return filtered.length ? filtered : CLASS_TYPES;
-  }, [template]);
 
   const totalScore = scores.reduce((sum, item) => sum + item.score, 0);
   const totalWeightage = scores.reduce((sum, item) => sum + item.weightage, 0);
@@ -3540,6 +3561,7 @@ const InstructorEvaluationChatbox: React.FC<{
     setTemplate(nextTemplate);
     setScores(TRAINER_REVIEW_TEMPLATES[nextTemplate].map((item) => ({ ...item, score: 0 })));
     setClassType('');
+    setSessionId('');
   };
 
   const setScore = (category: string, score: number) => {
@@ -3657,18 +3679,24 @@ const InstructorEvaluationChatbox: React.FC<{
           <option value="">Studio</option>
           {STUDIOS.map((item) => <option key={item}>{item}</option>)}
         </select>
-        <select
-          value={classType}
-          onChange={(event) => setClassType(event.target.value)}
-          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-900 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100 md:col-span-1"
-        >
-          <option value="">Class / format</option>
-          {classOptions.map((item) => <option key={item}>{item}</option>)}
-        </select>
+        <div className="md:col-span-2">
+          <MomenceSessionDropdownField
+            multi={false}
+            values={{ sessionId, classType, classDateTime: reviewPeriod, trainer: instructor, studio }}
+            onChange={(sessions) => {
+              const session = sessions[0];
+              setSessionId(session?.id || '');
+              setClassType(session?.classType || '');
+              setReviewPeriod(session?.startsAt || '');
+              setInstructor(session?.trainer || instructor);
+              setStudio(session?.studio || studio);
+            }}
+          />
+        </div>
         <input
           value={reviewPeriod}
           onChange={(event) => setReviewPeriod(event.target.value)}
-          placeholder="Review period or class date"
+          placeholder="Review period notes"
           className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
         />
       </div>
@@ -4151,7 +4179,6 @@ const DetailCaptureForm: React.FC<{
                     'category',
                     'subCategory',
                     'priority',
-                    'sessionMode',
                     'templateType',
                     'classType',
                     'studio',
@@ -4220,23 +4247,31 @@ const DetailCaptureForm: React.FC<{
                   );
                 })()
               ) : field.type === 'textarea' ? (
-                <textarea
-                  id={`detail-${id}`}
-                  value={values[id] || ''}
-                  onChange={(event) => setValue(id, event.target.value)}
-                  rows={4}
-                  className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                  placeholder="Describe the issue and relevant details..."
-                />
+                <>
+                  <textarea
+                    id={`detail-${id}`}
+                    value={values[id] || ''}
+                    onChange={(event) => setValue(id, event.target.value)}
+                    rows={4}
+                    className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+                    placeholder="Describe the issue and relevant details..."
+                  />
+                  <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
+                </>
               ) : (
-                <input
-                  id={`detail-${id}`}
-                  type={field.type === 'date' || field.type === 'datetime-local' || field.type === 'number' ? field.type : 'text'}
-                  value={values[id] || ''}
-                  onChange={(event) => setValue(id, event.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                  placeholder={field.label}
-                />
+                <>
+                  <input
+                    id={`detail-${id}`}
+                    type={field.type === 'date' || field.type === 'datetime-local' || field.type === 'number' ? field.type : 'text'}
+                    value={values[id] || ''}
+                    onChange={(event) => setValue(id, event.target.value)}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+                    placeholder={field.label}
+                  />
+                  {field.type === 'text' && (
+                    <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
+                  )}
+                </>
               )}
             </div>
           );
@@ -4262,84 +4297,33 @@ const AssessmentSessionDetailsField: React.FC<{
   values: Record<string, string>;
   onChange: (values: Record<string, string>) => void;
 }> = ({ values, onChange }) => {
-  const customSession = values.sessionMode === 'Custom practice session';
-
   return (
     <div className="md:col-span-2 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-900">Session Details</div>
           <p className="mt-1 text-xs text-slate-500">
-            {customSession
-              ? 'Capture a practice session manually with studio, instructor, class type, date and start time.'
-              : 'Select the Momence session first so class, studio, instructor and start time map automatically.'}
+            Select the Momence session first so class, studio, instructor and start time map automatically.
           </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-blue-800 ring-1 ring-blue-100">
-          {customSession ? 'Manual entry' : 'Momence mapped'}
+          Momence mapped
         </span>
       </div>
 
-      {!customSession ? (
-        <MomenceSessionDropdownField
-          values={values}
-          multi={false}
-          onChange={(sessions) => {
-            onChange({
-              sessionId: sessions.map((session) => session.id).join(' | '),
-              classType: sessions.map((session) => session.classType).join(' | '),
-              classDateTime: sessions.map((session) => session.startsAt || '').filter(Boolean).join(' | '),
-              trainer: sessions.map((session) => session.trainer || '').filter(Boolean).join(' | '),
-              studio: sessions.map((session) => session.studio || '').filter(Boolean).join(' | '),
-            });
-          }}
-        />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
-            Studio session / practice type *
-            <select
-              value={values.classType || ''}
-              onChange={(event) => onChange({ classType: event.target.value, sessionId: '' })}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            >
-              <option value="">Select class type</option>
-              {CLASS_TYPES.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
-            Studio space *
-            <select
-              value={values.studio || ''}
-              onChange={(event) => onChange({ studio: event.target.value })}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            >
-              <option value="">Select studio</option>
-              {STUDIOS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
-            Instructor assessed *
-            <select
-              value={values.trainer || ''}
-              onChange={(event) => onChange({ trainer: event.target.value })}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            >
-              <option value="">Select instructor</option>
-              {TRAINERS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
-            Class date and start time *
-            <input
-              type="datetime-local"
-              value={values.classDateTime || ''}
-              onChange={(event) => onChange({ classDateTime: event.target.value })}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            />
-          </label>
-        </div>
-      )}
+      <MomenceSessionDropdownField
+        values={values}
+        multi={false}
+        onChange={(sessions) => {
+          onChange({
+            sessionId: sessions.map((session) => session.id).join(' | '),
+            classType: sessions.map((session) => session.classType).join(' | '),
+            classDateTime: sessions.map((session) => session.startsAt || '').filter(Boolean).join(' | '),
+            trainer: sessions.map((session) => session.trainer || '').filter(Boolean).join(' | '),
+            studio: sessions.map((session) => session.studio || '').filter(Boolean).join(' | '),
+          });
+        }}
+      />
     </div>
   );
 };
@@ -4415,8 +4399,10 @@ const MultiSelectDropdown: React.FC<{
   options: string[];
   placeholder: string;
   disabled?: boolean;
+  loading?: boolean;
+  emptyMessage?: string;
   onChange: (value: string) => void;
-}> = ({ value, options, placeholder, disabled = false, onChange }) => {
+}> = ({ value, options, placeholder, disabled = false, loading = false, emptyMessage = 'No options available', onChange }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedValues = useMemo(
@@ -4504,8 +4490,10 @@ const MultiSelectDropdown: React.FC<{
                 <span className="min-w-0 flex-1 break-words">{option}</span>
               </button>
             );
-          }) : (
-            <div className="px-2.5 py-2 text-xs text-slate-400">No options available</div>
+          }) : loading ? (
+            <div className="px-2.5 py-2 text-xs text-slate-500">Loading options...</div>
+          ) : (
+            <div className="px-2.5 py-2 text-xs text-slate-400">{emptyMessage}</div>
           )}
         </div>
       )}
@@ -4555,6 +4543,13 @@ const momenceSessionSearchCache = new Map<string, MomenceSessionOption[]>();
 
 function momenceSessionDropdownCacheKey(sessionTypes: string[]): string {
   return `__momence_session_dropdown_options__:${sessionTypes.join(',')}`;
+}
+
+function mergeMomenceSessionOptions(currentOptions: MomenceSessionOption[], nextOptions: MomenceSessionOption[]): MomenceSessionOption[] {
+  const byLabel = new Map<string, MomenceSessionOption>();
+  for (const option of currentOptions) byLabel.set(momenceSessionDropdownLabel(option), option);
+  for (const option of nextOptions) byLabel.set(momenceSessionDropdownLabel(option), option);
+  return Array.from(byLabel.values());
 }
 
 const MomenceMemberFormField: React.FC<{
@@ -4760,9 +4755,12 @@ const MomenceSessionDropdownField: React.FC<{
       return;
     }
 
+    setOptions([]);
     setLoading(true);
     setError(null);
-    searchMomenceSessions('', { types: sessionTypes })
+    loadMomenceSessionsProgressively('', { types: sessionTypes }, (sessions) => {
+      if (!cancelled) setOptions((current) => mergeMomenceSessionOptions(current, sessions));
+    })
       .then((sessions) => {
         momenceSessionSearchCache.set(cacheKey, sessions);
         if (!cancelled) setOptions(sessions);
@@ -4797,7 +4795,9 @@ const MomenceSessionDropdownField: React.FC<{
   const dropdownOptions = options.map(momenceSessionDropdownLabel);
   const dropdownValue = selectedDropdownLabels.join(' | ');
   const placeholder = loading
-    ? 'Loading Momence sessions...'
+    ? dropdownOptions.length === 0
+      ? 'Loading first Momence sessions...'
+      : 'Select Momence sessions'
     : error
       ? 'Momence sessions unavailable'
       : multi
@@ -4813,11 +4813,16 @@ const MomenceSessionDropdownField: React.FC<{
         value={dropdownValue}
         options={dropdownOptions}
         placeholder={placeholder}
-        disabled={loading || dropdownOptions.length === 0}
+        loading={loading && dropdownOptions.length === 0}
+        emptyMessage="No Momence sessions loaded yet"
         onChange={handleDropdownChange}
       />
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
-      {loading && <div className="mt-1 text-[11px] text-slate-500">Loading Momence sessions...</div>}
+      {loading && (
+        <div className="mt-1 text-[11px] text-slate-500">
+          {dropdownOptions.length ? 'First sessions ready. Loading more in the background...' : 'Loading Momence sessions...'}
+        </div>
+      )}
     </div>
   );
 };

@@ -124,14 +124,15 @@ export function trainerReviewRecordsFromTickets(tickets: Ticket[]): TrainerRevie
   });
 }
 
-export function isTrainerEvaluationProfileOnly(ticket: Pick<Ticket, 'category' | 'tags' | 'metadata'>): boolean {
+export function isTrainerEvaluationProfileOnly(ticket: Pick<Ticket, 'category' | 'tags' | 'metadata'> & Partial<Ticket>): boolean {
   const metadata = ticket.metadata || {};
+  const tags = Array.isArray(ticket.tags) ? ticket.tags : [];
   return Boolean(
     metadata.profileOnly === true ||
-    ticket.tags.includes('profile-only') ||
+    tags.includes('profile-only') ||
     (
       ticket.category === 'Trainer Feedback' &&
-      ticket.tags.includes('trainer-profile') &&
+      tags.includes('trainer-profile') &&
       Boolean(metadata.trainerReview)
     )
   );

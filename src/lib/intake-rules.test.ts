@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  captureMemberVoiceFromText,
+  captureMemberFeedbackFromText,
   getIntakeFieldDefinition,
   getIntakeFieldDefinitions,
   getMissingIntakeFields,
@@ -168,36 +168,36 @@ describe('intake publishability rules', () => {
     expect(getMissingIntakeFields({ ...base, reportedBy: 'ops@physique57india.com' })).not.toContain('reportedBy');
   });
 
-  it('captures only pasted member statements as member voice', () => {
+  it('captures only pasted member statements as member feedback', () => {
     const context: IntakeContext = {};
 
-    expect(captureMemberVoiceFromText('Complaint', context)).toBeNull();
-    expect(captureMemberVoiceFromText('Route this as Complaint', context)).toBeNull();
+    expect(captureMemberFeedbackFromText('Complaint', context)).toBeNull();
+    expect(captureMemberFeedbackFromText('Route this as Complaint', context)).toBeNull();
     expect(
-      captureMemberVoiceFromText(
+      captureMemberFeedbackFromText(
         'Here are the missing details:\nPriority: High\nDocumented By: Priya Shah',
         context
       )
     ).toBeNull();
 
     expect(
-      captureMemberVoiceFromText(
+      captureMemberFeedbackFromText(
         'Member said she has called twice about a refund and still has not received a clear response.',
         context
       )
     ).toBe('Member said she has called twice about a refund and still has not received a clear response.');
   });
 
-  it('captures member voice phrasing even when it contains a colon', () => {
+  it('captures member feedback phrasing even when it contains a colon', () => {
     expect(
-      captureMemberVoiceFromText(
+      captureMemberFeedbackFromText(
         'Member said: she has called twice about a refund and still has not received a clear response.',
         {}
       )
     ).toBe('Member said: she has called twice about a refund and still has not received a clear response.');
 
     expect(
-      captureMemberVoiceFromText(
+      captureMemberFeedbackFromText(
         'Client stated: the studio space felt too warm during the full session.',
         {}
       )
@@ -342,11 +342,11 @@ describe('intake publishability rules', () => {
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
       'studio',
       'memberName',
-      'classType',
       'incidentDateTime',
       'desiredResolution',
       'memberSentiment',
     ]));
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('classType');
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('membership');
   });
 
@@ -391,6 +391,33 @@ describe('intake publishability rules', () => {
       inferIntakeContextFromText('Member has a power cycle 3 months unlimited membership.')
     ).toMatchObject({
       membership: 'powerCycle 3 months Unlimited',
+    });
+  });
+
+  it('normalizes common studio, class, trainer, and area shorthand from natural reports', () => {
+    expect(
+      inferIntakeContextFromText('member said the mat class at kemps with Rohan was too crowded in studio 1')
+    ).toMatchObject({
+      studio: 'Kwality House, Kemps Corner',
+      classType: 'Studio Mat 57',
+      trainer: 'Rohan Dahima',
+      affectedArea: 'Studio 1',
+    });
+
+    expect(
+      inferIntakeContextFromText('pc class at bandra had audio issues in the powercycle room')
+    ).toMatchObject({
+      studio: 'Supreme HQ, Bandra',
+      classType: 'Studio PowerCycle',
+      affectedArea: 'studio - 2 or powerCycle Studio',
+    });
+
+    expect(
+      inferIntakeContextFromText('bb class at blr with Siddhartha had a late start')
+    ).toMatchObject({
+      studio: 'Kenkere House, Bengaluru',
+      classType: 'Studio Back Body Blaze',
+      trainer: 'Siddhartha Kusuma',
     });
   });
 
@@ -595,7 +622,9 @@ describe('intake publishability rules', () => {
       incidentDateTime: '2026-06-02T10:37',
     };
 
-    const fields = getIntakeFieldDefinitions(context);
+    expect(context.affectedArea).toBe('Studio 1');
+
+    const fields = getIntakeFieldDefinitions({ ...context, affectedArea: undefined });
 
     expect(fields).toEqual(expect.arrayContaining([
       expect.objectContaining({

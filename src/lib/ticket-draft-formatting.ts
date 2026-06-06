@@ -142,7 +142,7 @@ export function draftDescriptionNeedsRewrite(description: string | undefined, in
   const value = description || '';
   if (!value.trim()) return true;
   if (/hi all|best,\s*(?:\n|$)|team physique 57/i.test(value)) return true;
-  if (/member voice summary/i.test(value) && /internal reporting/i.test(intakeRoute || value)) return true;
+  if (/member feedback summary/i.test(value) && /internal reporting/i.test(intakeRoute || value)) return true;
   if (sourceText && sourceText.trim().length > 80) {
     const normalizedDescription = normalizeText(value);
     const normalizedSource = normalizeText(sourceText);

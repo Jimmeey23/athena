@@ -4,7 +4,7 @@ import { htmlForChatTranscript, plainTextForChatTranscript, transcriptFileBaseNa
 describe('chat conversation exports', () => {
   const exportedAt = new Date('2026-06-02T09:30:00.000Z');
   const messages = [
-    { role: 'assistant' as const, content: 'Hi Jimmeey, happy to help. What should we log today?' },
+    { role: 'assistant' as const, content: 'Hi Jimmeey, happy to help. What should we log today? 🙂' },
     { role: 'user' as const, content: 'instructor arrived late for class' },
     {
       role: 'assistant' as const,

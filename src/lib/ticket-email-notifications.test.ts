@@ -1,4 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/backend-supabase', () => ({
+  backendSupabase: {
+    functions: {
+      invoke: vi.fn(),
+    },
+  },
+}));
+
 import { isTicketDueToday, ticketEmailInFlightKey, ticketEmailRecipientHints } from './ticket-email-notifications';
 import { buildTicketLifecycleEmail } from '../../supabase/functions/ticket-email-notifications/email-template';
 import { ticketEmailDeliveryEnvelope } from '../../supabase/functions/_shared/ticket-email-delivery';

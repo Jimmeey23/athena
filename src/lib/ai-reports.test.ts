@@ -54,7 +54,7 @@ describe('AI reports engine', () => {
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('executive_operations_summary');
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('data_quality_intake_completeness');
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_performance_consolidated');
-    expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_member_voice_consolidated');
+    expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_member_feedback_consolidated');
     expect(ALL_REPORT_DEFINITIONS.map((definition) => definition.id)).toContain('trainer_coaching_priority_report');
     expect(isTrainerReportId('trainer_performance_consolidated')).toBe(true);
     expect(isTrainerReportId('executive_operations_summary')).toBe(false);
@@ -82,6 +82,30 @@ describe('AI reports engine', () => {
         filters: { ...DEFAULT_REPORT_FILTERS, sourceType: 'live' },
       }).map((ticket) => ticket.id)
     ).toEqual(['P57-1']);
+  });
+
+  it('does not crash reports when legacy tickets are missing tags', () => {
+    const legacyTicket = baseTicket({
+      id: 'P57-LEGACY-NO-TAGS',
+      tags: undefined as unknown as string[],
+      createdAt: '2026-05-12T10:00:00.000Z',
+    });
+
+    const filtered = filterTicketsForReport([legacyTicket], {
+      from: '2026-05-01',
+      to: '2026-05-31',
+      filters: DEFAULT_REPORT_FILTERS,
+    });
+    const report = buildReport({
+      reportId: 'executive_operations_summary',
+      tickets: [legacyTicket],
+      events: [],
+      period: { from: '2026-05-01', to: '2026-05-31' },
+      filters: DEFAULT_REPORT_FILTERS,
+    });
+
+    expect(filtered.map((ticket) => ticket.id)).toEqual(['P57-LEGACY-NO-TAGS']);
+    expect(report.reportTickets).toBe(1);
   });
 
   it('uses ticket events before resolution metadata when calculating resolved time', () => {
@@ -151,7 +175,7 @@ describe('AI reports engine', () => {
     }
   });
 
-  it('builds consolidated trainer performance reports from evaluations and member voice tickets', () => {
+  it('builds consolidated trainer performance reports from evaluations and member feedback tickets', () => {
     const report = buildReport({
       reportId: 'trainer_performance_consolidated',
       tickets: [
@@ -200,7 +224,7 @@ describe('AI reports engine', () => {
           status: 'Resolved',
           trainer: 'Simran Dutt',
           sentiment: 'Positive',
-          tags: ['ai-approved', 'member-voice'],
+          tags: ['ai-approved', 'member-feedback'],
           createdAt: '2026-05-09T10:00:00.000Z',
         }),
       ],
@@ -214,10 +238,10 @@ describe('AI reports engine', () => {
     expect(report.sourceRows.map((row) => row.ticketId)).toEqual(expect.arrayContaining(['P57-TRAINER-1', 'P57-TRAINER-2']));
     expect(report.metrics.map((metric) => metric.id)).toContain('trainer_review_count');
     expect(report.metrics.map((metric) => metric.id)).toContain('trainer_average_score');
-    expect(report.metrics.map((metric) => metric.id)).toContain('trainer_member_voice_count');
+    expect(report.metrics.map((metric) => metric.id)).toContain('trainer_member_feedback_count');
     expect(report.metrics.find((metric) => metric.id === 'trainer_average_score')?.value).toBe('84%');
     expect(report.sections.map((section) => section.id)).toContain('trainer_score_trend');
-    expect(report.sections.map((section) => section.id)).toContain('trainer_member_voice');
+    expect(report.sections.map((section) => section.id)).toContain('trainer_member_feedback');
     expect(report.sections.map((section) => section.id)).toContain('trainer_coaching_priorities');
     expect(report.dataQualityNotes.join(' ')).toContain('trainer evaluation scorecards');
   });

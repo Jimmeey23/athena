@@ -174,7 +174,7 @@ export function normalizeInboundEmails(payload: unknown): NormalizedInboundEmail
   const root = asRecord(payload);
   const candidates = Array.isArray(root.events) ? root.events.map(asRecord) : [root];
 
-  return candidates.map((candidate) => {
+  return candidates.map((candidate): NormalizedInboundEmail | null => {
     const from = emailFromValue(candidate.from || candidate.sender || candidate.from_email || candidate.From);
     const to = Array.isArray(candidate.to)
       ? emailFromValue(candidate.to[0])
@@ -281,7 +281,10 @@ function extractReason(text: string): string | undefined {
   return sentence?.[0]?.replace(/\s+/g, ' ').trim().replace(/[.?!]$/, '');
 }
 
-export function extractFreezeRequest(email: Pick<NormalizedInboundEmail, 'subject' | 'text'>, now = new Date()): FreezeRequest {
+export function extractFreezeRequest(
+  email: Pick<NormalizedInboundEmail, 'subject' | 'text'> & Partial<Pick<NormalizedInboundEmail, 'fromEmail' | 'fromName'>>,
+  now = new Date(),
+): FreezeRequest {
   const combined = `${email.subject || ''}\n${email.text || ''}`.trim();
   if (!/\bfreeze|pause\b/i.test(combined)) {
     return { intent: 'unsupported', reason: 'Email does not appear to request a membership freeze.' };

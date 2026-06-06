@@ -5,10 +5,10 @@ import { ChatInterface } from './ticketing/ChatInterface';
 import { TicketDetailDrawer } from './ticketing/TicketDetailDrawer';
 import { AuthGate } from './AuthGate';
 import { BackendAuthProvider, useBackendAuth } from '@/contexts/BackendAuthContext';
-import { AlertTriangle, BarChart3, Bell, CheckCircle2, Clock, Flame, Gauge, MessageSquareText, PanelRightClose, PanelRightOpen, RotateCcw, Settings, ShieldAlert, Tickets, Users, Workflow } from 'lucide-react';
+import { BarChart3, Bell, Gauge, MessageSquareText, PanelRightClose, PanelRightOpen, RotateCcw, Settings, ShieldAlert, Tickets, Users, Workflow } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useNavigate } from 'react-router-dom';
-import { ASSOCIATES, CATEGORIES, PRIORITY_SLA, STUDIOS, getEscalationTarget, getSlaState, isClosedTicket, isTicketBreached, Ticket } from '@/lib/ticketing-data';
+import { ASSOCIATES, CATEGORIES, PRIORITY_SLA, getEscalationTarget, getSlaState, isClosedTicket, Ticket } from '@/lib/ticketing-data';
 import {
   DepartmentSetting,
   EmployeeSetting,
@@ -16,7 +16,6 @@ import {
   RoutingRuleSetting,
   RoutingSettings,
   defaultRoutingSettings,
-  inferRoutingCity,
   loadRoutingSettings,
   physique57RoutingPresets,
   routingRuleId,
@@ -24,21 +23,16 @@ import {
 } from '@/lib/routing-settings';
 import {
   EMPTY_ROUTING_FILTERS,
-  applyBulkRoutingOperation,
   applyRoutingRulePatch,
   buildCategoryRoutingRows,
   createCityRoutingRules,
   deleteCategoryRoutingRules,
-  filterRoutingRules,
   isCityRoutingRule,
   routingScopeKey,
   uniqueText,
-  type BulkRoutingOperation,
   type CategoryRoutingRow,
-  type RoutingFilterState,
   type RoutingScopeKey,
   type RoutingScopeSummary,
-  type RoutingStateFilter,
 } from '@/lib/settings-routing-ops';
 import { canOpenAppTab, visibleAppTabValues } from '@/lib/app-access';
 import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
@@ -53,6 +47,56 @@ const AiReportsPanel = lazy(() =>
 const TrainerProfilesPanel = lazy(() =>
   import('./ticketing/TrainerProfilesPanel').then((module) => ({ default: module.TrainerProfilesPanel }))
 );
+
+interface LazyTabErrorBoundaryProps {
+  children: React.ReactNode;
+  title: string;
+  resetKey: string;
+}
+
+interface LazyTabErrorBoundaryState {
+  error: Error | null;
+}
+
+class LazyTabErrorBoundary extends React.Component<LazyTabErrorBoundaryProps, LazyTabErrorBoundaryState> {
+  state: LazyTabErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): LazyTabErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidUpdate(previousProps: LazyTabErrorBoundaryProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`${this.props.title}: lazy tab failed to load`, error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <div className="flex h-full items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md rounded-2xl border border-amber-200 bg-white p-5 text-center shadow-sm">
+          <div className="text-sm font-semibold text-slate-950">{this.props.title}</div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            The local dev server served a stale module. Refresh this view to request the current bundle again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white transition hover:bg-slate-800"
+          >
+            Refresh view
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
 
 const sideTabs = [
   { value: 'chat', label: 'Chat Intake', icon: MessageSquareText },
@@ -227,16 +271,20 @@ const SupportShell: React.FC = () => {
               </TabsContent>
               <TabsContent value="tickets" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
                 {(activeTab === 'tickets' || hasOpenedTickets) && (
-                  <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading submitted tickets...</div>}>
-                    <TicketDashboard />
-                  </Suspense>
+                  <LazyTabErrorBoundary title="Submitted tickets could not load" resetKey={activeTab}>
+                    <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading submitted tickets...</div>}>
+                      <TicketDashboard />
+                    </Suspense>
+                  </LazyTabErrorBoundary>
                 )}
               </TabsContent>
               <TabsContent value="trainers" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
                 {activeTab === 'trainers' && (
-                  <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading trainer profiles...</div>}>
-                    <TrainerProfilesPanel />
-                  </Suspense>
+                  <LazyTabErrorBoundary title="Trainer profiles could not load" resetKey={activeTab}>
+                    <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading trainer profiles...</div>}>
+                      <TrainerProfilesPanel />
+                    </Suspense>
+                  </LazyTabErrorBoundary>
                 )}
               </TabsContent>
               <TabsContent value="notifications" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
@@ -249,9 +297,11 @@ const SupportShell: React.FC = () => {
               </TabsContent>
               <TabsContent value="reports" className="reports-print-root m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">
                 {activeTab === 'reports' && (
-                  <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading reports...</div>}>
-                    <AiReportsPanel />
-                  </Suspense>
+                  <LazyTabErrorBoundary title="Reports could not load" resetKey={activeTab}>
+                    <Suspense fallback={<div className="flex h-full items-center justify-center bg-white text-sm text-stone-500">Loading reports...</div>}>
+                      <AiReportsPanel />
+                    </Suspense>
+                  </LazyTabErrorBoundary>
                 )}
               </TabsContent>
               <TabsContent value="insights" className="m-0 h-full min-h-0 overflow-hidden data-[state=inactive]:hidden">

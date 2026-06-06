@@ -5,6 +5,7 @@ import {
   freezeMomenceMembership,
   listMomenceHostMembershipOptions,
   loadMomenceTicketContext,
+  loadMomenceSessionsProgressively,
   scheduleMomenceMembershipUnfreeze,
   searchMomenceSessions,
   unfreezeMomenceMembership,
@@ -124,6 +125,28 @@ describe('buildMomenceInsightSummary', () => {
     expect(summary.session?.fillRateLabel).toBe('18/20 booked');
     expect(summary.session?.matchingMemberBookingId).toBe('301');
     expect(summary.ticketContextLines).toContain('Momence member: Asha Rao');
+  });
+});
+
+describe('Momence session progressive loading', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('requests a small first session page so dropdown options become available quickly', async () => {
+    vi.stubEnv('VITE_MOMENCE_SESSION_FUNCTION_URL', 'http://localhost/session-search');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      payload: [{ id: 1, title: 'Barre 57', startsAt: '2026-06-06T10:00:00.000Z' }],
+      hasMore: false,
+    }), { status: 200 })));
+
+    await loadMomenceSessionsProgressively('', undefined, vi.fn());
+
+    const body = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(body.page).toBe(0);
+    expect(body.maxPages).toBe(1);
+    expect(body.pageSize).toBeLessThanOrEqual(50);
   });
 });
 
@@ -274,11 +297,47 @@ describe('Momence session search', () => {
         query: '',
         pastDays: 180,
         futureDays: 45,
-        pageSize: 200,
+        pageSize: 40,
         includeCancelled: false,
         types: ['private'],
+        page: 0,
+        maxPages: 1,
       }),
     }));
+  });
+
+  it('emits the first session page before later pages finish loading', async () => {
+    const { loadMomenceSessionsProgressively } = await import('./momence-api');
+    let resolveSecondPage: (value: Response) => void = () => undefined;
+    const secondPage = new Promise<Response>((resolve) => {
+      resolveSecondPage = resolve;
+    });
+    const onPage = vi.fn();
+    vi.stubGlobal('fetch', vi.fn((_, init) => {
+      const body = JSON.parse(String((init as RequestInit).body));
+      if (body.page === 0) {
+        return Promise.resolve(new Response(JSON.stringify({
+          payload: [{ id: 501, name: 'First Page Class' }],
+          hasMore: true,
+        }), { status: 200 }));
+      }
+      return secondPage;
+    }));
+
+    const loading = loadMomenceSessionsProgressively('', {}, onPage);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onPage).toHaveBeenCalledTimes(1);
+    expect(onPage.mock.calls[0][0][0]).toMatchObject({ id: '501', classType: 'First Page Class' });
+
+    resolveSecondPage(new Response(JSON.stringify({
+      payload: [{ id: 502, name: 'Second Page Class' }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    const sessions = await loading;
+    expect(onPage).toHaveBeenCalledTimes(2);
+    expect(sessions.map((session) => session.id)).toEqual(['501', '502']);
   });
 });
 

@@ -481,7 +481,7 @@ export function mapFilloutTrainingEvaluation(payload: unknown, now = new Date())
     submission.form_id
   );
   const receivedAt = now.toISOString();
-  const sourceRef = `fillout:${formId || 'unknown-form'}:${submissionId || String(Math.abs(allText.split('').reduce((hash, char) => ((hash * 31 + char.charCodeAt(0)) | 0), 0))).toString(36)}`;
+  const sourceRef = `fillout:${formId || 'unknown-form'}:${submissionId || String(Math.abs(allText.split('').reduce((hash, char) => ((hash * 31 + char.charCodeAt(0)) | 0), 0))).toString()}`;
   const input: TrainerEvaluationInput = {
     trainer,
     template,

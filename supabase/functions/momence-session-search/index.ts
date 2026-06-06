@@ -16,6 +16,8 @@ type SearchBody = {
   pastDays?: number;
   futureDays?: number;
   pageSize?: number;
+  page?: number;
+  maxPages?: number;
   includeCancelled?: boolean;
   type?: string;
   types?: string[];
@@ -85,6 +87,16 @@ function clampDays(value: unknown, fallback: number, max: number): number {
 function clampPageSize(value: unknown): number {
   const number = typeof value === 'number' && Number.isFinite(value) ? value : DEFAULT_PAGE_SIZE;
   return Math.max(10, Math.min(200, Math.round(number)));
+}
+
+function clampPage(value: unknown): number {
+  const number = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return Math.max(0, Math.round(number));
+}
+
+function clampMaxPages(value: unknown): number {
+  const number = typeof value === 'number' && Number.isFinite(value) ? value : MAX_PAGES;
+  return Math.max(1, Math.min(MAX_PAGES, Math.round(number)));
 }
 
 function extractItems(data: unknown): unknown[] {
@@ -173,6 +185,8 @@ Deno.serve(async (request) => {
     const pastDays = clampDays(body.pastDays, DEFAULT_PAST_DAYS, 730);
     const futureDays = clampDays(body.futureDays, DEFAULT_FUTURE_DAYS, 365);
     const pageSize = clampPageSize(body.pageSize);
+    const startPage = clampPage(body.page);
+    const maxPages = clampMaxPages(body.maxPages);
     const sessionTypes = Array.isArray(body.types) && body.types.some((type) => typeof type === 'string' && type.trim())
       ? body.types.filter((type): type is string => typeof type === 'string' && Boolean(type.trim())).map((type) => type.trim())
       : [typeof body.type === 'string' && body.type.trim() ? body.type.trim() : DEFAULT_SESSION_TYPE];
@@ -182,9 +196,12 @@ Deno.serve(async (request) => {
 
     const token = await getAccessToken();
     const pages: unknown[] = [];
+    let lastPageItemCount = 0;
+    let lastFetchedPage = startPage;
     let responseContentType = 'application/json';
 
-    for (let page = 0; page < MAX_PAGES; page += 1) {
+    for (let pageOffset = 0; pageOffset < maxPages; pageOffset += 1) {
+      const page = startPage + pageOffset;
       const url = new URL(`${MOMENCE_BASE_URL}/host/sessions`);
       url.searchParams.set('page', String(page));
       url.searchParams.set('pageSize', String(pageSize));
@@ -212,6 +229,8 @@ Deno.serve(async (request) => {
       responseContentType = response.headers.get('Content-Type') || responseContentType;
       const data = JSON.parse(text);
       const items = extractItems(data);
+      lastPageItemCount = items.length;
+      lastFetchedPage = page;
       pages.push(...items);
       if (!Array.isArray(items) || items.length < pageSize) break;
     }
@@ -221,7 +240,13 @@ Deno.serve(async (request) => {
       ? pages.filter((session) => matchesQuery(session, normalizedQuery))
       : pages;
 
-    return new Response(JSON.stringify({ payload: filteredPages }), {
+    return new Response(JSON.stringify({
+      payload: filteredPages,
+      page: startPage,
+      lastFetchedPage,
+      pageSize,
+      hasMore: lastPageItemCount >= pageSize,
+    }), {
       status: 200,
       headers: {
         ...corsHeaders,

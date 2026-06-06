@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { STUDIOS, TRAINERS, CLASS_TYPES, CATEGORIES, MEMBERSHIPS, INTAKE_ROUTES, PRIORITY_SLA } from '@/lib/ticketing-data';
+import { STUDIOS, TRAINERS, CATEGORIES, MEMBERSHIPS, INTAKE_ROUTES, PRIORITY_SLA } from '@/lib/ticketing-data';
 import { MapPin, User, Calendar, Tag, ChevronDown, X, BadgeCheck, Search, Route, Siren, Paperclip } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -64,125 +64,166 @@ function multiDisplay(value?: string, fallback = ''): string {
 
 export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCount = 0, accent = 'blue' }) => {
   const activeTone = 'border-blue-500 bg-blue-50 text-blue-700 shadow-[0_10px_22px_rgba(37,99,235,0.14)]';
-  return (
-    <div className="flex w-max flex-nowrap items-center gap-2">
-      <button
-        type="button"
-        className={`inline-flex h-8 min-w-0 max-w-[180px] items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-sm transition duration-200 ${
-          attachmentCount > 0
-            ? activeTone
-            : 'border-slate-200 bg-white/90 text-stone-600'
-        }`}
-        title={attachmentCount > 0 ? `${attachmentCount} attachment(s) queued` : 'No attachments queued'}
-      >
-        <Paperclip className="w-3 h-3" />
-        <span className="truncate min-w-0">
-          {attachmentCount > 0 ? `Documents (${attachmentCount})` : 'Documents'}
-        </span>
-      </button>
-      <AsyncPicker
-        icon={<User className="w-3 h-3" />}
-        label="Member"
-        value={multiDisplay(context.memberName)}
-        loadOptions={searchMomenceMembers}
-        onSelect={(member) =>
-          onChange({
-            ...context,
-            memberId: appendMultiUnique(context.memberId, member.id),
-            memberName: appendMultiUnique(context.memberName, member.name),
-            memberContact: appendMultiUnique(context.memberContact, member.email || member.phoneNumber || ''),
-          })
-        }
-        onClear={() =>
-          onChange({
-            ...context,
-            memberId: undefined,
-            memberName: undefined,
-            memberContact: undefined,
-          })
-        }
-        accent={accent}
-      />
-      <AsyncPicker
-        icon={<Calendar className="w-3 h-3" />}
-        label="Session"
-        value={multiDisplay(context.classType)}
-        loadOptions={searchMomenceSessions}
-        onSelect={(session) =>
-          onChange({
-            ...context,
-            sessionId: appendMultiUnique(context.sessionId, session.id),
-            classType: appendMultiUnique(context.classType, session.classType),
-            classDateTime: appendMultiUnique(context.classDateTime, session.startsAt || ''),
-            trainer: appendMultiUnique(context.trainer, session.trainer || ''),
-            studio: appendMultiUnique(context.studio, session.studio || ''),
-          })
-        }
-        onClear={() =>
-          onChange({
-            ...context,
-            sessionId: undefined,
-            classType: undefined,
-            classDateTime: undefined,
-          })
-        }
-        accent={accent}
-      />
-      <Picker
-        icon={<MapPin className="w-3 h-3" />}
-        label="Studio"
-        value={context.studio}
-        options={STUDIOS}
-        onSelect={(v) => onChange({ ...context, studio: v })}
-        onClear={() => onChange({ ...context, studio: undefined })}
-        accent={accent}
-      />
-      <Picker
-        icon={<User className="w-3 h-3" />}
-        label="Trainer"
-        value={context.trainer}
-        options={TRAINERS}
-        onSelect={(v) => onChange({ ...context, trainer: v })}
-        onClear={() => onChange({ ...context, trainer: undefined })}
-        accent={accent}
-      />
-      <Picker
-        icon={<Calendar className="w-3 h-3" />}
-        label="Class"
-        value={context.classType}
-        options={CLASS_TYPES}
-        onSelect={(v) => onChange({ ...context, classType: v })}
-        onClear={() => onChange({ ...context, classType: undefined })}
-        accent={accent}
-      />
-      <Picker
-        icon={<BadgeCheck className="w-3 h-3" />}
-        label="Membership"
-        value={context.membership}
-        options={MEMBERSHIPS}
-        onSelect={(v) => onChange({ ...context, membership: v })}
-        onClear={() => onChange({ ...context, membership: undefined })}
-        accent={accent}
-      />
-      <Picker
-        icon={<Route className="w-3 h-3" />}
-        label="Route"
-        value={context.intakeRoute}
-        options={INTAKE_ROUTES}
-        onSelect={(v) => onChange({ ...context, intakeRoute: v })}
-        onClear={() => onChange({ ...context, intakeRoute: undefined })}
-        accent={accent}
-      />
-      <Picker
-        icon={<Tag className="w-3 h-3" />}
-        label="Category"
-        value={context.category}
-        options={Object.keys(CATEGORIES)}
-        onSelect={(v) => onChange({ ...context, category: v, subCategory: undefined })}
-        onClear={() => onChange({ ...context, category: undefined, subCategory: undefined })}
-        accent={accent}
-      />
-      {context.category && (
+  const controls: Array<{ key: string; active: boolean; node: React.ReactNode }> = [
+    {
+      key: 'documents',
+      active: attachmentCount > 0,
+      node: (
+        <button
+          type="button"
+          className={`inline-flex h-8 min-w-0 max-w-[180px] items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-sm transition duration-200 ${
+            attachmentCount > 0
+              ? activeTone
+              : 'border-slate-200 bg-white/90 text-stone-600'
+          }`}
+          title={attachmentCount > 0 ? `${attachmentCount} attachment(s) queued` : 'No attachments queued'}
+        >
+          <Paperclip className="w-3 h-3" />
+          <span className="truncate min-w-0">
+            {attachmentCount > 0 ? `Documents (${attachmentCount})` : 'Documents'}
+          </span>
+        </button>
+      ),
+    },
+    {
+      key: 'member',
+      active: Boolean(context.memberName || context.memberId),
+      node: (
+        <AsyncPicker
+          icon={<User className="w-3 h-3" />}
+          label="Member"
+          value={multiDisplay(context.memberName)}
+          loadOptions={searchMomenceMembers}
+          onSelect={(member) =>
+            onChange({
+              ...context,
+              memberId: appendMultiUnique(context.memberId, member.id),
+              memberName: appendMultiUnique(context.memberName, member.name),
+              memberContact: appendMultiUnique(context.memberContact, member.email || member.phoneNumber || ''),
+            })
+          }
+          onClear={() =>
+            onChange({
+              ...context,
+              memberId: undefined,
+              memberName: undefined,
+              memberContact: undefined,
+            })
+          }
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'session',
+      active: Boolean(context.sessionId || context.classType),
+      node: (
+        <AsyncPicker
+          icon={<Calendar className="w-3 h-3" />}
+          label="Session"
+          value={multiDisplay(context.classType)}
+          loadOptions={searchMomenceSessions}
+          onSelect={(session) =>
+            onChange({
+              ...context,
+              sessionId: appendMultiUnique(context.sessionId, session.id),
+              classType: appendMultiUnique(context.classType, session.classType),
+              classDateTime: appendMultiUnique(context.classDateTime, session.startsAt || ''),
+              trainer: appendMultiUnique(context.trainer, session.trainer || ''),
+              studio: appendMultiUnique(context.studio, session.studio || ''),
+            })
+          }
+          onClear={() =>
+            onChange({
+              ...context,
+              sessionId: undefined,
+              classType: undefined,
+              classDateTime: undefined,
+            })
+          }
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'studio',
+      active: Boolean(context.studio),
+      node: (
+        <Picker
+          icon={<MapPin className="w-3 h-3" />}
+          label="Studio"
+          value={context.studio}
+          options={STUDIOS}
+          onSelect={(v) => onChange({ ...context, studio: v })}
+          onClear={() => onChange({ ...context, studio: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'trainer',
+      active: Boolean(context.trainer),
+      node: (
+        <Picker
+          icon={<User className="w-3 h-3" />}
+          label="Trainer"
+          value={context.trainer}
+          options={TRAINERS}
+          onSelect={(v) => onChange({ ...context, trainer: v })}
+          onClear={() => onChange({ ...context, trainer: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'membership',
+      active: Boolean(context.membership),
+      node: (
+        <Picker
+          icon={<BadgeCheck className="w-3 h-3" />}
+          label="Membership"
+          value={context.membership}
+          options={MEMBERSHIPS}
+          onSelect={(v) => onChange({ ...context, membership: v })}
+          onClear={() => onChange({ ...context, membership: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'route',
+      active: Boolean(context.intakeRoute),
+      node: (
+        <Picker
+          icon={<Route className="w-3 h-3" />}
+          label="Route"
+          value={context.intakeRoute}
+          options={INTAKE_ROUTES}
+          onSelect={(v) => onChange({ ...context, intakeRoute: v })}
+          onClear={() => onChange({ ...context, intakeRoute: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'category',
+      active: Boolean(context.category),
+      node: (
+        <Picker
+          icon={<Tag className="w-3 h-3" />}
+          label="Category"
+          value={context.category}
+          options={Object.keys(CATEGORIES)}
+          onSelect={(v) => onChange({ ...context, category: v, subCategory: undefined })}
+          onClear={() => onChange({ ...context, category: undefined, subCategory: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    ...(context.category ? [{
+      key: 'subCategory',
+      active: Boolean(context.subCategory),
+      node: (
         <Picker
           icon={<Tag className="w-3 h-3" />}
           label="Sub-category"
@@ -192,24 +233,47 @@ export const ContextPicker: React.FC<Props> = ({ context, onChange, attachmentCo
           onClear={() => onChange({ ...context, subCategory: undefined })}
           accent={accent}
         />
-      )}
-      <Picker
-        icon={<Siren className="w-3 h-3" />}
-        label="Priority"
-        value={context.priority}
-        options={Object.keys(PRIORITY_SLA)}
-        onSelect={(v) => onChange({ ...context, priority: v })}
-        onClear={() => onChange({ ...context, priority: undefined })}
-        accent={accent}
-      />
-      <input
-        value={context.urgencyReason || ''}
-        onChange={(event) => onChange({ ...context, urgencyReason: event.target.value })}
-        placeholder="Urgency reason"
-        className={`h-8 min-w-[200px] rounded-full border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-stone-700 shadow-sm outline-none transition duration-200 placeholder:text-stone-400 focus:ring-4 ${
-          'hover:border-blue-200 focus:border-blue-500 focus:ring-blue-500/15'
-        }`}
-      />
+      ),
+    }] : []),
+    {
+      key: 'priority',
+      active: Boolean(context.priority),
+      node: (
+        <Picker
+          icon={<Siren className="w-3 h-3" />}
+          label="Priority"
+          value={context.priority}
+          options={Object.keys(PRIORITY_SLA)}
+          onSelect={(v) => onChange({ ...context, priority: v })}
+          onClear={() => onChange({ ...context, priority: undefined })}
+          accent={accent}
+        />
+      ),
+    },
+    {
+      key: 'urgency',
+      active: Boolean(context.urgencyReason),
+      node: (
+        <input
+          value={context.urgencyReason || ''}
+          onChange={(event) => onChange({ ...context, urgencyReason: event.target.value })}
+          placeholder="Urgency reason"
+          className={`h-8 min-w-[200px] rounded-full border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-stone-700 shadow-sm outline-none transition duration-200 placeholder:text-stone-400 focus:ring-4 ${
+            'hover:border-blue-200 focus:border-blue-500 focus:ring-blue-500/15'
+          }`}
+        />
+      ),
+    },
+  ];
+  const sortedControls = controls
+    .map((control, index) => ({ ...control, index }))
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.index - b.index);
+
+  return (
+    <div className="flex w-max flex-nowrap items-center gap-2">
+      {sortedControls.map((control) => (
+        <React.Fragment key={control.key}>{control.node}</React.Fragment>
+      ))}
     </div>
   );
 };
@@ -299,7 +363,7 @@ const AsyncPicker = <TOption extends MomenceSearchOption,>({
             placeholder={`Search Momence ${label.toLowerCase()}...`}
             className="text-xs"
           />
-          <CommandList className="max-h-[320px]">
+          <CommandList className="max-h-[352px]">
             <CommandEmpty>
               {loading
                 ? 'Searching Momence...'
@@ -382,7 +446,7 @@ const Picker: React.FC<{
       >
         <Command>
           <CommandInput placeholder={`Search ${label.toLowerCase()}...`} className="text-xs" />
-          <CommandList className="max-h-[320px]">
+          <CommandList className="max-h-[352px]">
             <CommandEmpty>No matches</CommandEmpty>
             {options.map((opt) => (
               <CommandItem

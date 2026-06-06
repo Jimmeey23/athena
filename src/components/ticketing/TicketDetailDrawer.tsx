@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ticket, PRIORITY_SLA, STATUSES, ASSOCIATES, CATEGORIES, STUDIOS, CLASS_TYPES, TRAINERS, getEscalationTarget } from '@/lib/ticketing-data';
+import { Ticket, PRIORITY_SLA, STATUSES, ASSOCIATES, CATEGORIES, STUDIOS, TRAINERS, getEscalationTarget } from '@/lib/ticketing-data';
 import { buildTicketEditPatch } from '@/lib/ticket-editing';
 import { canSelectStatusFromTicket, validateTicketStatusUpdate } from '@/lib/ticket-status-lifecycle';
 import { TicketStatusUpdateInput } from './TicketContext';
@@ -7,6 +7,8 @@ import { useTickets } from './useTickets';
 import { X, Clock, MapPin, User, Calendar, Tag, MessageSquare, Phone, Lock, Pencil, Save, Trash2, Link2, Plus } from 'lucide-react';
 import { MomenceAutomationPanel } from './MomenceAutomationPanel';
 import { backendSupabase } from '@/lib/backend-supabase';
+import { MomenceMemberTicketField, MomenceSessionTicketField } from './MomenceTicketEntityFields';
+import { buildResolutionAssistant } from '@/lib/smart-ops-intelligence';
 
 interface Props {
   ticket: Ticket | null;
@@ -42,15 +44,6 @@ function defaultStatusValues(ticket?: Ticket | null): TicketStatusUpdateInput {
   };
 }
 
-function toDateTimeLocalInputValue(value?: string): string {
-  if (!value) return '';
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return value;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
 function tagsFromInput(value: string): string[] {
   return Array.from(new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean)));
 }
@@ -67,6 +60,7 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
   const [statusValues, setStatusValues] = useState<TicketStatusUpdateInput>(() => defaultStatusValues(ticket));
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
   const ticketAttachments = useMemo(() => ticket ? readTicketAttachments(ticket) : [], [ticket]);
+  const resolutionAssistant = useMemo(() => ticket ? buildResolutionAssistant(ticket) : null, [ticket]);
 
   useEffect(() => {
     setEditingLinkedContext(false);
@@ -440,6 +434,44 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
             </div>
           </form>
 
+          {resolutionAssistant && (
+            <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.06)]">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-blue-700">{resolutionAssistant.title}</div>
+                  <p className="mt-1 text-xs text-slate-500">{resolutionAssistant.priorityReason}</p>
+                </div>
+                <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+                  {resolutionAssistant.slaState}
+                </span>
+              </div>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-900">
+                {resolutionAssistant.suggestedMemberReply}
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Next actions</div>
+                  <ul className="space-y-1.5 text-xs text-slate-700">
+                    {resolutionAssistant.nextActions.map((action) => (
+                      <li key={action} className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">{action}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Closure checklist</div>
+                  <ul className="space-y-1.5 text-xs text-slate-700">
+                    {resolutionAssistant.closureChecklist.map((item) => (
+                      <li key={item} className="flex gap-1.5 rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 block">Assigned To</label>
             <select
@@ -490,11 +522,47 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
                 <EditSelect label="Sub-category" value={currentValues.subCategory || ''} values={subCategories} onChange={(value) => setEditValues((state) => ({ ...state, subCategory: value }))} />
                 <EditSelect label="Studio" value={currentValues.studio || ''} values={STUDIOS} onChange={(value) => setEditValues((state) => ({ ...state, studio: value }))} />
                 <EditSelect label="Priority" value={currentValues.priority || ''} values={['Critical', 'High', 'Medium', 'Low']} onChange={(value) => setEditValues((state) => ({ ...state, priority: value as Ticket['priority'] }))} />
-                <EditText label="Member" value={currentValues.memberName || ''} onChange={(value) => setEditValues((state) => ({ ...state, memberName: value || undefined }))} />
-                <EditText label="Contact" value={currentValues.memberContact || ''} onChange={(value) => setEditValues((state) => ({ ...state, memberContact: value || undefined }))} />
                 <EditSelect label="Instructor" value={currentValues.trainer || ''} values={['', ...TRAINERS]} onChange={(value) => setEditValues((state) => ({ ...state, trainer: value || undefined }))} />
-                <EditSelect label="Session" value={currentValues.classType || ''} values={['', ...CLASS_TYPES]} onChange={(value) => setEditValues((state) => ({ ...state, classType: value || undefined }))} />
-                <EditText label="Session Time" value={toDateTimeLocalInputValue(currentValues.classDateTime)} type="datetime-local" onChange={(value) => setEditValues((state) => ({ ...state, classDateTime: value || undefined }))} />
+                <MomenceSessionTicketField
+                  classType={currentValues.classType}
+                  classDateTime={currentValues.classDateTime}
+                  trainer={currentValues.trainer}
+                  studio={currentValues.studio}
+                  onSelect={(session) => {
+                    setEditValues((state) => ({
+                      ...state,
+                      classType: session.classType || session.label,
+                      classDateTime: session.startsAt || undefined,
+                      trainer: session.trainer || state.trainer,
+                      studio: session.studio || state.studio,
+                    }));
+                  }}
+                  onClear={() => {
+                    setEditValues((state) => ({
+                      ...state,
+                      classType: undefined,
+                      classDateTime: undefined,
+                    }));
+                  }}
+                />
+                <MomenceMemberTicketField
+                  memberName={currentValues.memberName}
+                  memberContact={currentValues.memberContact}
+                  onSelect={(member) => {
+                    setEditValues((state) => ({
+                      ...state,
+                      memberName: member.name || member.label,
+                      memberContact: member.email || member.phoneNumber || member.description || undefined,
+                    }));
+                  }}
+                  onClear={() => {
+                    setEditValues((state) => ({
+                      ...state,
+                      memberName: undefined,
+                      memberContact: undefined,
+                    }));
+                  }}
+                />
                 <EditText label="Reported By" value={currentValues.reportedBy || ''} onChange={(value) => setEditValues((state) => ({ ...state, reportedBy: value || undefined }))} />
                 <EditSelect label="Sentiment" value={currentValues.sentiment || ''} values={['', 'Positive', 'Neutral', 'Negative', 'Angry']} onChange={(value) => setEditValues((state) => ({ ...state, sentiment: value ? value as Ticket['sentiment'] : undefined }))} />
                 <EditText label="Tags" value={(currentValues.tags || []).join(', ')} onChange={(value) => setEditValues((state) => ({ ...state, tags: tagsFromInput(value) }))} />

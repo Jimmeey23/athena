@@ -160,7 +160,7 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
     priority: 'Low',
     prompts: [
       'Instructor assessed:',
-      'Session source and studio session observed:',
+      'Momence session observed:',
       'Template type: PowerCycle / Strength-Fit',
       'PowerCycle or Strength/Fit rubric scores:',
       'Weighted evaluation score out of 100:',
@@ -169,7 +169,6 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
       'Coaching action plan:',
     ],
     fields: [
-      { id: 'sessionMode', label: 'Session source', type: 'select', required: true, options: ['Momence session', 'Custom practice session'], section: 'Session Details' },
       { id: 'classType', label: 'Studio session / practice type', type: 'select', required: true, section: 'Session Details' },
       { id: 'studio', label: 'Studio space', type: 'select', required: true, section: 'Session Details' },
       { id: 'trainer', label: 'Instructor assessed', type: 'select', required: true, section: 'Session Details' },
@@ -207,7 +206,7 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
   {
     id: 'member-class-experience-feedback',
     label: 'Member class experience feedback',
-    description: 'General member voice after a studio session.',
+    description: 'General member feedback after a studio session.',
     intakeRoute: 'Feedback',
     category: 'Class Experience',
     subCategory: 'Class Format Satisfaction',

@@ -90,7 +90,7 @@ const SOURCE_TYPES: Array<{ value: ReportFilters['sourceType']; label: string }>
   { value: 'historic', label: 'Historic only' },
 ];
 
-type ReportFamilyId = 'executive' | 'client_voice' | 'trainer' | 'studio_ops' | 'revenue';
+type ReportFamilyId = 'executive' | 'client_feedback' | 'trainer' | 'studio_ops' | 'revenue';
 
 interface ReportFamily {
   id: ReportFamilyId;
@@ -111,19 +111,19 @@ const REPORT_FAMILIES: ReportFamily[] = [
     icon: TrendingUp,
   },
   {
-    id: 'client_voice',
-    title: 'Client Voice & Retention',
+    id: 'client_feedback',
+    title: 'Client Feedback & Retention',
     description: 'Member sentiment, complaints, recurring drivers, and retention risk.',
-    primaryReportId: 'member_voice_sentiment_report',
-    reportIds: ['member_voice_sentiment_report', 'complaint_retention_risk_report', 'category_driver_analysis', 'recurring_subcategory_analysis'],
+    primaryReportId: 'member_feedback_sentiment_report',
+    reportIds: ['member_feedback_sentiment_report', 'complaint_retention_risk_report', 'category_driver_analysis', 'recurring_subcategory_analysis'],
     icon: MessageSquareText,
   },
   {
     id: 'trainer',
     title: 'Trainer Performance',
-    description: 'Scorecards, consolidated trainer reports, member voice, and coaching priorities.',
+    description: 'Scorecards, consolidated trainer reports, member feedback, and coaching priorities.',
     primaryReportId: 'trainer_performance_consolidated',
-    reportIds: ['trainer_performance_consolidated', 'trainer_scorecard_trend', 'trainer_member_voice_consolidated', 'trainer_coaching_priority_report', 'instructor_class_experience_feedback'],
+    reportIds: ['trainer_performance_consolidated', 'trainer_scorecard_trend', 'trainer_member_feedback_consolidated', 'trainer_coaching_priority_report', 'instructor_class_experience_feedback'],
     icon: GraduationCap,
   },
   {
@@ -1026,15 +1026,6 @@ const PaginationButton: React.FC<{
 );
 
 type ReportBadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
-
-function badgeToneFor(value: string): ReportBadgeTone {
-  const normalized = value.toLowerCase();
-  if (/critical|high|breach|blocked|escalated|overdue/.test(normalized)) return 'danger';
-  if (/medium|risk|progress|waiting|pending/.test(normalized)) return 'warning';
-  if (/low|closed|resolved|track|complete/.test(normalized)) return 'success';
-  if (/new|live/.test(normalized)) return 'info';
-  return 'neutral';
-}
 
 const ReportBadge: React.FC<{ children: React.ReactNode; tone?: ReportBadgeTone; minWidth?: string }> = ({
   children,

@@ -18,7 +18,7 @@ export type ReportId =
   | 'owner_workload_accountability'
   | 'department_routing_load'
   | 'escalation_handoff_report'
-  | 'member_voice_sentiment_report'
+  | 'member_feedback_sentiment_report'
   | 'complaint_retention_risk_report'
   | 'request_membership_service_report'
   | 'hosted_class_partnership_intelligence'
@@ -26,7 +26,7 @@ export type ReportId =
   | 'instructor_class_experience_feedback'
   | 'trainer_performance_consolidated'
   | 'trainer_scorecard_trend'
-  | 'trainer_member_voice_consolidated'
+  | 'trainer_member_feedback_consolidated'
   | 'trainer_coaching_priority_report'
   | 'facility_studio_tools_environment_issues'
   | 'data_quality_intake_completeness';
@@ -322,7 +322,7 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
     match: 'events',
   },
   {
-    id: 'member_voice_sentiment_report',
+    id: 'member_feedback_sentiment_report',
     title: 'Client Sentiment Report',
     group: 'Client Feedback',
     description: 'Sentiment distribution and emotionally charged client feedback.',
@@ -388,7 +388,7 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
     id: 'trainer_performance_consolidated',
     title: 'Trainer Performance Consolidated',
     group: 'Trainer Performance',
-    description: 'Consolidated instructor scorecards, member voice, coaching focus, class context, and source ticket drilldowns.',
+    description: 'Consolidated instructor scorecards, member feedback, coaching focus, class context, and source ticket drilldowns.',
     bestFor: 'Monthly trainer performance reviews and leadership coaching calibration',
     chart: 'trainer',
     match: 'trainer',
@@ -403,11 +403,11 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
     match: 'trainer',
   },
   {
-    id: 'trainer_member_voice_consolidated',
-    title: 'Trainer Member Voice Consolidated',
+    id: 'trainer_member_feedback_consolidated',
+    title: 'Trainer Member Feedback Consolidated',
     group: 'Trainer Performance',
     description: 'Member-reported compliments, concerns, sentiment, class feedback, and recurring trainer touchpoints.',
-    bestFor: 'Connecting member voice to instructor experience and retention signals',
+    bestFor: 'Connecting member feedback to instructor experience and retention signals',
     chart: 'trainer',
     match: 'trainer',
   },
@@ -415,7 +415,7 @@ export const ALL_REPORT_DEFINITIONS: ReportDefinition[] = [
     id: 'trainer_coaching_priority_report',
     title: 'Trainer Coaching Priority Report',
     group: 'Trainer Performance',
-    description: 'Lower-scoring criteria, negative member voice, high-risk trainer feedback, and recommended coaching focus areas.',
+    description: 'Lower-scoring criteria, negative member feedback, high-risk trainer feedback, and recommended coaching focus areas.',
     bestFor: 'Prioritizing instructor coaching follow-up and next observation plans',
     chart: 'trainer',
     match: 'trainer',
@@ -475,8 +475,12 @@ function normalizeFilterValue(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
 }
 
+function ticketTags(ticket: Partial<Pick<Ticket, 'tags'>>): string[] {
+  return Array.isArray(ticket.tags) ? ticket.tags : [];
+}
+
 export function isHistoricTicket(ticket: Ticket): boolean {
-  return ticket.tags.includes('historic') || ticket.studio === 'Historic Import';
+  return ticketTags(ticket).includes('historic') || ticket.studio === 'Historic Import';
 }
 
 export function sourceTypeForTicket(ticket: Ticket): 'Live' | 'Historic' {
@@ -502,7 +506,7 @@ export function filterTicketsForReport(tickets: Ticket[], input: FilterInput): T
     if (filters.owner !== 'All' && ticket.assignedTo !== filters.owner) return false;
     if (filters.sla !== 'All' && getSlaState(ticket) !== filters.sla) return false;
     if (filters.sentiment !== 'All' && (ticket.sentiment || 'Unspecified') !== filters.sentiment) return false;
-    if (tag && !ticket.tags.some((ticketTag) => normalizeFilterValue(ticketTag).includes(tag))) return false;
+    if (tag && !ticketTags(ticket).some((ticketTag) => normalizeFilterValue(ticketTag).includes(tag))) return false;
 
     if (query) {
       const haystack = [
@@ -518,7 +522,7 @@ export function filterTicketsForReport(tickets: Ticket[], input: FilterInput): T
         ticket.memberName,
         ticket.assignedTo,
         ticket.team,
-        ticket.tags.join(' '),
+        ticketTags(ticket).join(' '),
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(query)) return false;
     }
@@ -574,7 +578,7 @@ function textForTicket(ticket: Ticket): string {
     ticket.conversationSummary,
     ticket.category,
     ticket.subCategory,
-    ticket.tags.join(' '),
+    ticketTags(ticket).join(' '),
   ].filter(Boolean).join(' ');
 }
 
@@ -594,7 +598,7 @@ type TrainerReviewSnapshot = {
 const TRAINER_REPORT_IDS = new Set<ReportId>([
   'trainer_performance_consolidated',
   'trainer_scorecard_trend',
-  'trainer_member_voice_consolidated',
+  'trainer_member_feedback_consolidated',
   'trainer_coaching_priority_report',
 ]);
 
@@ -646,21 +650,21 @@ function trainerReviewFromTicket(ticket: Ticket): TrainerReviewSnapshot | null {
 
 function isTrainerEvaluationTicket(ticket: Ticket): boolean {
   return Boolean(trainerReviewFromTicket(ticket)) ||
-    (ticket.category === 'Trainer Feedback' && ticket.tags.includes('trainer-profile')) ||
-    ticket.tags.includes('instructor-evaluation');
+    (ticket.category === 'Trainer Feedback' && ticketTags(ticket).includes('trainer-profile')) ||
+    ticketTags(ticket).includes('instructor-evaluation');
 }
 
-function isTrainerMemberVoiceTicket(ticket: Ticket): boolean {
+function isTrainerMemberFeedbackTicket(ticket: Ticket): boolean {
   const text = textForTicket(ticket).toLowerCase();
   return Boolean(ticket.trainer) ||
     ['Trainer Feedback', 'Class Experience', 'Instructor & Class Quality'].includes(ticket.category) ||
-    /trainer|instructor|cue|correction|music|class flow|pacing|form|energy|member voice|compliment/.test(text);
+    /trainer|instructor|cue|correction|music|class flow|pacing|form|energy|member feedback|compliment/.test(text);
 }
 
 function isTrainerCoachingPriorityTicket(ticket: Ticket): boolean {
   const review = trainerReviewFromTicket(ticket);
   if (review) return review.scorePercent > 0 && review.scorePercent < 80;
-  return isTrainerMemberVoiceTicket(ticket) && (
+  return isTrainerMemberFeedbackTicket(ticket) && (
     ticket.sentiment === 'Negative' ||
     ticket.sentiment === 'Angry' ||
     ticket.priority === 'Critical' ||
@@ -671,9 +675,9 @@ function isTrainerCoachingPriorityTicket(ticket: Ticket): boolean {
 
 function matchesTrainerReport(ticket: Ticket, definition: ReportDefinition): boolean {
   if (definition.id === 'trainer_scorecard_trend') return Boolean(trainerReviewFromTicket(ticket));
-  if (definition.id === 'trainer_member_voice_consolidated') return isTrainerMemberVoiceTicket(ticket) && !isTrainerEvaluationTicket(ticket);
+  if (definition.id === 'trainer_member_feedback_consolidated') return isTrainerMemberFeedbackTicket(ticket) && !isTrainerEvaluationTicket(ticket);
   if (definition.id === 'trainer_coaching_priority_report') return isTrainerCoachingPriorityTicket(ticket);
-  return Boolean(trainerReviewFromTicket(ticket)) || isTrainerMemberVoiceTicket(ticket);
+  return Boolean(trainerReviewFromTicket(ticket)) || isTrainerMemberFeedbackTicket(ticket);
 }
 
 function matchesDefinition(ticket: Ticket, definition: ReportDefinition): boolean {
@@ -767,7 +771,7 @@ function completenessRows(tickets: Ticket[]): ReportRow[] {
     { name: 'Team routed', present: (ticket) => Boolean(ticket.team) },
     { name: 'Sentiment captured', present: (ticket) => Boolean(ticket.sentiment) },
     { name: 'Summary captured', present: (ticket) => Boolean(ticket.conversationSummary || ticket.description) },
-    { name: 'Tags captured', present: (ticket) => ticket.tags.length > 0 },
+    { name: 'Tags captured', present: (ticket) => ticketTags(ticket).length > 0 },
   ];
   return fields.map((field) => {
     const value = tickets.filter(field.present).length;
@@ -837,9 +841,9 @@ function trainerScoreDistributionRows(tickets: Ticket[]): ReportRow[] {
   return rows;
 }
 
-function trainerMemberVoiceRows(tickets: Ticket[]): ReportRow[] {
-  const memberVoiceTickets = tickets.filter((ticket) => isTrainerMemberVoiceTicket(ticket) && !isTrainerEvaluationTicket(ticket));
-  return addPercents(countBy(memberVoiceTickets, trainerNameForTicket, 12), memberVoiceTickets.length);
+function trainerMemberFeedbackRows(tickets: Ticket[]): ReportRow[] {
+  const memberFeedbackTickets = tickets.filter((ticket) => isTrainerMemberFeedbackTicket(ticket) && !isTrainerEvaluationTicket(ticket));
+  return addPercents(countBy(memberFeedbackTickets, trainerNameForTicket, 12), memberFeedbackTickets.length);
 }
 
 function trainerCriterionGapRows(tickets: Ticket[]): ReportRow[] {
@@ -875,7 +879,7 @@ function trainerCoachingPriorityRows(tickets: Ticket[]): ReportRow[] {
     current.danger = current.danger || ticket.priority === 'Critical' || ticket.priority === 'High' || (review?.scorePercent || 100) < 65;
     current.secondary.push(review
       ? `${review.scorePercent}% score${review.focusPoints ? ` · ${review.focusPoints}` : ''}`
-      : `${ticket.sentiment || 'Member voice'} · ${ticket.title}`
+      : `${ticket.sentiment || 'Member feedback'} · ${ticket.title}`
     );
     rows.set(trainer, current);
   }
@@ -908,7 +912,7 @@ function reportSections(definition: ReportDefinition, tickets: Ticket[], events:
 
   if (definition.chart === 'trainer') {
     const scoreTrend = trainerScoreTrendRows(tickets);
-    const memberVoice = trainerMemberVoiceRows(tickets);
+    const memberFeedback = trainerMemberFeedbackRows(tickets);
     const coachingPriorities = trainerCoachingPriorityRows(tickets);
     const criterionGaps = trainerCriterionGapRows(tickets);
     const scoreDistribution = trainerScoreDistributionRows(tickets);
@@ -920,9 +924,9 @@ function reportSections(definition: ReportDefinition, tickets: Ticket[], events:
         { id: 'trainer_criterion_gaps', title: 'Criterion Gaps', kind: 'ranked', rows: criterionGaps.length ? criterionGaps : [{ name: 'No criterion gaps captured', value: 0 }] },
       ];
     }
-    if (definition.id === 'trainer_member_voice_consolidated') {
+    if (definition.id === 'trainer_member_feedback_consolidated') {
       return [
-        { id: 'trainer_member_voice', title: 'Member Voice By Trainer', kind: 'bar', rows: memberVoice.length ? memberVoice : [{ name: 'No trainer member voice tickets captured', value: 0 }] },
+        { id: 'trainer_member_feedback', title: 'Member Feedback By Trainer', kind: 'bar', rows: memberFeedback.length ? memberFeedback : [{ name: 'No trainer member feedback tickets captured', value: 0 }] },
         { id: 'trainer_sentiment_mix', title: 'Trainer Feedback Sentiment', kind: 'donut', rows: sentimentRows },
         { id: 'trainer_feedback_touchpoints', title: 'Trainer Feedback Touchpoints', kind: 'ranked', rows: subCategoryRows },
       ];
@@ -931,12 +935,12 @@ function reportSections(definition: ReportDefinition, tickets: Ticket[], events:
       return [
         { id: 'trainer_coaching_priorities', title: 'Trainer Coaching Priorities', kind: 'ranked', rows: coachingPriorities.length ? coachingPriorities : [{ name: 'No coaching priority signals captured', value: 0 }] },
         { id: 'trainer_criterion_gaps', title: 'Criterion Gaps', kind: 'ranked', rows: criterionGaps.length ? criterionGaps : [{ name: 'No criterion gaps captured', value: 0 }] },
-        { id: 'trainer_member_voice', title: 'Member Voice By Trainer', kind: 'bar', rows: memberVoice.length ? memberVoice : [{ name: 'No trainer member voice tickets captured', value: 0 }] },
+        { id: 'trainer_member_feedback', title: 'Member Feedback By Trainer', kind: 'bar', rows: memberFeedback.length ? memberFeedback : [{ name: 'No trainer member feedback tickets captured', value: 0 }] },
       ];
     }
     return [
       { id: 'trainer_score_trend', title: 'Trainer Score Trend', kind: 'line', rows: scoreTrend.length ? scoreTrend : [{ name: 'No scorecards captured', value: 0 }] },
-      { id: 'trainer_member_voice', title: 'Member Voice By Trainer', kind: 'bar', rows: memberVoice.length ? memberVoice : [{ name: 'No trainer member voice tickets captured', value: 0 }] },
+      { id: 'trainer_member_feedback', title: 'Member Feedback By Trainer', kind: 'bar', rows: memberFeedback.length ? memberFeedback : [{ name: 'No trainer member feedback tickets captured', value: 0 }] },
       { id: 'trainer_coaching_priorities', title: 'Trainer Coaching Priorities', kind: 'ranked', rows: coachingPriorities.length ? coachingPriorities : [{ name: 'No coaching priority signals captured', value: 0 }] },
       { id: 'trainer_criterion_gaps', title: 'Criterion Gaps', kind: 'ranked', rows: criterionGaps.length ? criterionGaps : [{ name: 'No criterion gaps captured', value: 0 }] },
     ];
@@ -1017,18 +1021,18 @@ function resolutionHours(tickets: Ticket[], events: TicketReportEvent[]): number
 
 function buildTrainerMetrics(tickets: Ticket[]): ReportMetric[] {
   const reviews = trainerReviews(tickets);
-  const memberVoice = tickets.filter((ticket) => isTrainerMemberVoiceTicket(ticket) && !isTrainerEvaluationTicket(ticket));
+  const memberFeedback = tickets.filter((ticket) => isTrainerMemberFeedbackTicket(ticket) && !isTrainerEvaluationTicket(ticket));
   const coachingPriorities = tickets.filter(isTrainerCoachingPriorityTicket);
   const trainerNames = new Set([
     ...reviews.map((review) => review.trainer),
-    ...memberVoice.map(trainerNameForTicket),
+    ...memberFeedback.map(trainerNameForTicket),
   ].filter((name) => name && name !== 'Unspecified Instructor'));
   const averageScore = reviews.length
     ? Math.round(reviews.reduce((sum, review) => sum + review.scorePercent, 0) / reviews.length)
     : 0;
   const lowScores = reviews.filter((review) => review.scorePercent > 0 && review.scorePercent < 80).length;
-  const positiveVoice = memberVoice.filter((ticket) => ticket.sentiment === 'Positive').length;
-  const negativeVoice = memberVoice.filter((ticket) => ticket.sentiment === 'Negative' || ticket.sentiment === 'Angry').length;
+  const positiveFeedback = memberFeedback.filter((ticket) => ticket.sentiment === 'Positive').length;
+  const negativeFeedback = memberFeedback.filter((ticket) => ticket.sentiment === 'Negative' || ticket.sentiment === 'Angry').length;
 
   return [
     {
@@ -1037,7 +1041,7 @@ function buildTrainerMetrics(tickets: Ticket[]): ReportMetric[] {
       value: trainerNames.size,
       numericValue: trainerNames.size,
       tone: 'info',
-      description: 'Unique instructors represented in scorecards or member voice.',
+      description: 'Unique instructors represented in scorecards or member feedback.',
     },
     {
       id: 'trainer_review_count',
@@ -1057,26 +1061,26 @@ function buildTrainerMetrics(tickets: Ticket[]): ReportMetric[] {
       description: 'Average weighted score across included trainer scorecards.',
     },
     {
-      id: 'trainer_member_voice_count',
-      label: 'Member Voice',
-      value: memberVoice.length,
-      numericValue: memberVoice.length,
-      tone: memberVoice.length ? 'info' : 'neutral',
+      id: 'trainer_member_feedback_count',
+      label: 'Member Feedback',
+      value: memberFeedback.length,
+      numericValue: memberFeedback.length,
+      tone: memberFeedback.length ? 'info' : 'neutral',
       description: 'Trainer or class feedback tickets that are not structured scorecards.',
     },
     {
-      id: 'trainer_positive_voice',
-      label: 'Positive Voice',
-      value: positiveVoice,
-      numericValue: positiveVoice,
+      id: 'trainer_positive_feedback',
+      label: 'Positive Feedback',
+      value: positiveFeedback,
+      numericValue: positiveFeedback,
       tone: 'success',
     },
     {
-      id: 'trainer_negative_voice',
-      label: 'Negative Voice',
-      value: negativeVoice,
-      numericValue: negativeVoice,
-      tone: negativeVoice ? 'warning' : 'success',
+      id: 'trainer_negative_feedback',
+      label: 'Negative Feedback',
+      value: negativeFeedback,
+      numericValue: negativeFeedback,
+      tone: negativeFeedback ? 'warning' : 'success',
     },
     {
       id: 'trainer_low_scorecards',
@@ -1162,9 +1166,9 @@ function qualityNotes(tickets: Ticket[], events: TicketReportEvent[], usedFallba
   if (eventCoverage < 50) notes.push(`Ticket event coverage is ${eventCoverage}%; lifecycle metrics use resolution metadata fallback where available.`);
   if (definition?.chart === 'trainer') {
     const reviews = trainerReviews(tickets).length;
-    const voice = tickets.filter((ticket) => isTrainerMemberVoiceTicket(ticket) && !isTrainerEvaluationTicket(ticket)).length;
-    notes.push(`${reviews} trainer evaluation scorecards and ${voice} trainer member-voice tickets are included in this trainer report.`);
-    notes.push('Trainer performance scorecards and member voice are labeled separately so structured evaluation scores are not conflated with operational feedback.');
+    const feedback = tickets.filter((ticket) => isTrainerMemberFeedbackTicket(ticket) && !isTrainerEvaluationTicket(ticket)).length;
+    notes.push(`${reviews} trainer evaluation scorecards and ${feedback} trainer member feedback tickets are included in this trainer report.`);
+    notes.push('Trainer performance scorecards and member feedback are labeled separately so structured evaluation scores are not conflated with operational feedback.');
   }
   if (usedFallback) notes.push('No report-specific tickets matched, so the report shows the full filtered period as a fallback.');
   return notes;

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { CATEGORIES, PRIORITY_SLA, STUDIOS, Ticket } from '@/lib/ticketing-data';
-import { Sparkles, Check, Pencil, MapPin, User, Calendar, Tag, Clock, ShieldCheck, AlertTriangle, Brain, Route, Layers3, Loader2 } from 'lucide-react';
+import { Sparkles, Check, Pencil, MapPin, User, Calendar, Tag, Clock, ShieldCheck, AlertTriangle, Brain, Route, Layers3, Loader2, MessageSquareText } from 'lucide-react';
 import { SlaCountdown } from './SlaCountdown';
 import { TicketReviewInsights } from '@/lib/ticket-review';
+import { MomenceMemberTicketField, MomenceSessionTicketField } from './MomenceTicketEntityFields';
+import { buildSmartTicketIntelligence, DuplicatePatternInsights, SmartTicketIntelligence } from '@/lib/smart-ops-intelligence';
 
 interface DraftTicket {
   title: string;
@@ -35,11 +37,12 @@ interface Props {
   confirmedTicket?: Pick<Ticket, 'slaDueAt' | 'status'>;
   publishing?: boolean;
   reviewInsights?: TicketReviewInsights;
+  duplicatePatternInsights?: DuplicatePatternInsights;
   momenceLoading?: boolean;
   momenceError?: string | null;
 }
 
-export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing = false, reviewInsights, momenceLoading = false, momenceError }) => {
+export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing = false, reviewInsights, duplicatePatternInsights, momenceLoading = false, momenceError }) => {
   const priorityMeta = PRIORITY_SLA[draft.priority];
   const slaHours = PRIORITY_SLA[draft.priority]?.hours ?? PRIORITY_SLA.Medium.hours;
   const tags = Array.isArray(draft.tags) ? draft.tags : [];
@@ -130,10 +133,46 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
               onChange={(value) => updateEditedDraft('studio', value)}
             />
             <EditInput label="Instructor" value={editedDraft.trainer || ''} onChange={(value) => updateEditedDraft('trainer', value)} />
-            <EditInput label="Class / Session" value={editedDraft.classType || ''} onChange={(value) => updateEditedDraft('classType', value)} />
-            <EditInput label="Session time" type="datetime-local" value={editedDraft.classDateTime || ''} onChange={(value) => updateEditedDraft('classDateTime', value)} />
-            <EditInput label="Member" value={editedDraft.memberName || ''} onChange={(value) => updateEditedDraft('memberName', value)} />
-            <EditInput label="Member contact" value={editedDraft.memberContact || ''} onChange={(value) => updateEditedDraft('memberContact', value)} />
+            <MomenceSessionTicketField
+              classType={editedDraft.classType}
+              classDateTime={editedDraft.classDateTime}
+              trainer={editedDraft.trainer}
+              studio={editedDraft.studio}
+              onSelect={(session) => {
+                setEditedDraft((current) => ({
+                  ...current,
+                  classType: session.classType || session.label,
+                  classDateTime: session.startsAt || null,
+                  trainer: session.trainer || current.trainer,
+                  studio: session.studio || current.studio,
+                }));
+              }}
+              onClear={() => {
+                setEditedDraft((current) => ({
+                  ...current,
+                  classType: null,
+                  classDateTime: null,
+                }));
+              }}
+            />
+            <MomenceMemberTicketField
+              memberName={editedDraft.memberName}
+              memberContact={editedDraft.memberContact}
+              onSelect={(member) => {
+                setEditedDraft((current) => ({
+                  ...current,
+                  memberName: member.name || member.label,
+                  memberContact: member.email || member.phoneNumber || member.description || null,
+                }));
+              }}
+              onClear={() => {
+                setEditedDraft((current) => ({
+                  ...current,
+                  memberName: null,
+                  memberContact: null,
+                }));
+              }}
+            />
             <EditInput label="Documented by" value={editedDraft.reportedBy || ''} onChange={(value) => updateEditedDraft('reportedBy', value)} />
             <EditInput label="Owner" value={editedDraft.assignedTo || ''} onChange={(value) => updateEditedDraft('assignedTo', value)} />
             <EditInput label="Department" value={editedDraft.department || ''} onChange={(value) => updateEditedDraft('department', value)} />
@@ -168,7 +207,7 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
       )}
 
       {!confirmed && reviewInsights && !editing && (
-        <TicketReviewPanel insights={reviewInsights} momenceLoading={momenceLoading} momenceError={momenceError} />
+        <TicketReviewPanel insights={reviewInsights} duplicatePatternInsights={duplicatePatternInsights} momenceLoading={momenceLoading} momenceError={momenceError} draft={draft} />
       )}
 
       {confirmed ? (
@@ -310,13 +349,20 @@ const Row: React.FC<{ icon: React.ReactNode; label: string; value: string }> = (
 
 const TicketReviewPanel: React.FC<{
   insights: TicketReviewInsights;
+  duplicatePatternInsights?: DuplicatePatternInsights;
   momenceLoading: boolean;
   momenceError?: string | null;
-}> = ({ insights, momenceLoading, momenceError }) => (
-  <div className="mb-3 space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+  draft: DraftTicket;
+}> = ({ insights, duplicatePatternInsights, momenceLoading, momenceError, draft }) => {
+  const smart = buildSmartTicketIntelligence({ draft: draft as BuildableDraftTicket });
+  const averageConfidence = Math.round(
+    insights.confidence.reduce((sum, item) => sum + item.score, 0) / Math.max(1, insights.confidence.length)
+  );
+  return (
+  <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
     {insights.duplicateWarning && (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-        <div className="mb-1 flex items-center gap-2 font-semibold">
+      <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+        <div className="mb-1 flex items-center gap-2 font-bold">
           <AlertTriangle className="h-4 w-4" />
           Exact duplicate: {insights.duplicateWarning.ticketId}
         </div>
@@ -326,91 +372,217 @@ const TicketReviewPanel: React.FC<{
       </div>
     )}
 
-    <div className="grid gap-2 sm:grid-cols-5">
-      {insights.confidence.map((item) => (
-        <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-2">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{item.label}</span>
-            <span className={`font-mono text-[11px] font-bold ${confidenceTone(item.score)}`}>{item.score}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-            <div className={`h-full rounded-full ${confidenceBar(item.score)}`} style={{ width: `${item.score}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-
-    <div className="grid gap-2 lg:grid-cols-2">
-      <ReviewBlock icon={<Route className="h-3.5 w-3.5" />} title="Why Athena routed this">
-        {insights.routingRationale.map((line) => (
-          <div key={line} className="rounded-lg bg-white px-2 py-1.5 text-[11px] leading-relaxed text-slate-600">
-            {line}
-          </div>
-        ))}
-      </ReviewBlock>
-      <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title="Momence context">
-        {momenceLoading && (
-          <div className="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 text-[11px] font-medium text-slate-500">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Loading live Momence context...
-          </div>
-        )}
-        {momenceError && (
-          <div className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
-            {momenceError}
-          </div>
-        )}
-        {insights.momenceChips.length ? (
-          <div className="flex flex-wrap gap-1">
-            {insights.momenceChips.map((chip) => (
-              <span key={chip} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
-                {chip}
-              </span>
-            ))}
-          </div>
-        ) : !momenceLoading && (
-          <div className="rounded-lg bg-white px-2 py-1.5 text-[11px] text-slate-500">
-            No live Momence member/session context selected yet.
-          </div>
-        )}
-      </ReviewBlock>
-    </div>
-
-    {insights.riskSignals.length > 0 && (
-      <ReviewBlock icon={<AlertTriangle className="h-3.5 w-3.5" />} title="Smart risk flags">
-        {insights.riskSignals.map((line) => (
-          <div key={line} className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800">
-            {line}
-          </div>
-        ))}
-      </ReviewBlock>
+    {duplicatePatternInsights && (
+      <PatternNotice insights={duplicatePatternInsights} />
     )}
 
-    <ReviewBlock icon={<Layers3 className="h-3.5 w-3.5" />} title="Review before publish">
-      <div className="grid gap-2 md:grid-cols-2">
-        {insights.sections.map((section) => (
-          <div key={section.title} className="rounded-xl border border-slate-200 bg-white p-2">
-            <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</div>
-            <div className="space-y-1">
-              {section.items.slice(0, 4).map((item) => (
-                <div key={item} className="truncate text-[11px] text-slate-700" title={item}>{item}</div>
-              ))}
-            </div>
-          </div>
-        ))}
+    <div className="border-b border-slate-100 bg-slate-50/65 px-4 py-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Decision Summary</div>
+          <div className="mt-0.5 text-sm font-semibold text-slate-950">Routing, risk and readiness before publishing.</div>
+        </div>
+        <span className={`rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold ${confidenceTone(averageConfidence)}`}>
+          {averageConfidence}% confidence
+        </span>
       </div>
-    </ReviewBlock>
+      <SmartOpsReviewStrip intelligence={smart} momenceLoading={momenceLoading} momenceReady={insights.momenceChips.length > 0} confidenceScore={averageConfidence} />
+    </div>
+
+    <div className="grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.6fr)] p-4">
+      <div className="grid gap-3">
+        <ReviewBlock icon={<Route className="h-3.5 w-3.5" />} title="Routing evidence" compact>
+          <StructuredLineList lines={insights.routingRationale} />
+        </ReviewBlock>
+        <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title="Momence context" compact>
+          <MomenceReviewState loading={momenceLoading} error={momenceError} chips={insights.momenceChips} />
+        </ReviewBlock>
+        {insights.riskSignals.length > 0 && (
+          <ReviewBlock icon={<AlertTriangle className="h-3.5 w-3.5" />} title="Risk flags" compact>
+            <StructuredLineList lines={insights.riskSignals} tone="amber" />
+          </ReviewBlock>
+        )}
+        <ReviewBeforePublish sections={insights.sections} />
+      </div>
+      <SmartOpsReviewBlock intelligence={smart} />
+    </div>
+  </div>
+  );
+};
+
+type BuildableDraftTicket = Parameters<typeof buildSmartTicketIntelligence>[0]['draft'];
+
+const SmartOpsReviewStrip: React.FC<{ intelligence: SmartTicketIntelligence; momenceLoading: boolean; momenceReady: boolean; confidenceScore: number }> = ({ intelligence, momenceLoading, momenceReady, confidenceScore }) => (
+  <div className="grid gap-2 sm:grid-cols-4">
+    <DecisionMetric
+      label="Risk"
+      value={`${intelligence.riskScore}`}
+      detail={intelligence.riskLevel}
+      tone={intelligence.riskScore >= 72 ? 'amber' : 'blue'}
+      score={intelligence.riskScore}
+    />
+    <DecisionMetric
+      label="Confidence"
+      value={`${confidenceScore}%`}
+      detail="Draft readiness"
+      tone={confidenceScore >= 70 ? 'green' : 'amber'}
+      score={confidenceScore}
+    />
+    <DecisionMetric label="Playbook" value={intelligence.playbook.title} detail={intelligence.playbook.owner} tone="slate" />
+    <DecisionMetric label="Momence" value={momenceReady ? 'Context attached' : momenceLoading ? 'Loading context' : 'Not selected'} detail={momenceReady ? 'Ready' : 'Needs check'} tone={momenceReady ? 'green' : 'amber'} score={momenceReady ? 100 : momenceLoading ? 55 : 25} />
   </div>
 );
 
-const ReviewBlock: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
-  <div className="rounded-xl border border-slate-200 bg-white/70 p-2">
+const DecisionMetric: React.FC<{ label: string; value: string; detail: string; tone: 'blue' | 'green' | 'amber' | 'slate'; score?: number }> = ({ label, value, detail, tone, score }) => {
+  const tones = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-900',
+    green: 'border-emerald-100 bg-emerald-50 text-emerald-900',
+    amber: 'border-amber-100 bg-amber-50 text-amber-900',
+    slate: 'border-slate-200 bg-white text-slate-900',
+  };
+  return (
+    <div className={`min-w-0 rounded-xl border px-3 py-2 ${tones[tone]}`}>
+      <div className="text-[9px] font-bold uppercase tracking-[0.14em] opacity-65">{label}</div>
+      <div className="mt-1 truncate text-xs font-semibold" title={value}>{value}</div>
+      <div className="mt-0.5 truncate text-[10px] opacity-70">{detail}</div>
+      {typeof score === 'number' && (
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
+          <div className={`h-full rounded-full ${confidenceBar(score)}`} style={{ width: `${Math.max(6, Math.min(100, score))}%` }} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence }> = ({ intelligence }) => (
+  <div className="space-y-3">
+      <div className="rounded-xl border border-slate-200 bg-slate-950 p-3 text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)]">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300">Smart risk</div>
+            <div className="mt-1 text-2xl font-bold leading-none">{intelligence.riskScore}</div>
+          </div>
+          <div className="h-16 w-16 rounded-full border-[8px] border-blue-400/80 bg-white/10 p-2 text-center text-[10px] font-bold uppercase leading-[34px] text-white">
+            {intelligence.riskLevel}
+          </div>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-white/15">
+          <div className={`h-full rounded-full ${confidenceBar(intelligence.riskScore)}`} style={{ width: `${intelligence.riskScore}%` }} />
+        </div>
+        <div className="mt-2 text-[11px] leading-relaxed text-slate-300">{intelligence.urgencyExplanation}</div>
+      </div>
+      <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title={intelligence.playbook.title} compact>
+        <StructuredLineList lines={intelligence.playbook.steps} />
+      </ReviewBlock>
+      <ReviewBlock icon={<Sparkles className="h-3.5 w-3.5" />} title="Quick actions" compact>
+        <div className="flex flex-wrap gap-1.5">
+          {intelligence.quickActions.map((action) => (
+            <span key={action.label} title={action.prompt} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-700">
+              {action.label}
+            </span>
+          ))}
+        </div>
+        <div className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[11px] leading-relaxed text-emerald-800">
+          {intelligence.playbook.suggestedReply}
+        </div>
+      </ReviewBlock>
+      <ReviewBlock icon={<MessageSquareText className="h-3.5 w-3.5" />} title="Next best questions" compact>
+        <StructuredLineList lines={intelligence.nextBestQuestions} />
+      </ReviewBlock>
+  </div>
+);
+
+const ReviewBlock: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; compact?: boolean }> = ({ icon, title, children, compact = false }) => (
+  <div className={`rounded-xl border border-slate-200 bg-white ${compact ? 'p-2.5' : 'p-3'}`}>
     <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
       {icon}
       {title}
     </div>
     <div className="space-y-1.5">{children}</div>
   </div>
+);
+
+const PatternNotice: React.FC<{ insights: DuplicatePatternInsights }> = ({ insights }) => (
+  <div className="border-b border-blue-100 bg-blue-50/75 px-4 py-3 text-xs text-blue-950">
+    <div className="mb-2 flex items-center gap-2 font-bold">
+      <Layers3 className="h-4 w-4" />
+      Smart duplicate and pattern check
+    </div>
+    <div className="grid gap-2 md:grid-cols-[1fr_1fr_1.2fr]">
+      <MiniInsight label="Issue pattern" value={insights.patternSummary} />
+      <MiniInsight label="Member pattern" value={insights.memberRepeatSummary} />
+      <MiniInsight label="Recommended action" value={insights.recommendedAction} strong />
+    </div>
+  </div>
+);
+
+const MiniInsight: React.FC<{ label: string; value: string; strong?: boolean }> = ({ label, value, strong = false }) => (
+  <div className={`rounded-lg border px-2.5 py-2 ${strong ? 'border-blue-200 bg-white text-blue-950' : 'border-white/70 bg-white/75 text-slate-700'}`}>
+    <div className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+    <div className="text-[11px] font-medium leading-snug">{value}</div>
+  </div>
+);
+
+const StructuredLineList: React.FC<{ lines: string[]; tone?: 'slate' | 'amber' }> = ({ lines, tone = 'slate' }) => (
+  <div className="space-y-1.5">
+    {lines.map((line) => (
+      <div key={line} className={`flex gap-2 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed ${tone === 'amber' ? 'border border-amber-100 bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>
+        <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${tone === 'amber' ? 'bg-amber-500' : 'bg-blue-500'}`} />
+        <span>{line}</span>
+      </div>
+    ))}
+  </div>
+);
+
+const MomenceReviewState: React.FC<{ loading: boolean; error?: string | null; chips: string[] }> = ({ loading, error, chips }) => (
+  <>
+    {loading && (
+      <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] font-medium text-slate-500">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading live Momence context...
+      </div>
+    )}
+    {error && (
+      <div className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+        {error}
+      </div>
+    )}
+    {chips.length ? (
+      <div className="flex flex-wrap gap-1">
+        {chips.map((chip) => (
+          <span key={chip} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+            {chip}
+          </span>
+        ))}
+      </div>
+    ) : !loading && (
+      <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+        No live Momence member/session context selected yet.
+      </div>
+    )}
+  </>
+);
+
+const ReviewBeforePublish: React.FC<{ sections: TicketReviewInsights['sections'] }> = ({ sections }) => (
+  <ReviewBlock icon={<Layers3 className="h-3.5 w-3.5" />} title="Review before publish" compact>
+    <div className="grid gap-2 md:grid-cols-2">
+      {sections.map((section) => (
+        <div key={section.title} className="rounded-xl border border-slate-200 bg-white p-2 shadow-[0_8px_18px_rgba(15,23,42,0.03)]">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</div>
+            <div className="h-1 w-10 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full w-3/4 rounded-full bg-blue-500" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            {section.items.slice(0, 4).map((item) => (
+              <div key={item} className="truncate text-[11px] text-slate-700" title={item}>{item}</div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </ReviewBlock>
 );
 
 function confidenceTone(score: number): string {

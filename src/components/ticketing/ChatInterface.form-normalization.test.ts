@@ -12,7 +12,23 @@ describe('chat detail form normalization', () => {
   });
 
   it('prefers app constants over AI-provided options for known detail fields', () => {
-    expect(source).toContain('const standardOptions = base.options?.length ? base.options : null');
-    expect(source).toContain('options: standardOptions || aiOptions || base.options');
+    expect(source).toContain('const standardOptions = contextualBase.options?.length ? contextualBase.options : null');
+    expect(source).toContain('options: standardOptions || aiOptions || contextualBase.options');
+  });
+
+  it('uses the current category to keep subcategory options scoped', () => {
+    expect(source).toContain('function detailFieldWithContext');
+    expect(source).toContain("if (base.id === 'subCategory')");
+    expect(source).toContain('CATEGORIES[category]');
+    expect(source).toContain('normalizeDetailForm(data?.detailForm, responseContext)');
+  });
+
+  it('loads Momence session dropdown pages progressively without static class fallbacks', () => {
+    expect(source).toContain('loadMomenceSessionsProgressively');
+    expect(source).toContain('setOptions((current) => mergeMomenceSessionOptions(current, sessions))');
+    expect(source).not.toContain('function localSessionOptionsForClassTypes');
+    expect(source).not.toContain("description: 'Class option'");
+    expect(source).toContain('loading={loading && dropdownOptions.length === 0}');
+    expect(source).not.toContain('disabled={dropdownOptions.length === 0}');
   });
 });

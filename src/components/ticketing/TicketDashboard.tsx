@@ -6,7 +6,6 @@ import { SlaCountdown } from './SlaCountdown';
 import {
   ASSOCIATES,
   CATEGORIES,
-  CLASS_TYPES,
   getEscalationTarget,
   getSlaState,
   getTicketGroupValue,
@@ -51,6 +50,8 @@ import {
   YAxis,
 } from 'recharts';
 import { isTrainerEvaluationProfileOnly } from '@/lib/trainer-profiles';
+import { MomenceMemberTicketField, MomenceSessionTicketField } from './MomenceTicketEntityFields';
+import { buildNaturalLanguageAnalyticsAnswer, buildSmartOpsBriefing } from '@/lib/smart-ops-intelligence';
 
 type DashboardView = 'list' | 'table' | 'kanban' | 'grouped' | 'sla' | 'analytics';
 type GroupBy = 'none' | 'status' | 'priority' | 'studio' | 'category' | 'assignee' | 'sla' | 'member';
@@ -312,7 +313,8 @@ function filterTickets(tickets: Ticket[], filters: Filters): Ticket[] {
     if (filters.assignee !== 'All' && ticket.assignedTo !== filters.assignee) return false;
     if (filters.sentiment !== 'All' && ticket.sentiment !== filters.sentiment) return false;
     if (filters.sla !== 'All' && getSlaState(ticket) !== filters.sla) return false;
-    if (tag && !ticket.tags.some((value) => value.toLowerCase().includes(tag))) return false;
+    const tags = Array.isArray(ticket.tags) ? ticket.tags : [];
+    if (tag && !tags.some((value) => value.toLowerCase().includes(tag))) return false;
 
     const created = new Date(ticket.createdAt).getTime();
     if (fromTime && created < fromTime) return false;
@@ -333,7 +335,7 @@ function filterTickets(tickets: Ticket[], filters: Filters): Ticket[] {
         ticket.memberContact,
         ticket.assignedTo,
         ticket.team,
-        ticket.tags.join(' '),
+        tags.join(' '),
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(query)) return false;
     }
@@ -441,9 +443,47 @@ const ManualTicketModal: React.FC<{
           <SelectField label="Priority" value={values.priority} values={['Critical', 'High', 'Medium', 'Low']} onChange={(value) => setValue('priority', value as Ticket['priority'])} />
           <SelectField label="Studio" value={values.studio} values={STUDIOS} onChange={(value) => setValue('studio', value)} />
           <SelectField label="Assigned to" value={values.assignedTo || ''} values={ASSOCIATES.map((associate) => associate.name)} onChange={(value) => setValue('assignedTo', value)} />
-          <SelectField label="Class type" value={values.classType || ''} values={['', ...CLASS_TYPES]} onChange={(value) => setValue('classType', value || null)} />
-          <TextField label="Member name" value={values.memberName || ''} onChange={(value) => setValue('memberName', value || null)} />
-          <TextField label="Member contact" value={values.memberContact || ''} onChange={(value) => setValue('memberContact', value || null)} />
+          <MomenceSessionTicketField
+            classType={values.classType}
+            classDateTime={values.classDateTime}
+            trainer={values.trainer}
+            studio={values.studio}
+            onSelect={(session) => {
+              setValues((current) => ({
+                ...current,
+                classType: session.classType || session.label,
+                classDateTime: session.startsAt || null,
+                trainer: session.trainer || current.trainer || null,
+                studio: session.studio || current.studio,
+              }));
+            }}
+            onClear={() => {
+              setValues((current) => ({
+                ...current,
+                classType: null,
+                classDateTime: null,
+                trainer: null,
+              }));
+            }}
+          />
+          <MomenceMemberTicketField
+            memberName={values.memberName}
+            memberContact={values.memberContact}
+            onSelect={(member) => {
+              setValues((current) => ({
+                ...current,
+                memberName: member.name || member.label,
+                memberContact: member.email || member.phoneNumber || member.description || null,
+              }));
+            }}
+            onClear={() => {
+              setValues((current) => ({
+                ...current,
+                memberName: null,
+                memberContact: null,
+              }));
+            }}
+          />
         </div>
 
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
@@ -458,13 +498,6 @@ const ManualTicketModal: React.FC<{
     </>
   );
 };
-
-const TextField: React.FC<{ label: string; value: string; onChange: (value: string) => void }> = ({ label, value, onChange }) => (
-  <label className="grid gap-1.5 text-xs font-semibold text-stone-600">
-    {label}
-    <input value={value} onChange={(event) => onChange(event.target.value)} className="h-10 rounded-xl border border-slate-200 px-3 text-sm text-stone-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
-  </label>
-);
 
 const SelectField: React.FC<{ label: string; value: string; values: string[] | readonly string[]; onChange: (value: string) => void }> = ({ label, value, values, onChange }) => (
   <label className="grid gap-1.5 text-xs font-semibold text-stone-600">
@@ -533,6 +566,8 @@ function buildAnalytics(tickets: Ticket[]) {
         .filter((ticket) => !isRecordOnlyTicket(ticket) && (getSlaState(ticket) === 'Breached' || ticket.priority === 'Critical' || ticket.priority === 'High'))
         .slice(0, 8),
     },
+    smartBriefing: buildSmartOpsBriefing(tickets),
+    tickets,
   };
 }
 
@@ -835,8 +870,68 @@ const SlaView: React.FC<{ tickets: Ticket[]; onOpen: (ticket: Ticket) => void }>
   );
 };
 
-const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> = ({ analytics }) => (
+const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> = ({ analytics }) => {
+  const [question, setQuestion] = useState('');
+  const answer = useMemo(
+    () => question.trim() ? buildNaturalLanguageAnalyticsAnswer(question, analytics.tickets) : null,
+    [analytics.tickets, question]
+  );
+
+  return (
   <div className="grid gap-4 xl:grid-cols-2">
+    <section className="grid gap-3 xl:col-span-2 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-700">Today's Ops Briefing</div>
+            <div className="mt-1 text-sm font-semibold text-blue-950">Smart next actions from visible tickets</div>
+          </div>
+          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-blue-700">
+            {analytics.smartBriefing.topRisks.length} risks
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {analytics.smartBriefing.nextActions.length ? analytics.smartBriefing.nextActions.map((action) => (
+            <div key={action} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs leading-relaxed text-blue-900">{action}</div>
+          )) : (
+            <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs text-blue-900">No urgent smart actions in the current filtered view.</div>
+          )}
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <SmartBriefingList title="Repeated Patterns" items={analytics.smartBriefing.repeatedPatterns} />
+          <SmartBriefingList title="Studio Hotspots" items={analytics.smartBriefing.studioHotspots} />
+          <SmartBriefingList title="Owner Warnings" items={analytics.smartBriefing.ownerWarnings} />
+        </div>
+      </div>
+      <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Ask Analytics</div>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask about studios, complaints, risk..."
+            className="h-10 min-w-0 flex-1 rounded-xl border border-stone-200 px-3 text-sm text-stone-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+          />
+        </div>
+        {answer ? (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="text-xs font-semibold text-slate-950">{answer.title}</div>
+            <div className="mt-2 space-y-1">
+              {answer.lines.map((line) => (
+                <div key={line} className="text-[11px] leading-relaxed text-slate-600">{line}</div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] font-medium text-slate-400">
+              Sources: {answer.sourceTicketIds.slice(0, 5).join(', ') || 'none'}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-500">
+            Try "Bandra top complaints" or "highest risk patterns".
+          </div>
+        )}
+      </div>
+    </section>
     <section className="grid gap-3 xl:col-span-2 md:grid-cols-4">
       <DrilldownCard title="Top Category" items={analytics.drilldowns.topCategories} tone="blue" />
       <DrilldownCard title="Studio Load" items={analytics.drilldowns.studioLoad} tone="blue" />
@@ -933,6 +1028,18 @@ const AnalyticsView: React.FC<{ analytics: ReturnType<typeof buildAnalytics> }> 
         </BarChart>
       </ResponsiveContainer>
     </ChartPanel>
+  </div>
+  );
+};
+
+const SmartBriefingList: React.FC<{ title: string; items: string[] }> = ({ title, items }) => (
+  <div className="rounded-xl border border-blue-100 bg-white p-2.5">
+    <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-blue-700">{title}</div>
+    <div className="space-y-1">
+      {(items.length ? items : ['No notable pattern']).slice(0, 3).map((item) => (
+        <div key={item} className="truncate text-[11px] text-slate-600" title={item}>{item}</div>
+      ))}
+    </div>
   </div>
 );
 

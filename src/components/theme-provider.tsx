@@ -2,13 +2,18 @@
 
 import * as React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
-import { ThemeProviderProps } from "next-themes/dist/types"
 
 type Theme = "dark" | "light" | "system"
 
 type ThemeContextType = {
   theme: Theme
   setTheme: (theme: Theme) => void
+}
+
+type ThemeProviderProps = React.HTMLAttributes<HTMLDivElement> & {
+  children: React.ReactNode
+  defaultTheme?: Theme
+  value?: string
 }
 
 const ThemeContext = createContext<ThemeContextType | null>(null)
