@@ -26,11 +26,17 @@ describe('context intake templates', () => {
     const instructorLate = CONTEXT_TEMPLATES.find((template) => template.id === 'instructor-late-for-class');
 
     expect(instructorLate?.fields?.map((field) => field.id)).toEqual([
-      'sessionContext',
-      'instructorName',
+      'classType',
+      'memberName',
+      'memberContact',
+      'trainer',
       'scheduledStartTime',
       'actualStartTime',
       'delayMinutes',
+      'instructorArrivalTime',
+      'advanceNoticeGiven',
+      'advanceNoticeTime',
+      'latenessReason',
       'memberFeedback',
       'reportedImpact',
       'recoveryAction',
@@ -38,8 +44,57 @@ describe('context intake templates', () => {
       'clientsAffected',
       'followUpNeeded',
     ]);
+    expect(instructorLate?.fields?.find((field) => field.id === 'classType')?.label).toMatch(/Momence/i);
+    expect(instructorLate?.fields?.find((field) => field.id === 'memberName')?.label).toMatch(/Momence/i);
     expect(instructorLate?.fields?.find((field) => field.id === 'delayMinutes')?.type).toBe('number');
+    expect(instructorLate?.fields?.find((field) => field.id === 'advanceNoticeGiven')?.type).toBe('select');
+    expect(instructorLate?.fields?.find((field) => field.id === 'latenessReason')?.type).toBe('textarea');
     expect(instructorLate?.fields?.find((field) => field.id === 'memberFeedback')?.type).toBe('textarea');
+  });
+
+  it('defines the instructor assessment template around Momence session context and expanded method rubrics', () => {
+    const assessment = CONTEXT_TEMPLATES.find((template) => template.id === 'trainer-class-assessment');
+
+    expect(assessment?.fields?.map((field) => field.id).slice(0, 4)).toEqual([
+      'sessionMode',
+      'classType',
+      'studio',
+      'trainer',
+    ]);
+    expect(assessment?.fields?.find((field) => field.id === 'sessionMode')?.options).toEqual([
+      'Momence session',
+      'Custom practice session',
+    ]);
+    expect(assessment?.fields?.find((field) => field.id === 'templateType')?.options).toEqual([
+      'PowerCycle',
+      'Strength/Fit',
+    ]);
+    expect(assessment?.fields?.map((field) => field.id)).toEqual(expect.arrayContaining([
+      'classDateTime',
+      'pcAttendance',
+      'pcMusicality',
+      'pcSafety',
+      'sfPreClassSetup',
+      'sfVerbalCues',
+      'sfVisualDemonstrations',
+      'sfInjuryModifications',
+      'sfLevelModifications',
+      'sfUspMotivationConnection',
+      'sfMusicChoices',
+      'sfSpaceEquipment',
+      'sfTimeManagement',
+      'sfUseOfNames',
+      'sfOverallEnergy',
+      'sfMindfulMoment',
+      'sfPostClassSpiel',
+      'keyStrengths',
+      'areasForImprovement',
+      'coachingActionPlan',
+    ]));
+    expect(assessment?.fields?.filter((field) => field.type === 'rating' && field.dependsOnValue === 'PowerCycle')).toHaveLength(10);
+    expect(assessment?.fields?.filter((field) => field.type === 'rating' && field.dependsOnValue === 'Strength/Fit')).toHaveLength(13);
+    expect(assessment?.fields?.filter((field) => field.type === 'rating' && field.dependsOnValue === 'PowerCycle').reduce((sum, field) => sum + (field.scoreWeight || 0), 0)).toBe(100);
+    expect(assessment?.fields?.filter((field) => field.type === 'rating' && field.dependsOnValue === 'Strength/Fit').reduce((sum, field) => sum + (field.scoreWeight || 0), 0)).toBe(100);
   });
 
   it('builds hosted-class feedback from session, attendee, host, and late-comer inputs', () => {

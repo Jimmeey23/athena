@@ -1,4 +1,4 @@
-export type ContextTemplateFieldType = 'text' | 'textarea' | 'select' | 'datetime-local' | 'number';
+export type ContextTemplateFieldType = 'text' | 'textarea' | 'select' | 'datetime-local' | 'number' | 'rating';
 
 export interface ContextTemplateField {
   id: string;
@@ -7,6 +7,10 @@ export interface ContextTemplateField {
   required?: boolean;
   options?: string[];
   placeholder?: string;
+  section?: string;
+  scoreWeight?: number;
+  dependsOn?: string;
+  dependsOnValue?: string;
 }
 
 export interface ContextTemplate {
@@ -84,9 +88,13 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
     subCategory: 'Trainer Punctuality Issues',
     priority: 'High',
     prompts: [
-      'Studio session and scheduled start time:',
+      'Momence studio session and scheduled start time:',
+      'Momence member who shared the feedback:',
       'Instructor name:',
       'Actual start time / delay duration:',
+      'Trainer arrival time:',
+      'Whether the instructor informed in advance, and at what time:',
+      'Reason provided for lateness:',
       'Member verbatim concern:',
       'Impact member reported on their practice experience:',
       'Recovery action offered:',
@@ -94,11 +102,17 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
       'Other community members affected:',
     ],
     fields: [
-      { id: 'sessionContext', label: 'Studio session', type: 'text', required: true, placeholder: 'Class name, studio, and date/time' },
-      { id: 'instructorName', label: 'Instructor name', type: 'text', required: true },
+      { id: 'classType', label: 'Momence studio session', type: 'select', required: true },
+      { id: 'memberName', label: 'Momence member who shared feedback', type: 'text', required: true },
+      { id: 'memberContact', label: 'Momence member contact', type: 'text' },
+      { id: 'trainer', label: 'Instructor scheduled for session', type: 'select', required: true },
       { id: 'scheduledStartTime', label: 'Scheduled start time', type: 'datetime-local', required: true },
       { id: 'actualStartTime', label: 'Actual start time', type: 'datetime-local', required: true },
       { id: 'delayMinutes', label: 'Delay in minutes', type: 'number', required: true },
+      { id: 'instructorArrivalTime', label: 'Instructor arrival time', type: 'datetime-local', required: true },
+      { id: 'advanceNoticeGiven', label: 'Did instructor inform in advance?', type: 'select', required: true, options: ['Yes - before scheduled start', 'Yes - after scheduled start', 'No advance notice', 'Unable to confirm'] },
+      { id: 'advanceNoticeTime', label: 'Advance notice time', type: 'datetime-local' },
+      { id: 'latenessReason', label: 'Reason provided for lateness', type: 'textarea', required: true },
       { id: 'memberFeedback', label: 'Member verbatim concern', type: 'textarea', required: true },
       { id: 'reportedImpact', label: 'Member-reported impact on practice', type: 'textarea', required: true },
       { id: 'recoveryAction', label: 'Recovery action offered', type: 'textarea', required: true },
@@ -139,30 +153,55 @@ export const CONTEXT_TEMPLATES: ContextTemplate[] = [
   {
     id: 'trainer-class-assessment',
     label: 'Trainer class assessment',
-    description: 'Structured internal assessment for instructor delivery and coaching profile.',
+    description: 'Structured internal assessment for instructor delivery across PowerCycle and Strength/Fit coaching rubrics.',
     intakeRoute: 'Internal Reporting',
     category: 'Trainer Feedback',
     subCategory: 'Knowledge and Competence',
     priority: 'Low',
     prompts: [
       'Instructor assessed:',
-      'Studio session observed:',
-      'Template type: Barre / PowerCycle',
-      'Attendance and retention notes:',
-      'Member voice or class feedback heard:',
-      'Method delivery strengths:',
-      'Coaching focus areas:',
-      'Recommended development action:',
+      'Session source and studio session observed:',
+      'Template type: PowerCycle / Strength-Fit',
+      'PowerCycle or Strength/Fit rubric scores:',
+      'Weighted evaluation score out of 100:',
+      'Key strengths observed:',
+      'Areas for improvement:',
+      'Coaching action plan:',
     ],
     fields: [
-      { id: 'instructorName', label: 'Instructor assessed', type: 'text', required: true },
-      { id: 'sessionContext', label: 'Studio session observed', type: 'text', required: true },
-      { id: 'templateType', label: 'Assessment template', type: 'select', required: true, options: ['Barre', 'PowerCycle'] },
-      { id: 'attendanceNotes', label: 'Attendance and retention notes', type: 'textarea', required: true },
-      { id: 'memberVoice', label: 'Member voice or class feedback heard', type: 'textarea' },
-      { id: 'methodStrengths', label: 'Method delivery strengths', type: 'textarea', required: true },
-      { id: 'coachingFocus', label: 'Coaching focus areas', type: 'textarea', required: true },
-      { id: 'developmentAction', label: 'Recommended development action', type: 'textarea', required: true },
+      { id: 'sessionMode', label: 'Session source', type: 'select', required: true, options: ['Momence session', 'Custom practice session'], section: 'Session Details' },
+      { id: 'classType', label: 'Studio session / practice type', type: 'select', required: true, section: 'Session Details' },
+      { id: 'studio', label: 'Studio space', type: 'select', required: true, section: 'Session Details' },
+      { id: 'trainer', label: 'Instructor assessed', type: 'select', required: true, section: 'Session Details' },
+      { id: 'classDateTime', label: 'Class date and start time', type: 'datetime-local', required: true, section: 'Session Details' },
+      { id: 'templateType', label: 'Assessment template', type: 'select', required: true, options: ['PowerCycle', 'Strength/Fit'], section: 'Evaluation Setup' },
+      { id: 'evaluatorName', label: 'Evaluator name', type: 'text', required: true, section: 'Evaluation Setup' },
+      { id: 'pcAttendance', label: 'Class attendance and bike fill rate', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 12.5, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcRetention', label: 'Client retention and repeat riders', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 12.5, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcConnection', label: 'Client outreach, communication and connection', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 12.5, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcFeedback', label: 'Client feedback', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 12.5, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcMotivation', label: 'Ride motivation / USP integration', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcMusicality', label: 'Musicality and beat matching', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 10, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcEnergy', label: 'Energy, vocals and command', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 10, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcProgramming', label: 'Ride programming and sequencing', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcSafety', label: 'Safety, setup and form corrections', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'pcWorkEthics', label: 'Work ethics, meetings and core values', type: 'rating', required: true, section: 'PowerCycle Scorecard', scoreWeight: 6, dependsOn: 'templateType', dependsOnValue: 'PowerCycle' },
+      { id: 'sfPreClassSetup', label: 'Pre-class setup', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfVerbalCues', label: 'Verbal cues', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfVisualDemonstrations', label: 'Visual demonstrations', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfInjuryModifications', label: 'Injury modifications', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfLevelModifications', label: 'Level-appropriate personal modifications', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfUspMotivationConnection', label: 'USP integration, motivation and connection', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfMusicChoices', label: 'Music choices', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 7, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfSpaceEquipment', label: 'Studio space and equipment organisation', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 7, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfTimeManagement', label: 'Time management and class flow', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 7, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfUseOfNames', label: 'Use of client names', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 7, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfOverallEnergy', label: 'Overall energy', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfMindfulMoment', label: 'Mindful moment', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'sfPostClassSpiel', label: 'Post-class spiel', type: 'rating', required: true, section: 'Strength/Fit Scorecard', scoreWeight: 8, dependsOn: 'templateType', dependsOnValue: 'Strength/Fit' },
+      { id: 'keyStrengths', label: 'Key strengths observed', type: 'textarea', required: true, section: 'Coaching Notes' },
+      { id: 'areasForImprovement', label: 'Areas for improvement', type: 'textarea', required: true, section: 'Coaching Notes' },
+      { id: 'coachingActionPlan', label: 'Coaching action plan', type: 'textarea', required: true, section: 'Coaching Notes' },
     ],
   },
   {
@@ -221,6 +260,9 @@ export function buildContextTemplateText(template: ContextTemplate, values: Reco
   const fields = template.fields?.length
     ? template.fields.map((field) => `${field.label}: ${values[field.id] || ''}`.trimEnd())
     : template.prompts.map((prompt) => `${prompt} ${values[prompt] || ''}`.trimEnd());
+  const scoreLine = template.id === 'trainer-class-assessment' && values.evaluationScore
+    ? [`Weighted evaluation score: ${values.evaluationScore}`]
+    : [];
 
   return [
     `Intake route: ${template.intakeRoute}`,
@@ -228,6 +270,7 @@ export function buildContextTemplateText(template: ContextTemplate, values: Reco
     `Sub-category: ${template.subCategory}`,
     `Priority: ${template.priority}`,
     '',
+    ...scoreLine,
     ...fields,
   ].join('\n');
 }

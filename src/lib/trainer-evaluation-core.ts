@@ -1,6 +1,6 @@
 import { CLASS_TYPES, STUDIOS, TRAINERS } from './ticketing-data.ts';
 
-export type TrainerReviewTemplate = 'Barre' | 'PowerCycle';
+export type TrainerReviewTemplate = 'Barre' | 'PowerCycle' | 'StrengthFit';
 
 export interface TrainerEvaluationScore {
   category: string;
@@ -65,6 +65,21 @@ export const TRAINER_REVIEW_TEMPLATES: Record<TrainerReviewTemplate, Array<{ cat
     { category: 'Ride programming and sequencing', weightage: 8 },
     { category: 'Safety, setup and form corrections', weightage: 8 },
     { category: 'Work ethics, meetings and core values', weightage: 6 },
+  ],
+  StrengthFit: [
+    { category: 'Pre-class setup', weightage: 8 },
+    { category: 'Verbal cues', weightage: 8 },
+    { category: 'Visual demonstrations', weightage: 8 },
+    { category: 'Injury modifications', weightage: 8 },
+    { category: 'Level-appropriate personal modifications', weightage: 8 },
+    { category: 'USP integration, motivation and connection', weightage: 8 },
+    { category: 'Music choices', weightage: 7 },
+    { category: 'Studio space and equipment organisation', weightage: 7 },
+    { category: 'Time management and class flow', weightage: 7 },
+    { category: 'Use of client names', weightage: 7 },
+    { category: 'Overall energy', weightage: 8 },
+    { category: 'Mindful moment', weightage: 8 },
+    { category: 'Post-class spiel', weightage: 8 },
   ],
 };
 
@@ -336,7 +351,9 @@ export function buildTrainerEvaluationText(input: TrainerEvaluationInput): strin
 
 export function parseTrainerEvaluationText(text: string, trainer = 'Unspecified Instructor'): TrainerEvaluationInput {
   const lower = text.toLowerCase();
-  const template: TrainerReviewTemplate = /power\s?cycle|bike|ride|rider/.test(lower) ? 'PowerCycle' : 'Barre';
+  const template: TrainerReviewTemplate = /\bstrength\b|\bstrength\s+lab\b|\bstrength\s*\/\s*fit\b|\bfit\b/.test(lower)
+    ? 'StrengthFit'
+    : /power\s?cycle|bike|ride|rider/.test(lower) ? 'PowerCycle' : 'Barre';
   const avgAttendance = Number(text.match(/average for 2023\s*\n?.*?(\d+(?:\.\d+)?)/i)?.[1] || 0);
   const feedback = [
     text.match(/Client Feedback\s+([\s\S]*?)(?:Internal feedback|Focus points|Goals|$)/i)?.[1],
@@ -380,6 +397,19 @@ const SCORE_LABEL_ALIASES: Record<string, string[]> = {
   rideprogrammingandsequencing: ['ride programming', 'sequencing', 'programming'],
   safetysetupandformcorrections: ['safety', 'setup', 'form corrections', 'equipment'],
   workethicsmeetingsandcorevalues: ['work ethics', 'meetings', 'core values', 'time management'],
+  preclasssetup: ['pre class', 'pre-class', 'room presentation', 'room setup', 'equipment organised', 'vibe'],
+  verbalcues: ['verbal cues', 'cueing', 'coaching cues', 'cues'],
+  visualdemonstrations: ['visual demonstrations', 'demonstrations', 'demos', 'correct form'],
+  injurymodifications: ['injury modifications', 'injuries', 'safe modifications'],
+  levelappropriatepersonalmodifications: ['level modifications', 'level-appropriate', 'personal modifications', 'beginners', 'advanced clients', 'progressions'],
+  uspintegrationmotivationandconnection: ['usp integration', 'motivation', 'connection', 'brand usp', 'client connection'],
+  musicchoices: ['music choices', 'music', 'tempo', 'genre'],
+  studiospaceandequipmentorganisation: ['space', 'equipment', 'studio space', 'equipment organisation', 'equipment placement'],
+  timemanagementandclassflow: ['time management', 'class flow', 'pacing', 'starts and ends on time', 'structural flow'],
+  useofclientnames: ['use of names', 'client names', 'new client names'],
+  overallenergy: ['overall energy', 'energy', 'enthusiasm'],
+  mindfulmoment: ['mindful moment', 'entry', 'exit'],
+  postclassspiel: ['post class', 'post-class', 'spiel', 'farewell', 'new client onboarding'],
 };
 
 function scoreLabelMatch(category: string, label: string): number {
@@ -415,7 +445,10 @@ export function mapFilloutTrainingEvaluation(payload: unknown, now = new Date())
   const trainerRaw = findValue(answers, [/trainer/i, /instructor/i, /coach/i]);
   const trainer = findKnownValue(trainerRaw, TRAINERS) || trainerRaw || 'Unspecified Instructor';
   const templateRaw = findValue(answers, [/template/i, /format/i, /class\s*type/i, /discipline/i]);
-  const template: TrainerReviewTemplate = /power\s?cycle|bike|ride|rider/i.test(`${templateRaw}\n${allText}`) ? 'PowerCycle' : 'Barre';
+  const templateText = `${templateRaw}\n${allText}`;
+  const template: TrainerReviewTemplate = /\bstrength\b|\bstrength\s+lab\b|\bstrength\s*\/\s*fit\b|\bfit\b/i.test(templateText)
+    ? 'StrengthFit'
+    : /power\s?cycle|bike|ride|rider/i.test(templateText) ? 'PowerCycle' : 'Barre';
   const studioRaw = findValue(answers, [/^center$/i, /^studio$/i, /^location$/i, /^branch$/i, /studio/i, /location/i, /branch/i, /center/i]);
   const classRaw = findValue(answers, [/class/i, /session/i, /format/i]);
   const reviewPeriod = findValue(answers, [/review\s*period/i, /period/i, /month/i, /date/i]);

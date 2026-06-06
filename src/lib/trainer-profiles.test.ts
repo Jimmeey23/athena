@@ -37,9 +37,25 @@ describe('trainer profile evaluation engine', () => {
     expect(profiles.every((profile) => profile.reviews.length === 0)).toBe(true);
   });
 
-  it('keeps Barre and PowerCycle templates weighted to 100', () => {
+  it('keeps Barre, PowerCycle, and Strength/Fit templates weighted to 100', () => {
     expect(TRAINER_REVIEW_TEMPLATES.Barre.reduce((sum, item) => sum + item.weightage, 0)).toBe(100);
     expect(TRAINER_REVIEW_TEMPLATES.PowerCycle.reduce((sum, item) => sum + item.weightage, 0)).toBe(100);
+    expect(TRAINER_REVIEW_TEMPLATES.StrengthFit.reduce((sum, item) => sum + item.weightage, 0)).toBe(100);
+    expect(TRAINER_REVIEW_TEMPLATES.StrengthFit.map((item) => item.category)).toEqual(expect.arrayContaining([
+      'Pre-class setup',
+      'Verbal cues',
+      'Visual demonstrations',
+      'Injury modifications',
+      'Level-appropriate personal modifications',
+      'USP integration, motivation and connection',
+      'Music choices',
+      'Studio space and equipment organisation',
+      'Time management and class flow',
+      'Use of client names',
+      'Overall energy',
+      'Mindful moment',
+      'Post-class spiel',
+    ]));
   });
 
   it('extracts structured trainer review content from pasted performance text', () => {
@@ -290,5 +306,29 @@ describe('trainer profile evaluation engine', () => {
     expect(reviewedProfile?.reviews).toHaveLength(1);
     expect(reviewedProfile?.reviews[0].source).toBe('fillout');
     expect(unreviewedProfile?.reviews).toHaveLength(0);
+  });
+
+  it('maps Strength/Fit assessment submissions to the Strength/Fit rubric', () => {
+    const mapped = mapFilloutTrainingEvaluation({
+      formId: 'strength-fit-form',
+      submissionId: 'submission-strength-001',
+      submission: {
+        questions: [
+          { label: 'Trainer', value: 'Pranjali Jain' },
+          { label: 'Class / Session Type', value: 'Studio Strength Lab (Full Body)' },
+          { label: 'Pre-Class Setup', value: '7' },
+          { label: 'Verbal Cues', value: '8' },
+          { label: 'Visual Demonstrations', value: '8' },
+          { label: 'Injury Modifications', value: '7' },
+          { label: 'Post-Class Spiel', value: '6' },
+          { label: 'Key Strengths Observed', value: 'Strong setup and coaching cues.' },
+        ],
+      },
+    }, new Date('2026-05-31T00:00:00.000Z'));
+
+    expect(mapped.input.template).toBe('StrengthFit');
+    expect(mapped.input.classType).toBe('Studio Strength Lab (Full Body)');
+    expect(mapped.input.scores.map((score) => score.category)).toContain('Post-class spiel');
+    expect(mapped.record.scorePercent).toBeGreaterThan(0);
   });
 });

@@ -47,4 +47,38 @@ describe('template form dialog layout', () => {
     expect(source).toContain('Session required');
     expect(source).toContain('Member voice required');
   });
+
+  it('routes generic templates through Momence-aware member and session controls', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('const templateDetailFormFromTemplate');
+    expect(source).toContain('<DetailCaptureForm');
+    expect(source).toContain("title: `${template.label} details`");
+    expect(source).toContain('onSubmit={(values, form) => {');
+  });
+
+  it('selects a Momence session before mapping member choices from session bookings', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+    const sessionIndex = source.indexOf('{showTopSessionPicker && (');
+    const memberIndex = source.indexOf('{hasMemberFields && (');
+
+    expect(sessionIndex).toBeGreaterThan(-1);
+    expect(memberIndex).toBeGreaterThan(-1);
+    expect(sessionIndex).toBeLessThan(memberIndex);
+    expect(source).toContain('getMomenceSessionBookings(sessionId)');
+    expect(source).toContain('const SessionBookingMemberField: React.FC');
+    expect(source).toContain('Select members booked into this Momence session');
+  });
+
+  it('renders instructor assessments with custom session entry, sections, rating controls, and a weighted score', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain("form.id === 'trainer-class-assessment'");
+    expect(source).toContain('const AssessmentSessionDetailsField: React.FC');
+    expect(source).toContain('Custom practice session');
+    expect(source).toContain('Class date and start time *');
+    expect(source).toContain('const RatingControl: React.FC');
+    expect(source).toContain('scoreOutOf100');
+    expect(source).toContain('evaluationScore');
+  });
 });

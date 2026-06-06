@@ -196,7 +196,7 @@ export const TrainerProfilesPanel: React.FC = () => {
               <GraduationCap className="mx-auto h-9 w-9 text-blue-500" />
               <div className="mt-3 text-sm font-semibold text-slate-900">No trainer profiles yet</div>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                Turn on Instructor evaluation in Athena, choose a Barre or PowerCycle template, and create the first evaluation ticket.
+                Turn on Instructor evaluation in Athena, choose a Barre, PowerCycle, or Strength/Fit template, and create the first evaluation ticket.
               </p>
             </div>
           </div>

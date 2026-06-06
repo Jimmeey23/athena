@@ -155,7 +155,7 @@ const SupportShell: React.FC = () => {
             ? 'border-blue-100 bg-blue-50/80'
             : 'border-blue-100 bg-white/90'
         }`}>
-          <div className="mx-auto flex max-w-[1500px] items-center gap-3">
+          <div className="flex w-full items-center gap-3">
             <button
               type="button"
               onClick={goHome}

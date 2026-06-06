@@ -114,7 +114,7 @@ interface SuggestedChip {
   field: string;
 }
 
-type DetailFieldType = 'select' | 'text' | 'textarea' | 'date' | 'datetime-local' | 'number';
+type DetailFieldType = 'select' | 'text' | 'textarea' | 'date' | 'datetime-local' | 'number' | 'rating';
 
 interface DetailFormField {
   id: string;
@@ -123,9 +123,13 @@ interface DetailFormField {
   required?: boolean;
   options?: string[];
   dependsOn?: string;
+  dependsOnValue?: string;
+  section?: string;
+  scoreWeight?: number;
 }
 
 interface DetailForm {
+  id?: string;
   title: string;
   description?: string;
   fields: DetailFormField[];
@@ -2294,13 +2298,14 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                       }}
                     />
                   ) : (
-                    <GenericTemplateForm
-                      template={activeTemplate}
+                    <DetailCaptureForm
+                      form={templateDetailFormFromTemplate(activeTemplate)}
+                      initialContext={context}
                       disabled={loading}
-                      onCancel={() => setActiveTemplate(null)}
-                      onSubmit={(values) => {
+                      onSubmit={(values, form) => {
                         const nextContext: DetailContext = {
                           ...context,
+                          ...values,
                           intakeRoute: activeTemplate.intakeRoute,
                           category: activeTemplate.category,
                           subCategory: activeTemplate.subCategory,
@@ -2717,6 +2722,44 @@ function formatHostedSessionDateTime(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function toDateTimeLocalInputValue(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.replace(/([+-]\d{2}:?\d{2}|Z)$/i, '').slice(0, 16);
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+const templateDetailFormFromTemplate = (template: ContextTemplate): DetailForm => ({
+  id: template.id,
+  title: `${template.label} details`,
+  description: template.description,
+  fields: (template.fields || template.prompts.map((prompt): ContextTemplateField => ({
+    id: prompt,
+    label: prompt.replace(/:\s*$/, ''),
+    type: /feedback|concern|impact|action|notes|comment|resolution/i.test(prompt) ? 'textarea' : 'text',
+    required: true,
+  }))).map((field): DetailFormField => ({
+    id: field.id,
+    label: field.label,
+    type: field.type,
+    required: field.required,
+    options: field.options || templateFieldOptions(field.id),
+    dependsOn: field.dependsOn,
+    dependsOnValue: field.dependsOnValue,
+    section: field.section,
+    scoreWeight: field.scoreWeight,
+  })),
+  submitLabel: 'Generate ticket draft',
+});
+
+function templateFieldOptions(fieldId: string): string[] | undefined {
+  if (fieldId === 'studio') return STUDIOS;
+  if (fieldId === 'trainer') return TRAINERS;
+  if (fieldId === 'classType') return CLASS_TYPES;
+  return undefined;
 }
 
 const GenericTemplateForm: React.FC<{
@@ -3475,7 +3518,9 @@ const InstructorEvaluationChatbox: React.FC<{
   const classOptions = useMemo(() => {
     const matcher = template === 'PowerCycle'
       ? /cycle|power/i
-      : /barre|mat|amped|signature|foundations|sculpt|stretch|recovery/i;
+      : template === 'StrengthFit'
+        ? /strength|lab|fit/i
+        : /barre|mat|amped|signature|foundations|sculpt|stretch|recovery/i;
     const filtered = CLASS_TYPES.filter((item) => matcher.test(item));
     return filtered.length ? filtered : CLASS_TYPES;
   }, [template]);
@@ -3544,8 +3589,8 @@ const InstructorEvaluationChatbox: React.FC<{
         </div>
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-        {(['Barre', 'PowerCycle'] as TrainerReviewTemplate[]).map((item) => (
+      <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+        {(['Barre', 'PowerCycle', 'StrengthFit'] as TrainerReviewTemplate[]).map((item) => (
           <button
             key={item}
             type="button"
@@ -3556,7 +3601,7 @@ const InstructorEvaluationChatbox: React.FC<{
                 : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
             }`}
           >
-            {item}
+            {item === 'StrengthFit' ? 'Strength/Fit' : item}
           </button>
         ))}
       </div>
@@ -3760,8 +3805,9 @@ const fieldHelpText = (field: DetailFormField): string => {
 const DetailCaptureForm: React.FC<{
   form: DetailForm;
   initialContext: DetailContext;
+  disabled?: boolean;
   onSubmit: (values: Record<string, string>, form?: DetailForm) => void;
-}> = ({ form, initialContext, onSubmit }) => {
+}> = ({ form, initialContext, disabled = false, onSubmit }) => {
   const toCsvList = (value?: string) =>
     (value || '')
       .split('|')
@@ -3816,6 +3862,10 @@ const DetailCaptureForm: React.FC<{
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [hostMembershipOptions, setHostMembershipOptions] = useState<string[]>([]);
   const [membershipOptions, setMembershipOptions] = useState<string[]>([]);
+  const [sessionBookings, setSessionBookings] = useState<MomenceSessionBooking[]>([]);
+  const [sessionBookingsLoading, setSessionBookingsLoading] = useState(false);
+  const [sessionBookingsError, setSessionBookingsError] = useState<string | null>(null);
+  const isAssessmentForm = form.id === 'trainer-class-assessment';
   const hasMemberFields = form.fields.some((field) => field.id === 'memberName' || field.id === 'memberContact');
   const hasSessionFields = form.fields.some((field) => field.id === 'classType' || field.id === 'classDateTime' || field.id === 'sessionId');
 
@@ -3857,6 +3907,32 @@ const DetailCaptureForm: React.FC<{
     };
   }, [hostMembershipOptions, values.memberId]);
 
+  useEffect(() => {
+    const sessionId = splitPipeList(values.sessionId)[0];
+    if (!sessionId || !hasMemberFields) {
+      setSessionBookings([]);
+      setSessionBookingsError(null);
+      setSessionBookingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSessionBookingsLoading(true);
+    setSessionBookingsError(null);
+    getMomenceSessionBookings(sessionId)
+      .then((bookings) => {
+        if (!cancelled) setSessionBookings(bookings);
+      })
+      .catch((error) => {
+        if (!cancelled) setSessionBookingsError(error instanceof Error ? error.message : 'Session member list failed to load');
+      })
+      .finally(() => {
+        if (!cancelled) setSessionBookingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMemberFields, values.sessionId]);
+
   const setValue = (id: string, value: string) => {
     setValues((current) => {
       const next = { ...current, [id]: value };
@@ -3865,17 +3941,45 @@ const DetailCaptureForm: React.FC<{
     });
   };
 
-  const canSubmit = form.fields.every((field) => !field.required || values[String(field.id)]?.trim());
-  const requiredFields = form.fields.filter((field) => field.required);
+  const fieldVisible = (field: DetailFormField) => {
+    if (!field.dependsOn) return true;
+    return values[field.dependsOn] === field.dependsOnValue;
+  };
+  const visibleFields = form.fields.filter(fieldVisible);
+  const ratingFields = visibleFields.filter((field) => field.type === 'rating' && field.scoreWeight);
+  const weightedScore = ratingFields.reduce((sum, field) => {
+    const rating = Number(values[field.id]);
+    if (!Number.isFinite(rating)) return sum;
+    return sum + (Math.max(0, Math.min(10, rating)) / 10) * (field.scoreWeight || 0);
+  }, 0);
+  const scoreOutOf100 = Math.round(weightedScore * 10) / 10;
+  const canSubmit = visibleFields.every((field) => !field.required || values[String(field.id)]?.trim());
+  const requiredFields = visibleFields.filter((field) => field.required);
   const completedRequired = requiredFields.filter((field) => values[String(field.id)]?.trim()).length;
   const completionPercent = requiredFields.length ? Math.round((completedRequired / requiredFields.length) * 100) : 100;
+  const showTopSessionPicker = hasSessionFields && !isAssessmentForm;
+  const startsSection = (field: DetailFormField, index: number) => {
+    if (!field.section) return false;
+    const previousVisible = form.fields
+      .slice(0, index)
+      .filter(fieldVisible)
+      .filter((candidate) => !(isAssessmentForm && (candidate.id === 'studio' || candidate.id === 'trainer' || candidate.id === 'classDateTime')))
+      .filter((candidate) => !(showTopSessionPicker && (candidate.id === 'classType' || candidate.id === 'classDateTime' || candidate.id === 'sessionId')))
+      .at(-1);
+    return previousVisible?.section !== field.section;
+  };
 
   return (
     <form
       className="mt-3 w-full overflow-visible rounded-3xl border border-slate-200 bg-white/95 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSubmit) onSubmit(values, form);
+        if (canSubmit && !disabled) {
+          const submissionValues = isAssessmentForm
+            ? { ...values, evaluationScore: `${scoreOutOf100}/100` }
+            : values;
+          onSubmit(submissionValues, form);
+        }
       }}
     >
       <div className="border-b border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/45 px-5 py-4">
@@ -3893,38 +3997,29 @@ const DetailCaptureForm: React.FC<{
             <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold text-slate-600">
               <span className="inline-flex items-center gap-1.5">
                 <Gauge className="h-3.5 w-3.5 text-blue-700" />
-                Required complete
+                {isAssessmentForm ? 'Evaluation score' : 'Required complete'}
               </span>
-              <span className="font-mono tabular-nums text-slate-900">{completedRequired}/{requiredFields.length || 0}</span>
+              <span className="font-mono tabular-nums text-slate-900">
+                {isAssessmentForm ? `${scoreOutOf100}/100` : `${completedRequired}/${requiredFields.length || 0}`}
+              </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-100">
               <div
-                className="h-full rounded-full bg-blue-700 transition-all duration-300"
-                style={{ width: `${completionPercent}%` }}
+                className={`h-full rounded-full transition-all duration-300 ${isAssessmentForm ? 'bg-gradient-to-r from-emerald-500 via-blue-600 to-indigo-600' : 'bg-blue-700'}`}
+                style={{ width: `${isAssessmentForm ? Math.min(100, scoreOutOf100) : completionPercent}%` }}
               />
             </div>
+            {isAssessmentForm && (
+              <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                <span>{completedRequired}/{requiredFields.length || 0} required</span>
+                <span>{values.templateType || 'Select template'}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
       <div className="grid gap-3 p-5 md:grid-cols-2">
-        {hasMemberFields && (
-          <MomenceMemberFormField
-            values={values}
-            onSelect={async (member) => {
-              setValues((current) => ({
-                ...current,
-                memberId: appendCsvUnique(current.memberId, member.id),
-                memberName: appendCsvUnique(current.memberName, member.name),
-                memberContact: appendCsvUnique(current.memberContact, member.email || member.phoneNumber || member.description || ''),
-                membership: current.membership || '',
-              }));
-            }}
-            onRemove={(memberName) => {
-              setValues((current) => removeSelectedMember(current, memberName));
-            }}
-          />
-        )}
-        {hasSessionFields && (
+        {showTopSessionPicker && (
           <MomenceSessionDropdownField
             values={values}
             multi={false}
@@ -3934,16 +4029,69 @@ const DetailCaptureForm: React.FC<{
                 sessionId: sessions.map((session) => session.id).join(' | '),
                 classType: sessions.map((session) => session.classType).join(' | '),
                 classDateTime: sessions.map((session) => session.startsAt || '').filter(Boolean).join(' | '),
+                scheduledStartTime: current.scheduledStartTime || toDateTimeLocalInputValue(sessions[0]?.startsAt),
                 trainer: sessions.map((session) => session.trainer || '').filter(Boolean).join(' | '),
                 studio: sessions.map((session) => session.studio || '').filter(Boolean).join(' | ') || current.studio || '',
               }));
             }}
           />
         )}
+        {hasMemberFields && (
+          sessionBookings.length > 0 || values.sessionId ? (
+            <SessionBookingMemberField
+              values={values}
+              bookings={sessionBookings}
+              loading={sessionBookingsLoading}
+              error={sessionBookingsError}
+              onSelect={(booking) => {
+                const memberName = momenceBookingMemberName(booking);
+                const memberId = booking.member?.id ? String(booking.member.id) : '';
+                const memberContact = momenceBookingContact(booking);
+                setValues((current) => ({
+                  ...current,
+                  memberId: memberId ? appendCsvUnique(current.memberId, memberId) : current.memberId || '',
+                  memberName: appendCsvUnique(current.memberName, memberName),
+                  memberContact: memberContact ? appendCsvUnique(current.memberContact, memberContact) : current.memberContact || '',
+                  membership: current.membership || '',
+                }));
+              }}
+              onRemove={(memberName) => {
+                setValues((current) => removeSelectedMember(current, memberName));
+              }}
+            />
+          ) : (
+            <MomenceMemberFormField
+              values={values}
+              onSelect={async (member) => {
+                setValues((current) => ({
+                  ...current,
+                  memberId: appendCsvUnique(current.memberId, member.id),
+                  memberName: appendCsvUnique(current.memberName, member.name),
+                  memberContact: appendCsvUnique(current.memberContact, member.email || member.phoneNumber || member.description || ''),
+                  membership: current.membership || '',
+                }));
+              }}
+              onRemove={(memberName) => {
+                setValues((current) => removeSelectedMember(current, memberName));
+              }}
+            />
+          )
+        )}
         {form.fields.map((field, fieldIndex) => {
           const id = String(field.id);
+          if (!fieldVisible(field)) return null;
           if (hasMemberFields && (id === 'memberName' || id === 'memberContact')) return null;
-          if (hasSessionFields && (id === 'classType' || id === 'classDateTime' || id === 'sessionId')) return null;
+          if (isAssessmentForm && id === 'classType') {
+            return (
+              <AssessmentSessionDetailsField
+                key={id}
+                values={values}
+                onChange={(nextValues) => setValues((current) => ({ ...current, ...nextValues }))}
+              />
+            );
+          }
+          if (isAssessmentForm && (id === 'studio' || id === 'trainer' || id === 'classDateTime')) return null;
+          if (showTopSessionPicker && (id === 'classType' || id === 'classDateTime' || id === 'sessionId')) return null;
           const helpText = fieldHelpText(field);
           const complete = !field.required || Boolean(values[id]?.trim());
           const category = values.category;
@@ -3961,8 +4109,15 @@ const DetailCaptureForm: React.FC<{
               key={id}
               className={`group relative rounded-2xl border bg-white p-3 shadow-sm transition duration-200 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 ${
                 complete ? 'border-slate-200' : 'border-blue-200'
-              } ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}
+              } ${field.type === 'textarea' || field.type === 'rating' ? 'md:col-span-2' : ''}`}
             >
+              {startsSection(field, fieldIndex) && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-emerald-50 px-3 py-2">
+                  <span className="h-2 w-2 rounded-full bg-blue-700" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-900">{field.section}</span>
+                  {field.scoreWeight ? <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">{field.scoreWeight} pts</span> : null}
+                </div>
+              )}
               <div className="mb-2 flex items-start justify-between gap-3">
                 <label htmlFor={`detail-${id}`} className="flex min-w-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
                   <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] ${
@@ -3982,13 +4137,23 @@ const DetailCaptureForm: React.FC<{
                   </span>
                 </span>
               </div>
-              {field.type === 'select' ? (
+              {field.type === 'rating' ? (
+                <RatingControl
+                  id={`detail-${id}`}
+                  value={values[id] || ''}
+                  weight={field.scoreWeight || 0}
+                  onChange={(nextValue) => setValue(id, nextValue)}
+                />
+              ) : field.type === 'select' ? (
                 (() => {
                   const forceSingle = new Set([
                     'intakeRoute',
                     'category',
                     'subCategory',
                     'priority',
+                    'sessionMode',
+                    'templateType',
+                    'classType',
                     'studio',
                     'trainer',
                     'reportedBy',
@@ -4083,13 +4248,136 @@ const DetailCaptureForm: React.FC<{
         </span>
         <button
           type="submit"
-          disabled={!canSubmit}
+          disabled={!canSubmit || disabled}
           className="rounded-xl bg-blue-700 px-5 py-2.5 text-xs font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {form.submitLabel || 'Continue'}
         </button>
       </div>
     </form>
+  );
+};
+
+const AssessmentSessionDetailsField: React.FC<{
+  values: Record<string, string>;
+  onChange: (values: Record<string, string>) => void;
+}> = ({ values, onChange }) => {
+  const customSession = values.sessionMode === 'Custom practice session';
+
+  return (
+    <div className="md:col-span-2 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-900">Session Details</div>
+          <p className="mt-1 text-xs text-slate-500">
+            {customSession
+              ? 'Capture a practice session manually with studio, instructor, class type, date and start time.'
+              : 'Select the Momence session first so class, studio, instructor and start time map automatically.'}
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-blue-800 ring-1 ring-blue-100">
+          {customSession ? 'Manual entry' : 'Momence mapped'}
+        </span>
+      </div>
+
+      {!customSession ? (
+        <MomenceSessionDropdownField
+          values={values}
+          multi={false}
+          onChange={(sessions) => {
+            onChange({
+              sessionId: sessions.map((session) => session.id).join(' | '),
+              classType: sessions.map((session) => session.classType).join(' | '),
+              classDateTime: sessions.map((session) => session.startsAt || '').filter(Boolean).join(' | '),
+              trainer: sessions.map((session) => session.trainer || '').filter(Boolean).join(' | '),
+              studio: sessions.map((session) => session.studio || '').filter(Boolean).join(' | '),
+            });
+          }}
+        />
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
+            Studio session / practice type *
+            <select
+              value={values.classType || ''}
+              onChange={(event) => onChange({ classType: event.target.value, sessionId: '' })}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            >
+              <option value="">Select class type</option>
+              {CLASS_TYPES.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
+            Studio space *
+            <select
+              value={values.studio || ''}
+              onChange={(event) => onChange({ studio: event.target.value })}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            >
+              <option value="">Select studio</option>
+              {STUDIOS.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
+            Instructor assessed *
+            <select
+              value={values.trainer || ''}
+              onChange={(event) => onChange({ trainer: event.target.value })}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            >
+              <option value="">Select instructor</option>
+              {TRAINERS.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-slate-600">
+            Class date and start time *
+            <input
+              type="datetime-local"
+              value={values.classDateTime || ''}
+              onChange={(event) => onChange({ classDateTime: event.target.value })}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RatingControl: React.FC<{
+  id: string;
+  value: string;
+  weight: number;
+  onChange: (value: string) => void;
+}> = ({ id, value, weight, onChange }) => {
+  const rating = Number(value);
+  const contribution = Number.isFinite(rating) ? Math.round((Math.max(0, Math.min(10, rating)) / 10) * weight * 10) / 10 : 0;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold text-slate-600">
+        <span>Rating scale</span>
+        <span className="rounded-full bg-white px-2 py-0.5 text-slate-800 ring-1 ring-slate-200">
+          {value || '0'}/10 = {contribution}/{weight}
+        </span>
+      </div>
+      <div id={id} className="grid grid-cols-11 gap-1">
+        {Array.from({ length: 11 }, (_, score) => (
+          <button
+            key={score}
+            type="button"
+            onClick={() => onChange(String(score))}
+            className={`h-8 rounded-lg text-xs font-semibold transition ${
+              value === String(score)
+                ? 'bg-blue-700 text-white shadow-sm'
+                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-800'
+            }`}
+          >
+            {score}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -4347,6 +4635,77 @@ const MomenceMemberFormField: React.FC<{
               <div className="mt-0.5 text-[11px] text-stone-500">{option.description}</div>
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SessionBookingMemberField: React.FC<{
+  values: Record<string, string>;
+  bookings: MomenceSessionBooking[];
+  loading?: boolean;
+  error?: string | null;
+  onSelect: (booking: MomenceSessionBooking) => void;
+  onRemove: (memberName: string) => void;
+}> = ({ values, bookings, loading = false, error = null, onSelect, onRemove }) => {
+  const selectedMembers = splitPipeList(values.memberName);
+  const selectedSet = new Set(selectedMembers.map((member) => member.toLowerCase()));
+  const activeBookings = bookings.filter((booking) => !booking.cancelledAt && booking.member);
+
+  return (
+    <div className="w-full rounded-2xl border border-slate-200 bg-white p-3.5 transition focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 md:col-span-2">
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+        Select members booked into this Momence session *
+      </span>
+      <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+        Member choices are mapped from the selected session bookings. Use this before falling back to a global member search.
+      </p>
+      {selectedMembers.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selectedMembers.map((member) => (
+            <button
+              key={member}
+              type="button"
+              onClick={() => onRemove(member)}
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800"
+              title="Remove member"
+            >
+              {member}
+              <X className="h-3 w-3" />
+            </button>
+          ))}
+        </div>
+      )}
+      {loading ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Loading session members...</div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+      ) : activeBookings.length ? (
+        <div className="grid max-h-56 gap-1.5 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-1.5 sm:grid-cols-2">
+          {activeBookings.map((booking) => {
+            const memberName = momenceBookingMemberName(booking);
+            const selected = selectedSet.has(memberName.toLowerCase());
+            return (
+              <button
+                key={booking.id}
+                type="button"
+                onClick={() => onSelect(booking)}
+                className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${
+                  selected
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50'
+                }`}
+              >
+                <div className="font-semibold">{memberName}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">{momenceBookingContact(booking) || hostedBookingStatus(booking)}</div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          No active bookings were returned for the selected session.
         </div>
       )}
     </div>
