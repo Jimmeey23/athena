@@ -40,9 +40,9 @@ export function resolveAiProviderConfig(env: EnvReader, requestedProvider?: stri
     return {
       provider,
       apiKey,
-      model: clean(env('OPENAI_MODEL')) || 'gpt-4.1',
+      model: clean(env('OPENAI_MODEL')) || 'gpt-4.1-mini',
       baseUrl: trimTrailingSlash(clean(env('OPENAI_BASE_URL')) || 'https://api.openai.com/v1'),
-      maxTokens: Number(clean(env('OPENAI_MAX_TOKENS'))) || 8192,
+      maxTokens: Number(clean(env('OPENAI_MAX_TOKENS'))) || 3000,
     };
   }
 
@@ -54,7 +54,7 @@ export function resolveAiProviderConfig(env: EnvReader, requestedProvider?: stri
       apiKey,
       model: clean(env('ANTHROPIC_MODEL') || env('CLAUDE_MODEL')) || 'claude-opus-4-5',
       baseUrl: trimTrailingSlash(clean(env('ANTHROPIC_BASE_URL') || env('CLAUDE_BASE_URL')) || 'https://api.anthropic.com/v1'),
-      maxTokens: Number(clean(env('ANTHROPIC_MAX_TOKENS') || env('CLAUDE_MAX_TOKENS'))) || 8192,
+      maxTokens: Number(clean(env('ANTHROPIC_MAX_TOKENS') || env('CLAUDE_MAX_TOKENS'))) || 3000,
     };
   }
 
@@ -65,7 +65,7 @@ export function resolveAiProviderConfig(env: EnvReader, requestedProvider?: stri
     apiKey,
     model: clean(env('DEEPSEEK_MODEL')) || 'deepseek-v4-pro',
     baseUrl: trimTrailingSlash(clean(env('DEEPSEEK_BASE_URL')) || 'https://api.deepseek.com'),
-    maxTokens: Number(clean(env('DEEPSEEK_MAX_TOKENS'))) || 8192,
+    maxTokens: Number(clean(env('DEEPSEEK_MAX_TOKENS'))) || 3000,
   };
 }
 

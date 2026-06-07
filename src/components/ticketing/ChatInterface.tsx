@@ -1183,6 +1183,20 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     const source = voiceLiveText || input;
     return source.trim() ? buildVoiceExtractionHints(source) : [];
   }, [input, voiceLiveText]);
+  const isUrgentInput = useMemo(() => {
+    if (input.length < 6) return false;
+    return /\b(injur|injury|unsafe|harass|harassment|theft|fire|blood|emergency|accident|fracture|fell|ambulance|angry|furious|irate|refund|cancel(?:l?ation)?|lawsuit|legal|escalat|abuse|assault)\b/i.test(input);
+  }, [input]);
+  const capturedContextSummary = useMemo(() => {
+    const items: string[] = [];
+    if (context.studio) items.push(`📍 ${context.studio.split(',')[0]}`);
+    if (context.category) items.push(`🏷 ${context.category}`);
+    if (context.subCategory) items.push(`• ${context.subCategory}`);
+    if (context.memberName) items.push(`👤 ${context.memberName}`);
+    if (context.priority) items.push(`⚡ ${context.priority}`);
+    if (context.classType) items.push(`🏋️ ${context.classType}`);
+    return items;
+  }, [context]);
   const activeDraftReviewMessage = useMemo(
     () => messages.find((message) => message.id === activeDraftReviewMessageId && message.ticket) || null,
     [activeDraftReviewMessageId, messages]
@@ -2139,7 +2153,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   Online
                 </span>
                 <span className="hidden rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600 sm:inline-flex">
-                  GPT-4.1
+                  GPT-4.1-mini
                 </span>
               </div>
               <p className="truncate text-xs text-slate-500">Your AI ops assistant · Physique 57 India</p>
@@ -2183,6 +2197,29 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                 context={context}
               />
             ))}
+            {!loading && messages.length === 1 && (
+              <div className="animate-p57-fade-up mt-2 space-y-3">
+                <p className="text-[11px] font-medium text-slate-400">Not sure how to start? Try one of these:</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'A member complained about the AC at Bandra studio',
+                    'Member Priya Mehta wants a refund for her last class',
+                    'Locker room wasn’t clean at Kemps today',
+                    'Equipment issue — treadmill broken at Bengaluru',
+                    'Instructor arrived late for the barre class',
+                  ].map((starter) => (
+                    <button
+                      key={starter}
+                      type="button"
+                      onClick={() => { setInput(starter); textareaRef.current?.focus(); }}
+                      className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[12.5px] text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 hover:shadow"
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {loading && <TypingIndicator />}
           </div>
         )}
@@ -2358,6 +2395,21 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         <div className="z-10 flex-shrink-0 border-t border-border/50 bg-[#f0f2f5] px-4 py-3 sm:px-6">
           <div className="mx-auto flex w-full max-w-7xl items-end gap-3">
             <div className="flex-1 relative">
+              {isUrgentInput && (
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 shadow-sm">
+                  <span>⚡</span>
+                  <span>High-priority signals detected — Athena will flag this appropriately</span>
+                </div>
+              )}
+              {capturedContextSummary.length > 0 && (
+                <div className="mb-1.5 flex flex-wrap gap-1">
+                  {capturedContextSummary.map((item) => (
+                    <span key={item} className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              )}
               {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingAttachments.map((entry) => (
@@ -2402,12 +2454,14 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                 disabled={!input.trim() || loading}
                 onClick={() => {
                   const optimized = optimizeIntakePromptForAthena(input);
-                  if (optimized) setInput(optimized);
+                  if (optimized && optimized !== input) {
+                    setInput(optimized);
+                  }
                   requestAnimationFrame(() => textareaRef.current?.focus());
                 }}
-                className="absolute right-2 top-1.5 flex h-9 w-9 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:translate-y-0"
-                title="Optimize prompt for Athena"
-                aria-label="Optimize prompt for Athena"
+                className="absolute right-2 top-1.5 flex h-9 w-9 items-center justify-center rounded-full border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600 shadow-[0_2px_8px_rgba(79,70,229,0.12)] transition hover:-translate-y-0.5 hover:from-blue-100 hover:to-indigo-100 hover:text-indigo-700 hover:shadow-[0_4px_12px_rgba(79,70,229,0.20)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:translate-y-0"
+                title="Polish your text — expands abbreviations and cleans up common shorthand"
+                aria-label="Optimise prompt for Athena"
               >
                 <Sparkles className="h-4 w-4" />
               </button>
@@ -2417,9 +2471,12 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                 </div>
               )}
               {smartVoiceHints.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {smartVoiceHints.map((hint) => (
-                    <span key={hint} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                    <span
+                      key={hint}
+                      className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10.5px] font-semibold text-blue-700 shadow-sm"
+                    >
                       {hint}
                     </span>
                   ))}
@@ -3335,16 +3392,24 @@ const MessageBubble: React.FC<{
       </div>
 
       {visibleChips.length > 0 && !message.ticket && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {visibleChips.map((c, i) => (
-            <button
-              key={i}
-              onClick={() => onChipClick(c)}
-              className="rounded-full border border-blue-200 bg-gradient-to-br from-white to-blue-50 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-[0_2px_8px_rgba(37,99,235,0.10)] transition duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:text-blue-900 hover:shadow-[0_4px_12px_rgba(37,99,235,0.16)]"
-            >
-              {c.label}
-            </button>
-          ))}
+        <div className="mt-3 w-full pr-6">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Quick answers</span>
+            <div className="h-px flex-1 bg-slate-200/70" />
+            <span className="text-[10px] text-slate-400">tap to select</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {visibleChips.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => onChipClick(c)}
+                style={{ animationDelay: `${i * 55}ms` }}
+                className="animate-p57-fade-up inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-[13px] font-semibold text-blue-700 shadow-[0_2px_10px_rgba(37,99,235,0.09)] transition duration-200 hover:-translate-y-0.5 hover:border-blue-400 hover:bg-blue-50 hover:shadow-[0_6px_16px_rgba(37,99,235,0.18)] active:scale-95"
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

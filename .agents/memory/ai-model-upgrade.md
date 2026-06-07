@@ -1,12 +1,12 @@
 ---
-name: AI model upgrade
-description: Claude upgraded to claude-opus-4-5, max tokens 8192 for all providers in the Athena ticketing assistant.
+name: AI model config
+description: Model and token settings for all three AI providers in Athena ticketing assistant.
 ---
 
-Changed in `supabase/functions/_shared/ai-provider.ts`.
-- OpenAI: gpt-4.1, 8192 max tokens
-- Claude: claude-opus-4-5, 8192 max tokens  
-- DeepSeek: deepseek-v4-pro, 8192 max tokens
+File: `supabase/functions/_shared/ai-provider.ts`
+- OpenAI default: `gpt-4.1-mini`, maxTokens: 3000
+- Claude default: `claude-opus-4-5`, maxTokens: 3000
+- DeepSeek default: `deepseek-v4-pro`, maxTokens: 3000
 
-**Why:** Upgraded from claude-3-5-haiku for better reasoning and context handling in ticket intake.
-**How to apply:** Always keep all three providers in sync when upgrading model/token config.
+**Why:** User requested gpt-4.1-mini as default (better cost/speed). 3000 tokens is conservative but sufficient for ticket intake JSON responses — not too lavish, not too little.
+**How to apply:** All three providers stay in sync. Override per-provider via env vars (OPENAI_MODEL, ANTHROPIC_MODEL, DEEPSEEK_MODEL, *_MAX_TOKENS).

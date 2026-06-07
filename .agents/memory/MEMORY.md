@@ -1,3 +1,4 @@
-- [AI model upgrade](ai-model-upgrade.md) — Claude upgraded to claude-opus-4-5, max tokens 8192 across all three AI providers.
-- [Vite dev server config](vite-dev-config.md) — must use host 0.0.0.0 and port 5000 for Replit webview workflow; IPv6 (::) is not supported.
-- [npm install blocked packages](npm-blocked.md) — vitest@2.1.9, @testing-library/* and jsdom are blocked by Replit security policy; temporarily remove from package.json to run npm install, then restore.
+- [AI model config](ai-model-upgrade.md) — Default OpenAI gpt-4.1-mini, max 3000 tokens; Claude claude-opus-4-5, max 3000; DeepSeek deepseek-v4-pro, max 3000.
+- [Vite dev server config](vite-dev-config.md) — must use host 0.0.0.0 and port 5000 for Replit webview; IPv6 (::) not supported; allowedHosts:true required.
+- [npm install blocked packages](npm-blocked.md) — vitest@2.1.9, @testing-library/* and jsdom blocked by Replit policy; temporarily remove from package.json to run npm install, then restore.
+- [ChatInterface smart features](chat-smart-features.md) — urgency banner, context status strip, quick-start prompts, chip display logic added in ChatInterface.tsx.

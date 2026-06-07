@@ -108,10 +108,12 @@ export function optimizeIntakePromptForAthena(text: string): string {
   }
 
   const replacements: Array<[RegExp, string]> = [
+    // Studios
     [/\b(?:kemps|kemps corner|kc|kwality|kwality house)\b/gi, 'Kwality House, Kemps Corner'],
     [/\b(?:bandra|supreme|supreme hq|hq)\b/gi, 'Supreme HQ, Bandra'],
     [/\b(?:kenkere|blr|bangalore|bengaluru)\b/gi, 'Kenkere House, Bengaluru'],
     [/\b(?:copper|cloves|copper and cloves|copper & cloves)\b/gi, 'the Studio by Copper & Cloves, Bengaluru'],
+    // Class types
     [/\b(?:mat|mat57|mat\s*57)\b(?:\s+(?:class|session))?/gi, 'Studio Mat 57 class'],
     [/\b(?:barre|barre57|barre\s*57|signature)\b(?:\s+(?:class|session))?/gi, 'Studio Barre 57 class'],
     [/\b(?:pc|power\s*cycle|powercycle|cycle|spin)\b(?:\s+(?:class|session|room|studio))?/gi, 'Studio PowerCycle class'],
@@ -119,22 +121,70 @@ export function optimizeIntakePromptForAthena(text: string): string {
     [/\b(?:strength|strength\s*lab|sl)\b(?:\s+(?:class|session))?/gi, 'Studio Strength Lab class'],
     [/\b(?:hiit)\b(?:\s+(?:class|session))?/gi, 'Studio HIIT class'],
     [/\b(?:fit)\b(?:\s+(?:class|session))?/gi, 'Studio FIT class'],
-    [/\b(?:fd|frontdesk)\b/gi, 'front desk'],
+    // Staff / roles
+    [/\b(?:fd|front desk|frontdesk)\b/gi, 'front desk'],
+    [/\b(?:instr|instuctor|instructr)\b/gi, 'instructor'],
+    [/\b(?:trn|trnr)\b/gi, 'trainer'],
+    [/\b(?:mgr|mgmt)\b/gi, 'manager'],
+    [/\b(?:csr|cs team)\b/gi, 'client success team'],
+    [/\b(?:ops)\b/gi, 'operations'],
+    // Abbreviations
     [/\bac\b/gi, 'AC'],
     [/\bw\/o\b/gi, 'without'],
-    [/\bwants\s+call\b/gi, 'requested a call'],
-    [/\bwants\s+whatsapp\b/gi, 'requested a WhatsApp follow-up'],
-    [/\bwants\s+refund\b/gi, 'requested a refund'],
+    [/\bw\/ ?/gi, 'with '],
+    [/\basap\b/gi, 'as soon as possible'],
+    [/\bpls\b/gi, 'please'],
+    [/\bplz\b/gi, 'please'],
+    [/\btks\b/gi, 'thanks'],
+    [/\bthx\b/gi, 'thanks'],
+    [/\bappt\b/gi, 'appointment'],
+    [/\bpkg\b/gi, 'package'],
+    [/\bpmt\b|\bpaymt\b/gi, 'payment'],
+    [/\brefnd\b/gi, 'refund'],
+    [/\bcmplt\b|\bcomplnt\b/gi, 'complaint'],
+    [/\bcnfm\b|\bconfm\b/gi, 'confirm'],
+    [/\bwapp\b|\bwa\b(?=\s)/gi, 'WhatsApp'],
+    [/\bmb\b(?=\s)/gi, 'member'],
+    [/\bcls\b(?=\s)/gi, 'class'],
+    [/\bsess\b(?=\s)/gi, 'session'],
+    [/\binfo\b/gi, 'information'],
+    [/\bavail\b/gi, 'available'],
+    [/\bunavail\b/gi, 'unavailable'],
+    [/\besc\b(?=\s|$)/gi, 'escalated'],
+    [/\bfwd\b(?=\s|$)/gi, 'forwarded'],
+    [/\bchkd\b/gi, 'checked'],
+    [/\brecvd\b|\brcvd\b/gi, 'received'],
+    [/\bdoc\b(?=\s|$)/gi, 'documented'],
+    // Actions & states
+    [/\bwants\s+(?:a\s+)?call\b/gi, 'requested a call'],
+    [/\bwants\s+(?:a\s+)?whatsapp(?:\s+follow.?up)?\b/gi, 'requested a WhatsApp follow-up'],
+    [/\bwants\s+(?:a\s+)?refund\b/gi, 'requested a refund'],
+    [/\bwants\s+(?:a\s+)?callback\b/gi, 'requested a callback'],
+    [/\bwants\s+(?:a\s+)?email\b/gi, 'requested an email follow-up'],
+    [/\bneeds\s+(?:a\s+)?call\b/gi, 'needs a call'],
+    [/\bask(?:ing|ed)?\s+for\s+refund\b/gi, 'requested a refund'],
     [/\btoo packed\b/gi, 'overcrowded'],
     [/\btoo hot\b/gi, 'uncomfortably hot'],
     [/\btoo cold\b/gi, 'uncomfortably cold'],
+    [/\btoo loud\b/gi, 'too loud'],
+    [/\btoo dark\b/gi, 'insufficiently lit'],
+    [/\bsmells bad\b|\bbad smell\b/gi, 'has an unpleasant odor'],
     [/\bwas\s+not\s+working\b/gi, 'was not functioning'],
-    [/\bnot working\b/gi, 'not functioning'],
-    [/\bnot cooling\b/gi, 'not cooling properly'],
-    [/\bnot clean\b/gi, 'not clean enough'],
+    [/\bnot\s+working\b/gi, 'not functioning'],
+    [/\bbroken\b/gi, 'not functioning'],
+    [/\bnot\s+cooling\b/gi, 'not cooling properly'],
+    [/\bnot\s+clean\b/gi, 'not sufficiently clean'],
+    [/\bdirty\b/gi, 'unclean'],
     [/\bmember says\b/gi, 'member reported'],
     [/\bclient says\b/gi, 'client reported'],
+    [/\bmember mentioned\b/gi, 'member reported'],
     [/\bsaid\b/gi, 'reported'],
+    [/\btold\b/gi, 'reported'],
+    [/\bwasnt\b|\bwas not\b/gi, "was not"],
+    [/\bcant\b|\bcannot\b/gi, "cannot"],
+    [/\bdidnt\b|\bdid not\b/gi, "did not"],
+    [/\bisnt\b|\bis not\b/gi, "is not"],
+    [/\bwont\b|\bwill not\b/gi, "will not"],
   ];
   let optimized = replacements.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), report);
   optimized = optimized
@@ -430,14 +480,22 @@ export function buildNaturalLanguageAnalyticsAnswer(query: string, tickets: Tick
 }
 
 export function buildVoiceExtractionHints(text: string): string[] {
+  if (!text.trim() || text.length < 8) return [];
   const lower = text.toLowerCase();
   const hints: string[] = [];
-  if (/(said|reported|shared|told|mentioned|asked|requested)/.test(lower)) hints.push('Likely member feedback captured');
-  if (/bandra|supreme/.test(lower)) hints.push('Likely studio: Supreme HQ, Bandra');
-  if (/kemps|kwality/.test(lower)) hints.push('Likely studio: Kwality House, Kemps Corner');
-  if (/bengaluru|bangalore|kenkere|copper/.test(lower)) hints.push('Likely studio: Bengaluru');
-  if (/angry|refund|cancel|injury|unsafe|frustrated|escalate/.test(lower)) hints.push('Likely priority: High');
-  if (/class|session|barre|power|cycle|trainer|instructor/.test(lower)) hints.push('Likely session-related feedback');
-  hints.push('Search Momence for the member and session before publishing.');
-  return Array.from(new Set(hints)).slice(0, 5);
+  // Studio detection (specific keywords only)
+  if (/\b(bandra|supreme hq)\b/.test(lower)) hints.push('📍 Supreme HQ, Bandra');
+  else if (/\b(kemps corner|kwality house|kemps|kwality)\b/.test(lower)) hints.push('📍 Kwality House, Kemps Corner');
+  else if (/\b(bengaluru|bangalore|kenkere|kenkere house)\b/.test(lower)) hints.push('📍 Kenkere House, Bengaluru');
+  else if (/\b(copper|cloves)\b/.test(lower)) hints.push('📍 Studio by Copper & Cloves');
+  // Safety / urgency (only strong signals)
+  if (/\b(injur|injury|injur|unsafe|harass|harassment|theft|fire|blood|emergency|fell|fracture)\b/.test(lower)) hints.push('⚡ Safety signal — mark Critical');
+  else if (/\b(angry|furious|irate|refund|cancel(?:l?ation)?|lawsuit|legal|escalat)\b/.test(lower)) hints.push('⚡ High priority signal detected');
+  // Class type (specific class names)
+  if (/\b(barre\s*57|studio barre|power\s*cycle|powercycle|mat\s*57|studio mat|back body blaze|strength lab)\b/.test(lower)) hints.push('🏋️ Session-related ticket');
+  else if (/\b(class|session|trainer|instructor)\b/.test(lower) && hints.length > 0) hints.push('🏋️ Session context detected');
+  // Member name pattern (Firstname Lastname)
+  const memberMatch = text.match(/\b(?:member|client|community member)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/);
+  if (memberMatch) hints.push(`👤 Member: ${memberMatch[1]}`);
+  return Array.from(new Set(hints)).slice(0, 3);
 }
