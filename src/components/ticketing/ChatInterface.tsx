@@ -53,7 +53,7 @@ import {
   resolveTicketAssignee,
   resolveTicketDepartment,
 } from '@/lib/ticketing-data';
-import { findRelatedSubmittedTickets } from '@/lib/ticket-duplicate-matching';
+import { buildRelatedTicketNotice, findRelatedSubmittedTickets } from '@/lib/ticket-duplicate-matching';
 import { invokeTicketingFunction, withTimeout } from '@/lib/ticketing-functions';
 import { buildAthenaDraftRequestBody } from '@/lib/ticket-ai-chat-payload';
 import {
@@ -1170,6 +1170,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const voiceSilenceTimerRef = useRef<number | null>(null);
   const requestNonceRef = useRef(0);
   const activeChatEpochRef = useRef(0);
+  const shownRelatedTicketNoticeKeysRef = useRef<Set<string>>(new Set());
   const lastResetVersionRef = useRef(resetVersion);
   const recentTickets = useMemo(
     () => tickets
@@ -1518,22 +1519,15 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     try {
       setLoading(true);
       const relatedTickets = findRelatedSubmittedTickets(capturedFeedback || text, activeContext, tickets.filter((ticket) => !isTrainerEvaluationProfileOnly(ticket)));
-      if (relatedTickets.exactDuplicate) {
+      const relatedTicketNotice = buildRelatedTicketNotice(relatedTickets, shownRelatedTicketNoticeKeysRef.current);
+      if (relatedTicketNotice) {
+        shownRelatedTicketNoticeKeysRef.current.add(relatedTicketNotice.key);
         setMessages((prev) => [
           ...prev,
           {
-            id: `duplicate-${Date.now()}`,
+            id: `${relatedTicketNotice.messageIdPrefix}-${Date.now()}`,
             role: 'assistant',
-            content: `Exact duplicate found: **${relatedTickets.exactDuplicate.id}** — ${relatedTickets.exactDuplicate.title}. I will merge this intake into that ticket automatically if you approve the draft; I will not open the ticket drawer.`,
-          },
-        ]);
-      } else if (relatedTickets.similarTickets.length > 0) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `similar-${Date.now()}`,
-            role: 'assistant',
-            content: `Similar ticket group found: ${relatedTickets.similarTickets.map((ticket) => `**${ticket.id}**`).join(', ')}. These will be grouped for context only, not merged, because the specifics are different.`,
+            content: relatedTicketNotice.content,
           },
         ]);
       }
@@ -1578,8 +1572,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const normalizedAiTicket = data?.ticket ? normalizeDraftForReview(data.ticket, responseContext, text) : null;
       const remainingMissingFields = requiredFieldsForIssue(responseContext, normalizedAiTicket || undefined);
       const requiredFieldSet = new Set(remainingMissingFields);
-      const incompleteDraftForm = pruneDetailForm(detailFormForIncompleteDraft(normalizedAiTicket, responseContext), responseContext);
-      const localMissingForm = pruneDetailForm(detailFormForContext(responseContext), responseContext);
+      const incompleteDraftForm = detailFormForIncompleteDraft(normalizedAiTicket, responseContext);
+      const localMissingForm = detailFormForContext(responseContext);
       const deterministicForm = incompleteDraftForm || localMissingForm;
       const acceptsAiDetailForm = shouldAcceptAiDetailForm({
         remainingMissingFieldCount: remainingMissingFields.length,
@@ -1671,7 +1665,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
       const message = getDisplayError(e, 'Ticket AI chat failed');
       if (message.includes(ATHENA_CHAT_TIMEOUT_MESSAGE)) {
-        const timeoutForm = batchDetailFormForConversation(pruneDetailForm(detailFormForContext(activeContext), activeContext));
+        const timeoutForm = batchDetailFormForConversation(detailFormForContext(activeContext));
         const singleField = timeoutForm?.fields.length === 1 ? timeoutForm.fields[0] : null;
         const singleFieldNeedsPicker = singleField
           ? ['memberName', 'memberContact', 'classType', 'sessionId', 'membership'].includes(singleField.id)
@@ -1756,6 +1750,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     setPendingAttachments([]);
     setConversationId(null);
     setActiveDraftReviewMessageId(null);
+    shownRelatedTicketNoticeKeysRef.current.clear();
     setInstructorEvaluationMode(false);
     setActiveTemplate(null);
     setLoading(false);

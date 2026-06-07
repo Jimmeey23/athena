@@ -378,6 +378,18 @@ function hasConfirmedAffectedClients(value?: string): boolean {
   return /^yes\b/i.test(value?.trim() || '');
 }
 
+function hasNamedPersonRequestReference(text: string): boolean {
+  const value = text.trim().replace(/\s+/g, ' ');
+  if (/^(front desk|studio team|ops team|sales team|team member|instructor|trainer|manager)\b/i.test(value)) return false;
+  return /^[a-z][a-z'.-]+\s+[a-z][a-z'.-]+(?:\s+[a-z][a-z'.-]+)?\s+(?:is\s+)?(?:asking|asked|requesting|requested|wants|wanted|would like|needs)\b/i.test(value);
+}
+
+function hasPersonalCommercialReference(text: string): boolean {
+  return /\b(member|client|customer|guest|prospect)\b/i.test(text) ||
+    /\b(she|he|her|his|their)\b/i.test(text) ||
+    hasNamedPersonRequestReference(text);
+}
+
 function shouldRequireNamedMemberContext(context: IntakeContext, issueText: string): boolean {
   if (!isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName)) return false;
 
@@ -396,7 +408,7 @@ function shouldRequireNamedMemberContext(context: IntakeContext, issueText: stri
     context.subCategory,
   ].filter(Boolean).join(' ').toLowerCase();
 
-  const mentionsMember = /\b(member|client|customer|guest|prospect)\b/.test(entityText);
+  const mentionsMember = hasPersonalCommercialReference(entityText);
   const needsPersonalFollowUp =
     /refund|billing|payment|membership|package|freeze|roll\s?over|extension|renewal|cancel|complain|complaint|follow-up|follow up|contact|whatsapp|email|phone|profile|account/.test(lower);
 
@@ -416,7 +428,7 @@ function shouldRequireCommercialVerificationContext(context: IntakeContext, issu
     context.subCategory,
   ].filter(Boolean).join(' ').toLowerCase();
 
-  const memberReference = /\b(member|client|customer|guest|prospect)\b/.test(lower) || !isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName);
+  const memberReference = hasPersonalCommercialReference(lower) || !isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName);
   if (!memberReference) return false;
 
   const commercialConcern =

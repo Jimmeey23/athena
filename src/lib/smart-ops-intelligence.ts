@@ -90,6 +90,23 @@ function normalizeComparableText(value: string | null | undefined): string {
 export function optimizeIntakePromptForAthena(text: string): string {
   const report = text.trim().replace(/\s+/g, ' ');
   if (!report) return '';
+
+  const namedMemberRequest = report.match(/^(client|member|community member)\s+(.+?)\s+wants\s+(?:a\s+)?(refund|call|whatsapp(?:\s+follow-?up)?)$/i);
+  if (namedMemberRequest) {
+    const [, role, rawName, rawRequest] = namedMemberRequest;
+    const actor = role.toLowerCase() === 'community member' ? 'Community member' : role.toLowerCase() === 'client' ? 'Client' : 'Member';
+    const name = rawName
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+    const normalizedRequest = rawRequest.toLowerCase();
+    const request = normalizedRequest.includes('whatsapp')
+      ? 'requested a WhatsApp follow-up'
+      : normalizedRequest === 'call'
+        ? 'requested a call'
+        : 'requested a refund';
+    return `${actor} ${name} ${request}.`;
+  }
+
   const replacements: Array<[RegExp, string]> = [
     [/\b(?:kemps|kemps corner|kc|kwality|kwality house)\b/gi, 'Kwality House, Kemps Corner'],
     [/\b(?:bandra|supreme|supreme hq|hq)\b/gi, 'Supreme HQ, Bandra'],

@@ -324,6 +324,31 @@ describe('intake publishability rules', () => {
     ]);
   });
 
+  it('requires commercial verification for named refund requests even when member/client is omitted', () => {
+    const text = 'SMITA PATIL IS ASKING FOR A REFUND OF HER MEMBERSHIP FEES.';
+    const context: IntakeContext = {
+      ...inferIntakeContextFromText(text),
+      initialReport: text,
+      clientsAffected: 'Yes - directly affected',
+      description: text,
+      reportedBy: 'Jimmeey',
+      priority: 'High',
+      resolutionRequired: 'Yes',
+    };
+
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
+      'studio',
+      'memberName',
+      'membership',
+      'incidentDateTime',
+      'momencePurchaseContext',
+      'desiredResolution',
+      'memberSentiment',
+      'description',
+    ]));
+    expect(isIntakePublishable(context)).toBe(false);
+  });
+
   it('requires commercial Momence context for member package and class access disputes', () => {
     const text = [
       'Client Shaziya Andhyrujina is currently on a 3-month unlimited package.',

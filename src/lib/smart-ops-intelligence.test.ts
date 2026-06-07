@@ -153,4 +153,10 @@ describe('smart ops intelligence', () => {
       'Studio Back Body Blaze class at Kenkere House, Bengaluru without trainer and front desk requested a WhatsApp follow-up.'
     );
   });
+
+  it('rewrites rough all-caps member requests into documentation voice', () => {
+    expect(optimizeIntakePromptForAthena('CLIENT SMITA MODI WANTS A REFUND')).toBe(
+      'Client Smita Modi requested a refund.'
+    );
+  });
 });

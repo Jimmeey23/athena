@@ -18,6 +18,12 @@ export interface RelatedSubmittedTickets {
   similarTickets: Ticket[];
 }
 
+export interface RelatedTicketNotice {
+  key: string;
+  messageIdPrefix: 'duplicate' | 'similar';
+  content: string;
+}
+
 const GENERIC_ISSUE_TYPES = new Set(['', 'other', 'member reported issue', 'member-reported issue', 'general feedback']);
 
 function normalizeComparable(value?: string | null): string {
@@ -188,6 +194,34 @@ export function findRelatedSubmittedTickets(_text: string, ctx: DuplicateTicketC
     .slice(0, 5);
 
   return { exactDuplicate, similarTickets };
+}
+
+export function buildRelatedTicketNotice(
+  relatedTickets: RelatedSubmittedTickets,
+  shownNoticeKeys: ReadonlySet<string> = new Set(),
+): RelatedTicketNotice | null {
+  if (relatedTickets.exactDuplicate) {
+    const ticket = relatedTickets.exactDuplicate;
+    const key = `exact:${ticket.id}`;
+    if (shownNoticeKeys.has(key)) return null;
+    return {
+      key,
+      messageIdPrefix: 'duplicate',
+      content: `Exact duplicate found: **${ticket.id}** — ${ticket.title}. I will merge this intake into that ticket automatically if you approve the draft; I will not open the ticket drawer.`,
+    };
+  }
+
+  const similarTicketIds = relatedTickets.similarTickets.map((ticket) => ticket.id).filter(Boolean);
+  if (similarTicketIds.length === 0) return null;
+
+  const key = `similar:${similarTicketIds.join('|')}`;
+  if (shownNoticeKeys.has(key)) return null;
+
+  return {
+    key,
+    messageIdPrefix: 'similar',
+    content: `Similar ticket group found: ${similarTicketIds.map((id) => `**${id}**`).join(', ')}. These will be grouped for context only, not merged, because the specifics are different.`,
+  };
 }
 
 export function findExistingSubmittedTicket(text: string, ctx: DuplicateTicketContext, tickets: Ticket[]): Ticket | null {

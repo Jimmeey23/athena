@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { findExistingSubmittedTicket, findRelatedSubmittedTickets } from './ticket-duplicate-matching';
+import {
+  buildRelatedTicketNotice,
+  findExistingSubmittedTicket,
+  findRelatedSubmittedTickets,
+} from './ticket-duplicate-matching';
 import { Ticket } from './ticketing-data';
 
 const baseTicket: Ticket = {
@@ -126,5 +130,20 @@ describe('findExistingSubmittedTicket', () => {
 
     expect(related.exactDuplicate).toBeNull();
     expect(related.similarTickets.map((ticket) => ticket.id)).toEqual(['P57-OLD123']);
+  });
+
+  it('suppresses a related-ticket notice after the same ticket group has already been shown', () => {
+    const related = {
+      exactDuplicate: null,
+      similarTickets: [baseTicket],
+    };
+    const shownKeys = new Set<string>();
+
+    const firstNotice = buildRelatedTicketNotice(related, shownKeys);
+    if (firstNotice) shownKeys.add(firstNotice.key);
+    const repeatedNotice = buildRelatedTicketNotice(related, shownKeys);
+
+    expect(firstNotice?.content).toContain('Similar ticket group found: **P57-OLD123**');
+    expect(repeatedNotice).toBeNull();
   });
 });

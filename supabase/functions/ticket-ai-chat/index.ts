@@ -415,6 +415,18 @@ function hasConfirmedAffectedClients(value: unknown): boolean {
   return /^yes\b/i.test(cleanString(value));
 }
 
+function hasNamedPersonRequestReference(text: string): boolean {
+  const value = text.trim().replace(/\s+/g, ' ');
+  if (/^(front desk|studio team|ops team|sales team|team member|instructor|trainer|manager)\b/i.test(value)) return false;
+  return /^[a-z][a-z'.-]+\s+[a-z][a-z'.-]+(?:\s+[a-z][a-z'.-]+)?\s+(?:is\s+)?(?:asking|asked|requesting|requested|wants|wanted|would like|needs)\b/i.test(value);
+}
+
+function hasPersonalCommercialReference(text: string): boolean {
+  return /\b(member|client|customer|guest|prospect)\b/i.test(text) ||
+    /\b(she|he|her|his|their)\b/i.test(text) ||
+    hasNamedPersonRequestReference(text);
+}
+
 function shouldRequireNamedMemberContext(
   text: string,
   context: Record<string, unknown>,
@@ -441,7 +453,7 @@ function shouldRequireNamedMemberContext(
     cleanString(context.requestType),
   ].filter(Boolean).join(' ').toLowerCase();
 
-  return /\b(member|client|customer|guest|prospect)\b/.test(entityText)
+  return hasPersonalCommercialReference(entityText)
     && /refund|billing|payment|membership|package|freeze|roll\s?over|extension|renewal|cancel|complain|complaint|follow-up|follow up|contact|whatsapp|email|phone|profile|account/.test(lower);
 }
 
@@ -464,7 +476,7 @@ function shouldRequireCommercialVerificationContext(
   ].filter(Boolean).join(' ').toLowerCase();
 
   const memberReference =
-    /\b(member|client|customer|guest|prospect)\b/.test(lower) ||
+    hasPersonalCommercialReference(lower) ||
     Boolean(cleanString(context.memberId)) ||
     Boolean(cleanString(context.memberName));
   if (!memberReference) return false;
