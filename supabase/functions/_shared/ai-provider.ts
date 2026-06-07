@@ -40,7 +40,7 @@ export function resolveAiProviderConfig(env: EnvReader, requestedProvider?: stri
     return {
       provider,
       apiKey,
-      model: clean(env('OPENAI_MODEL')) || 'gpt-4.1-mini',
+      model: clean(env('OPENAI_MODEL')) || 'gpt-4.1',
       baseUrl: trimTrailingSlash(clean(env('OPENAI_BASE_URL')) || 'https://api.openai.com/v1'),
       maxTokens: Number(clean(env('OPENAI_MAX_TOKENS'))) || 3000,
     };
