@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { TicketProvider } from './ticketing/TicketContext';
 import { useTickets } from './ticketing/useTickets';
 import { ChatInterface } from './ticketing/ChatInterface';
+import { StandaloneMomencePanel } from './ticketing/StandaloneMomencePanel';
 import { TicketDetailDrawer } from './ticketing/TicketDetailDrawer';
 import { AuthGate } from './AuthGate';
 import { BackendAuthProvider, useBackendAuth } from '@/contexts/BackendAuthContext';
@@ -804,13 +805,9 @@ const TrendCard: React.FC<{ title: string; items: Array<{ name: string; value: n
 };
 
 const MomenceOpsPanel: React.FC = () => (
-  <WorkspacePanel title="Momence Ops" description="Operational shortcuts that depend on selected ticket, member, and session context.">
-    <div className="grid gap-3 md:grid-cols-3">
-      {['Member search required for member-specific tickets', 'Class search required for class-related feedback', 'Automation actions remain inside ticket detail'].map((item) => (
-        <div key={item} className="rounded-2xl border border-slate-200 bg-white/90 p-4 text-sm font-semibold text-stone-700 shadow-[0_16px_44px_rgba(15,23,42,0.06)]">
-          {item}
-        </div>
-      ))}
+  <WorkspacePanel title="Momence Ops" description="Search any member or session and run direct Momence operations — no ticket required.">
+    <div className="h-[calc(100vh-20rem)] min-h-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.06)]">
+      <StandaloneMomencePanel />
     </div>
   </WorkspacePanel>
 );

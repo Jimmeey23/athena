@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Send, Sparkles, CheckCircle2, Paperclip, X, Mic, Square, ChevronDown, Check, HelpCircle, ClipboardCheck, Gauge, GraduationCap, LayoutTemplate, Download, FileText, FileCode2, ImageDown } from 'lucide-react';
+import { LiveTicketBuilder } from './LiveTicketBuilder';
 import InteractiveRobotSpline from '@/components/InteractiveRobotSpline';
 import { ROBOT_SPLINE_URL } from '@/lib/galleryImages';
 import { getErrorMessage } from '@/lib/error-formatting';
@@ -42,6 +43,7 @@ import {
   CATEGORIES,
   FREEZE_REASONS,
   HOSTED_CLASS_FEEDBACK_AREAS,
+  CLASS_TYPES,
   INTAKE_ROUTES,
   MEMBER_SENTIMENT_OPTIONS,
   PRIORITY_SLA,
@@ -124,6 +126,7 @@ interface DetailFormField {
   type: DetailFieldType;
   required?: boolean;
   options?: string[];
+  placeholder?: string;
   dependsOn?: string;
   dependsOnValue?: string;
   section?: string;
@@ -1411,35 +1414,61 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 
   const buildContextPreamble = (ctx: DetailContext) => {
     const parts: string[] = [];
+
+    // --- Core identity fields ---
     if (ctx.memberName) parts.push(`Member: ${ctx.memberName}`);
-    if (ctx.intakeRoute) parts.push(`Intake route: ${ctx.intakeRoute}`);
-    if (ctx.requestType) parts.push(`Specific ticket type: ${ctx.requestType}`);
-    if (ctx.clientsAffected) parts.push(`Client impact check: ${ctx.clientsAffected}`);
-    if (ctx.memberId) parts.push(`Momence member ID: ${ctx.memberId}`);
-    if (ctx.memberContact) parts.push(`Member contact: ${ctx.memberContact}`);
-    if (ctx.sessionId) parts.push(`Momence session ID: ${ctx.sessionId}`);
-    if (ctx.studio) parts.push(`Studio: ${ctx.studio}`);
-    if (ctx.trainer) parts.push(`Trainer: ${ctx.trainer}`);
-    if (ctx.classType) parts.push(`Class: ${ctx.classType}`);
-    if (ctx.classDateTime) parts.push(`Class date/time: ${ctx.classDateTime}`);
+    if (ctx.memberId) parts.push(`Momence ID: ${ctx.memberId}`);
+    if (ctx.memberContact) parts.push(`Contact: ${ctx.memberContact}`);
     if (ctx.membership) parts.push(`Membership: ${ctx.membership}`);
+
+    // --- Ticket routing ---
+    if (ctx.intakeRoute) parts.push(`Route: ${ctx.intakeRoute}`);
+    if (ctx.requestType) parts.push(`Type: ${ctx.requestType}`);
     if (ctx.category) parts.push(`Category: ${ctx.category}`);
     if (ctx.subCategory) parts.push(`Sub-category: ${ctx.subCategory}`);
-    if (ctx.reportedBy) parts.push(`Reported by: ${ctx.reportedBy}`);
     if (ctx.priority) parts.push(`Priority: ${ctx.priority}`);
-    if (ctx.description) parts.push(`Issue summary: ${ctx.description}`);
-    if (ctx.incidentDateTime) parts.push(`Incident date/time: ${ctx.incidentDateTime}`);
-    if (ctx.desiredResolution) parts.push(`Requested resolution: ${ctx.desiredResolution}`);
-    if (ctx.conversationPlan) parts.push(`Full conversational plan: ${ctx.conversationPlan}`);
+    if (ctx.clientsAffected) parts.push(`Clients affected: ${ctx.clientsAffected}`);
+    if (ctx.reportedBy) parts.push(`Reported by: ${ctx.reportedBy}`);
+
+    // --- Session & location context ---
+    if (ctx.studio) parts.push(`Studio: ${ctx.studio}`);
+    if (ctx.classType) parts.push(`Class: ${ctx.classType}`);
+    if (ctx.trainer) parts.push(`Trainer: ${ctx.trainer}`);
+    if (ctx.classDateTime) parts.push(`Session date/time: ${ctx.classDateTime}`);
+    if (ctx.sessionId) parts.push(`Momence session ID: ${ctx.sessionId}`);
+
+    // --- Issue substance ---
+    if (ctx.description) parts.push(`Issue: ${ctx.description}`);
+    if (ctx.incidentDateTime) parts.push(`Incident at: ${ctx.incidentDateTime}`);
+    if (ctx.memberSentiment) parts.push(`Sentiment: ${ctx.memberSentiment}`);
+    if (ctx.urgencyReason) parts.push(`Urgency: ${ctx.urgencyReason}`);
+    if (ctx.desiredResolution) parts.push(`Resolution requested: ${ctx.desiredResolution}`);
+
+    // --- Remaining custom fields (catch-all) ---
+    const HANDLED_KEYS = new Set([
+      'memberName', 'memberId', 'memberContact', 'membership',
+      'intakeRoute', 'requestType', 'category', 'subCategory', 'priority', 'clientsAffected', 'reportedBy',
+      'studio', 'classType', 'trainer', 'classDateTime', 'sessionId',
+      'description', 'incidentDateTime', 'memberSentiment', 'urgencyReason', 'desiredResolution',
+      'conversationPlan', 'reporterFirstName', 'initialReport',
+    ]);
     Object.entries(ctx).forEach(([key, value]) => {
-      if (
-        value &&
-        !['memberName', 'intakeRoute', 'requestType', 'clientsAffected', 'memberId', 'memberContact', 'sessionId', 'studio', 'trainer', 'classType', 'classDateTime', 'membership', 'category', 'subCategory', 'reportedBy', 'priority', 'description', 'incidentDateTime', 'desiredResolution', 'conversationPlan', 'reporterFirstName'].includes(key)
-      ) {
+      if (value && !HANDLED_KEYS.has(key)) {
         parts.push(`${getDetailField(key)?.label || key}: ${value}`);
       }
     });
-    return parts.length ? `[Context — ${parts.join(' | ')}]\n` : '';
+
+    // --- Constant hints so AI picks valid values ---
+    const hints: string[] = [];
+    if (!ctx.studio) hints.push(`Valid studios: ${STUDIOS.join(', ')}`);
+    if (!ctx.classType) hints.push(`Valid class types: ${CLASS_TYPES.join(', ')}`);
+    if (!ctx.trainer) hints.push(`Valid trainers: ${TRAINERS.join(', ')}`);
+
+    if (ctx.conversationPlan) parts.push(`Conversation plan: ${ctx.conversationPlan}`);
+
+    const contextBlock = parts.length ? `[Context — ${parts.join(' | ')}]` : '';
+    const hintsBlock = hints.length ? `[Constants — ${hints.join(' | ')}]` : '';
+    return [contextBlock, hintsBlock].filter(Boolean).join('\n') + (contextBlock || hintsBlock ? '\n' : '');
   };
 
   const sendMessage = async (text: string, contextOverride?: DetailContext) => {
@@ -2052,7 +2081,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-slate-200/60 font-['Plus_Jakarta_Sans',Inter,sans-serif]">
-      <div className="relative hidden h-full w-[32%] overflow-hidden border-r border-slate-200 bg-gradient-to-br from-slate-100 via-white to-blue-50 lg:block">
+      <div className="relative hidden h-full w-[32%] shrink-0 overflow-hidden border-r border-slate-200 bg-gradient-to-br from-slate-100 via-white to-blue-50 lg:block 2xl:w-[26%]">
         <div className="absolute -left-12 top-16 h-56 w-56 rounded-full bg-blue-400/20 blur-3xl" />
         <div className="absolute -right-12 bottom-10 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(100,116,139,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(100,116,139,0.08)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_78%_56%_at_50%_50%,#000_68%,transparent_110%)]" />
@@ -2131,7 +2160,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         </div>
       </div>
 
-      <div className="relative z-10 flex h-full w-full flex-col bg-background lg:w-[68%]">
+      <div className="relative z-10 flex h-full w-full flex-col bg-background lg:w-[68%] 2xl:w-[48%]">
         <div className="animate-chat-header-in flex items-center justify-between border-b border-blue-100/80 bg-gradient-to-r from-white via-blue-50/40 to-indigo-50/30 px-4 py-2.5 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
           <div className="flex min-w-0 items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-blue-300/80 bg-gradient-to-br from-blue-100 to-indigo-100 shadow-[0_4px_14px_rgba(79,70,229,0.18)]">
@@ -2542,6 +2571,13 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         </>
         )}
       </div>
+
+      <div className="hidden 2xl:flex h-full w-[26%] shrink-0 flex-col border-l border-slate-200 bg-white overflow-hidden">
+        <LiveTicketBuilder
+          context={context}
+          activeDraft={activeDraftReviewMessage?.ticket ?? null}
+        />
+      </div>
     </div>
   );
 };
@@ -2823,6 +2859,7 @@ const templateDetailFormFromTemplate = (template: ContextTemplate): DetailForm =
     type: field.type,
     required: field.required,
     options: field.options || templateFieldOptions(field.id),
+    placeholder: field.placeholder,
     dependsOn: field.dependsOn,
     dependsOnValue: field.dependsOnValue,
     section: field.section,
@@ -3213,23 +3250,86 @@ function suggestionsForTemplateTextField(label: string): string[] {
 }
 
 function suggestionsForDetailField(field: DetailFormField): string[] {
-  const id = field.id.toLowerCase();
+  const id = field.id;
   const label = field.label.toLowerCase();
-  if (id.includes('description') || /describe|issue|details/.test(label)) {
+  if (id === 'memberFeedback') {
+    return [
+      '"I was told I couldn\'t enter even though I was only 2 minutes late — this has never happened before."',
+      '"The instructor didn\'t seem to notice the issue during class and I felt uncomfortable raising it."',
+      '"I was really happy with the session today — the instructor\'s energy was amazing."',
+    ];
+  }
+  if (id === 'policyExplanation') {
+    return [
+      'Explained that our policy is to close the studio door 5 minutes after the session starts to protect the member experience.',
+      'Informed the member that late entry is not permitted once the warm-up has begun, as per Physique 57 policy.',
+      'Policy was not formally explained at the time — member was turned away without a written or verbal reason.',
+    ];
+  }
+  if (id === 'lateArrivalReason') {
+    return [
+      'Member cited heavy traffic and difficulty finding parking near the studio.',
+      'Member stated their Momence booking confirmation showed a different class time.',
+      'Member mentioned a work obligation that ran over and said this was a one-off situation.',
+    ];
+  }
+  if (id === 'alternativeSolution') {
+    return [
+      'Offered a complimentary class credit to the member\'s Momence account as a goodwill gesture.',
+      'Transferred the member\'s booking to the next available session at no extra charge.',
+      'No alternative was offered — member was turned away and no follow-up was initiated.',
+    ];
+  }
+  if (id === 'requestedResolution' || id === 'requestedChange') {
+    return [
+      'Member requested a class credit and a written apology from the studio manager.',
+      'Member asked for a callback within 24 hours to confirm the resolution.',
+      'Member requested the late-arrival policy be reviewed and communicated more clearly to members.',
+    ];
+  }
+  if (id === 'reportedImpact') {
+    return [
+      'Member felt unwelcome and stated they are reconsidering their membership renewal.',
+      'Member left without attending the session and said the experience affected their confidence in the studio.',
+      'Member was frustrated but remained calm — noted the issue was a first occurrence for them.',
+    ];
+  }
+  if (id === 'immediateAction') {
+    return [
+      'Apologised to the member on behalf of the studio and escalated to the studio manager.',
+      'Offered a complimentary session credit immediately and logged the concern in Momence.',
+      'No immediate action taken — member left before any resolution could be offered.',
+    ];
+  }
+  if (id === 'sessionFeedback') {
+    return [
+      'Member noted the instructor\'s cues were unclear during the tuck sequence and asked for more corrections.',
+      'Member commented that the music was too loud and affected their ability to follow instructions.',
+      'Member praised the energy in the room but felt the pacing was faster than usual for this class type.',
+    ];
+  }
+  if (id === 'studioArea') {
+    return [
+      'Locker room — member reported a broken lock on locker #12 and visible mould near the showers.',
+      'PowerCycle studio — bike near the door had a loose handlebar that was flagged during class.',
+      'Reception and waiting area — member noted the area felt overcrowded before the 7 AM class.',
+    ];
+  }
+  if (id.toLowerCase().includes('description') || /describe|issue|detail/.test(label)) {
     return [
       'Member reported the concern during a studio touchpoint and requested follow-up.',
       'Member stated the issue affected their session experience and wants a resolution timeline.',
       'Team member documented the concern with studio, session, and member impact context.',
     ];
   }
-  if (id.includes('resolution') || /resolution|outcome|action/.test(label)) {
+  if (id.toLowerCase().includes('resolution') || /resolution|outcome|action/.test(label)) {
     return [
       'Member requested a callback with the confirmed next step.',
       'Member requested written confirmation by WhatsApp or email.',
       'Team member offered an interim solution while the issue is reviewed.',
     ];
   }
-  if (id.includes('feedback') || /feedback|comment/.test(label)) {
+  if (id.toLowerCase().includes('feedback') || /feedback|comment/.test(label)) {
     return [
       'Member expressed mixed feedback and asked that the concern be shared internally.',
       'Member complimented the instructor and noted the class energy felt strong.',
@@ -4313,7 +4413,7 @@ const DetailCaptureForm: React.FC<{
                     onChange={(event) => setValue(id, event.target.value)}
                     rows={4}
                     className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                    placeholder="Describe the issue and relevant details..."
+                    placeholder={field.placeholder || 'Describe the issue and relevant details...'}
                   />
                   <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
                 </>
@@ -4325,7 +4425,7 @@ const DetailCaptureForm: React.FC<{
                     value={values[id] || ''}
                     onChange={(event) => setValue(id, event.target.value)}
                     className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                    placeholder={field.label}
+                    placeholder={field.placeholder || field.label}
                   />
                   {field.type === 'text' && (
                     <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
