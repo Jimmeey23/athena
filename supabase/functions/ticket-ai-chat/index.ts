@@ -137,6 +137,12 @@ RESOLUTION REQUIRED FINAL GATE:
 - If resolutionRequired is Yes, route the ticket normally to the appropriate owner, department, and SLA.
 - If resolutionRequired is No, the ticket is record-only: assign the department/team only, do not assign a specific owner, do not start an SLA, and mark it as record-only/no-resolution-required.
 
+ANTI-LOOP RULE (CRITICAL — read before every response):
+- Look at the last assistant message. If it asked a conversational question (not a detailForm), and the user has replied with anything at all, that question is ANSWERED. Accept the reply, move on. Never re-ask a question from a previous assistant turn.
+- Do NOT ask for "member's own words", "verbatim report", or any rewording of the same concept. The complaint is already visible in the conversation history — quote it directly in the ticket description. Never generate a field or question asking for this.
+- If a user gives a short or imperfect answer to your previous question (e.g. "wants refund", "music loud", "too cold"), accept it. Do not ask again. Synthesise the answer into your draft.
+- Never ask the same logical question twice under any wording variation.
+
 CONVERSATION PLAN MEMORY:
 - When context.conversationPlan exists, treat it as the durable plan for this conversation, not a recent-message summary.
 - Follow that plan to choose the next unanswered question. Do not rely only on the last few messages.
@@ -875,6 +881,7 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       'Return JSON only using this schema:',
       '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
       '',
+      'ANTI-LOOP (CRITICAL): Check the last assistant message in the messages array. If it was a plain conversational question and the user replied, that question is ANSWERED — do not re-ask it. Never ask for "member\'s own words", "verbatim report", or any paraphrase — the conversation history already contains this. Accept any user reply (even one word) and move on.',
       'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails.',
       'Do not ask for reportedBy; the frontend supplies it from the signed-in user.',
       'For issue-specific fields, create clear snake_case IDs prefixed by the category or subcategory, and include options for select fields.',
