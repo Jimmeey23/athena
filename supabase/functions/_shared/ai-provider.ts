@@ -52,7 +52,7 @@ export function resolveAiProviderConfig(env: EnvReader, requestedProvider?: stri
     return {
       provider,
       apiKey,
-      model: clean(env('ANTHROPIC_MODEL') || env('CLAUDE_MODEL')) || 'claude-opus-4-5',
+      model: clean(env('ANTHROPIC_MODEL') || env('CLAUDE_MODEL')) || 'claude-haiku-4-5',
       baseUrl: trimTrailingSlash(clean(env('ANTHROPIC_BASE_URL') || env('CLAUDE_BASE_URL')) || 'https://api.anthropic.com/v1'),
       maxTokens: Number(clean(env('ANTHROPIC_MAX_TOKENS') || env('CLAUDE_MAX_TOKENS'))) || 3000,
     };
