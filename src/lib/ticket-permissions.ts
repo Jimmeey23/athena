@@ -1,4 +1,4 @@
-import { getEmployee } from './ticketing-data';
+import { getEmployee, getEscalationTarget } from './ticketing-data';
 
 type AccessRole = 'admin' | 'support' | string;
 
@@ -13,6 +13,12 @@ interface VisibilityPermissionTicket {
 }
 
 interface StatusPermissionInput {
+  accessRole: AccessRole;
+  identityValues: Iterable<string>;
+  ticket: StatusPermissionTicket;
+}
+
+interface ResolutionPermissionInput {
   accessRole: AccessRole;
   identityValues: Iterable<string>;
   ticket: StatusPermissionTicket;
@@ -37,6 +43,17 @@ function ticketOwnerKeys(assignedTo?: string | null): Set<string> {
   ].filter(Boolean));
 }
 
+function employeeKeys(name?: string | null): Set<string> {
+  const normalizedName = normalizeIdentity(name);
+  const employee = name ? getEmployee(name) : undefined;
+  const baseName = normalizedName.replace(/\s+-\s+.*$/, '').trim();
+  return new Set([
+    normalizedName,
+    baseName,
+    normalizeIdentity(employee?.email),
+  ].filter(Boolean));
+}
+
 export function canUpdateTicketStatus({ accessRole, identityValues, ticket }: StatusPermissionInput): boolean {
   if (accessRole === 'admin') return true;
 
@@ -45,6 +62,22 @@ export function canUpdateTicketStatus({ accessRole, identityValues, ticket }: St
 
   for (const identity of identityValues) {
     if (ownerKeys.has(normalizeIdentity(identity))) return true;
+  }
+
+  return false;
+}
+
+export function canEditTicketResolution({ accessRole, identityValues, ticket }: ResolutionPermissionInput): boolean {
+  if (accessRole === 'admin') return true;
+
+  const allowedKeys = new Set([
+    ...ticketOwnerKeys(ticket.assignedTo),
+    ...employeeKeys(ticket.assignedTo ? getEscalationTarget(ticket.assignedTo) : undefined),
+  ]);
+  if (allowedKeys.size === 0) return false;
+
+  for (const identity of identityValues) {
+    if (allowedKeys.has(normalizeIdentity(identity))) return true;
   }
 
   return false;

@@ -75,6 +75,8 @@ export interface ResolutionAssistant {
   closureChecklist: string[];
 }
 
+export type RecommendedResolutionDraft = Pick<Ticket, 'title' | 'description' | 'category' | 'subCategory' | 'priority' | 'studio'> & Partial<Pick<Ticket, 'assignedTo' | 'memberName' | 'memberContact' | 'classType' | 'classDateTime' | 'sentiment'>>;
+
 function textOf(...values: Array<string | null | undefined>): string {
   return values.filter(Boolean).join(' ').toLowerCase();
 }
@@ -272,6 +274,32 @@ function buildPlaybook(input: BuildSmartTicketIntelligenceInput, score: number):
   };
 }
 
+export function buildRecommendedResolutionSteps(draft: RecommendedResolutionDraft): string[] {
+  const riskScore = ticketRiskScore({
+    title: draft.title,
+    description: draft.description,
+    category: draft.category,
+    subCategory: draft.subCategory,
+    priority: draft.priority,
+    sentiment: draft.sentiment,
+  });
+  const playbook = buildPlaybook({ draft: draft as BuildSmartTicketIntelligenceInput['draft'] }, riskScore);
+  const steps = [
+    ...playbook.steps,
+    draft.memberName || draft.memberContact
+      ? 'Verify the linked Momence member record, active package, and preferred follow-up channel before taking action.'
+      : 'Attach or explicitly mark the Momence member context unavailable before closure.',
+    draft.classType || draft.classDateTime
+      ? 'Confirm the selected Momence session, booking status, and class impact details are accurate.'
+      : 'Attach the relevant Momence session if the issue affected a specific class, booking, or instructor touchpoint.',
+    draft.priority === 'Critical' || riskScore >= 72
+      ? 'Escalate same day with the owner, escalation manager, member-facing response owner, and response timeline.'
+      : 'Log the owner action, internal note, and member-facing update before moving the ticket to Resolved.',
+  ];
+
+  return Array.from(new Set(steps.map((step) => step.trim()).filter(Boolean))).slice(0, 6);
+}
+
 function intakeSuggestionsFor(context: SmartIntakeCopilotInput['context'], pendingFieldLabel?: string): string[] {
   const label = String(pendingFieldLabel || '').toLowerCase();
   const combined = textOf(context.title, context.description, context.category, context.subCategory, label);
@@ -378,11 +406,7 @@ export function buildResolutionAssistant(ticket: Ticket, now = Date.now()): Reso
   const memberLabel = ticket.memberName || 'the community member';
   const priorityReason = `${ticket.priority} priority is ${slaState.toLowerCase()} with ${level.toLowerCase()} smart risk.`;
   const suggestedMemberReply = `${memberLabel}, thank you for sharing this with us. We have documented the concern and ${ticket.assignedTo || playbook.owner} is reviewing the next step for ${ticket.subCategory || ticket.category}.`;
-  const nextActions = [
-    ...playbook.steps,
-    ticket.memberName || ticket.memberContact ? 'Confirm the linked Momence member record before closing.' : 'Attach the correct Momence member record before closing.',
-    ticket.classType || ticket.classDateTime ? 'Confirm the Momence session context is accurate.' : 'Attach the relevant fetched Momence session if the issue is session-related.',
-  ].slice(0, 5);
+  const nextActions = buildRecommendedResolutionSteps(ticket).slice(0, 5);
   const closureChecklist = [
     'Member outcome or requested resolution is documented.',
     'Owner, department, priority, and SLA rationale are clear.',

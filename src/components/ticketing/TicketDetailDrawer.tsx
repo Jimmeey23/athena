@@ -1,5 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ticket, PRIORITY_SLA, STATUSES, ASSOCIATES, CATEGORIES, STUDIOS, TRAINERS, getEscalationTarget } from '@/lib/ticketing-data';
+import {
+  Ticket,
+  PRIORITY_SLA,
+  STATUSES,
+  ASSOCIATES,
+  CATEGORIES,
+  STUDIOS,
+  TRAINERS,
+  RESOLUTION_ESCALATION_OPTIONS,
+  RESOLUTION_FOLLOW_UP_CHANNELS,
+  RESOLUTION_MEMBER_RESPONSES,
+  RESOLUTION_PATHWAYS,
+  RESOLUTION_STAGES,
+  getEscalationTarget,
+} from '@/lib/ticketing-data';
 import { buildTicketEditPatch } from '@/lib/ticket-editing';
 import { canSelectStatusFromTicket, validateTicketStatusUpdate } from '@/lib/ticket-status-lifecycle';
 import { TicketStatusUpdateInput } from './TicketContext';
@@ -48,19 +62,85 @@ function tagsFromInput(value: string): string[] {
   return Array.from(new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean)));
 }
 
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function getDisplayResolutionSteps(ticket: Ticket, assistantSteps: string[]): string[] {
+  const planned = stringArray(ticket.metadata?.resolutionPlan?.steps);
+  if (planned.length) return planned;
+  const recommended = stringArray(ticket.metadata?.recommendedResolutionSteps);
+  if (recommended.length) return recommended;
+  return stringArray(assistantSteps);
+}
+
+function stepsFromTextarea(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split('\n')
+      .map((line) => line.replace(/^[-*\d.)\s]+/, '').trim())
+      .filter(Boolean)
+  ));
+}
+
+function inferResolutionPathway(ticket: Ticket): string {
+  const text = `${ticket.category} ${ticket.subCategory} ${ticket.description}`.toLowerCase();
+  if (/billing|payment|refund|invoice|charge|package|membership/.test(text)) return 'Billing adjustment';
+  if (/momence|booking|waitlist|class|session|attendance|check.?in/.test(text)) return 'Momence correction';
+  if (/repair|maintenance|ac|hvac|clean|facility|equipment|studio tool/.test(text)) return 'Operations repair';
+  if (/trainer|instructor|cue|class quality|music|form/.test(text)) return 'Training coaching';
+  if (/partnership|hosted|event|influencer|partner/.test(text)) return 'Partnership follow-up';
+  if (/policy|terms|rule|cancellation/.test(text)) return 'Policy clarification';
+  return 'Member communication';
+}
+
+function defaultResolutionFields(ticket: Ticket) {
+  const plan = ticket.metadata?.resolutionPlan;
+  return {
+    stage: plan?.stage || (ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'Resolved pending confirmation' : 'Not started'),
+    pathway: plan?.pathway || inferResolutionPathway(ticket),
+    owner: plan?.owner || ticket.assignedTo,
+    targetDate: plan?.targetDate || '',
+    memberFollowUpChannel: plan?.memberFollowUpChannel || 'WhatsApp',
+    memberResponse: plan?.memberResponse || 'Not captured',
+    escalationNeeded: plan?.escalationNeeded || 'No escalation needed',
+  };
+}
+
+function selectValues(values: readonly string[], current: string): string[] {
+  return current && !values.includes(current) ? [current, ...values] : [...values];
+}
+
 export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
-  const { updateTicket, updateTicketStatus, canUpdateTicketStatus, deleteTicket } = useTickets();
+  const { updateTicket, updateTicketStatus, updateTicketResolutionPlan, canUpdateTicketStatus, canEditTicketResolution, deleteTicket } = useTickets();
   const [editingLinkedContext, setEditingLinkedContext] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusError, setStatusError] = useState('');
+  const [resolutionSaving, setResolutionSaving] = useState(false);
+  const [resolutionError, setResolutionError] = useState('');
+  const [resolutionStepsText, setResolutionStepsText] = useState('');
+  const [resolutionOwnerNotes, setResolutionOwnerNotes] = useState('');
+  const [resolutionStage, setResolutionStage] = useState('');
+  const [resolutionPathway, setResolutionPathway] = useState('');
+  const [resolutionOwner, setResolutionOwner] = useState('');
+  const [resolutionTargetDate, setResolutionTargetDate] = useState('');
+  const [resolutionFollowUpChannel, setResolutionFollowUpChannel] = useState('');
+  const [resolutionMemberResponse, setResolutionMemberResponse] = useState('');
+  const [resolutionEscalation, setResolutionEscalation] = useState('');
   const [editValues, setEditValues] = useState<Partial<Ticket>>({});
   const [statusValues, setStatusValues] = useState<TicketStatusUpdateInput>(() => defaultStatusValues(ticket));
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
   const ticketAttachments = useMemo(() => ticket ? readTicketAttachments(ticket) : [], [ticket]);
   const resolutionAssistant = useMemo(() => ticket ? buildResolutionAssistant(ticket) : null, [ticket]);
+  const resolutionSteps = useMemo(() => (
+    ticket ? getDisplayResolutionSteps(ticket, resolutionAssistant?.nextActions || []) : []
+  ), [resolutionAssistant?.nextActions, ticket]);
+  const resolutionStepsKey = resolutionSteps.join('\n');
+  const storedResolutionFields = useMemo(() => ticket ? defaultResolutionFields(ticket) : null, [ticket]);
 
   useEffect(() => {
     setEditingLinkedContext(false);
@@ -69,7 +149,32 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
     setEditError('');
     setStatusValues(defaultStatusValues(ticket));
     setStatusError('');
+    setResolutionError('');
   }, [ticket]);
+
+  useEffect(() => {
+    setResolutionStepsText(resolutionStepsKey);
+    setResolutionOwnerNotes(ticket?.metadata?.resolutionPlan?.ownerNotes || '');
+    setResolutionStage(storedResolutionFields?.stage || '');
+    setResolutionPathway(storedResolutionFields?.pathway || '');
+    setResolutionOwner(storedResolutionFields?.owner || '');
+    setResolutionTargetDate(storedResolutionFields?.targetDate || '');
+    setResolutionFollowUpChannel(storedResolutionFields?.memberFollowUpChannel || '');
+    setResolutionMemberResponse(storedResolutionFields?.memberResponse || '');
+    setResolutionEscalation(storedResolutionFields?.escalationNeeded || '');
+    setResolutionError('');
+  }, [
+    resolutionStepsKey,
+    storedResolutionFields?.escalationNeeded,
+    storedResolutionFields?.memberFollowUpChannel,
+    storedResolutionFields?.memberResponse,
+    storedResolutionFields?.owner,
+    storedResolutionFields?.pathway,
+    storedResolutionFields?.stage,
+    storedResolutionFields?.targetDate,
+    ticket?.id,
+    ticket?.metadata?.resolutionPlan?.ownerNotes,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +209,7 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
   const currentValues = { ...ticket, ...editValues };
   const subCategories = CATEGORIES[currentValues.category || ticket.category] || ['Other'];
   const statusAllowed = canUpdateTicketStatus(ticket);
+  const resolutionAllowed = canEditTicketResolution(ticket);
   const statusChanged = statusValues.status !== ticket.status;
   const statusValidationErrors = statusAllowed ? validateTicketStatusUpdate(ticket, statusValues) : [];
   const statusInputStarted = statusChanged ||
@@ -122,6 +228,15 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
   const followUpHistory = Array.isArray(ticket.metadata?.followUpHistory)
     ? ticket.metadata.followUpHistory
     : [];
+  const resolutionChanged = resolutionStepsText !== resolutionStepsKey ||
+    resolutionOwnerNotes !== (ticket.metadata?.resolutionPlan?.ownerNotes || '') ||
+    resolutionStage !== (storedResolutionFields?.stage || '') ||
+    resolutionPathway !== (storedResolutionFields?.pathway || '') ||
+    resolutionOwner !== (storedResolutionFields?.owner || '') ||
+    resolutionTargetDate !== (storedResolutionFields?.targetDate || '') ||
+    resolutionFollowUpChannel !== (storedResolutionFields?.memberFollowUpChannel || '') ||
+    resolutionMemberResponse !== (storedResolutionFields?.memberResponse || '') ||
+    resolutionEscalation !== (storedResolutionFields?.escalationNeeded || '');
   const saveEdits = async () => {
     setSaving(true);
     setEditError('');
@@ -156,6 +271,32 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
       setStatusError(error instanceof Error ? error.message : 'Unable to update ticket status.');
     } finally {
       setStatusSaving(false);
+    }
+  };
+
+  const saveResolutionPlan = async () => {
+    if (!resolutionAllowed) {
+      setResolutionError('Only the ticket owner, escalation manager, or admin can edit the resolution plan.');
+      return;
+    }
+    setResolutionSaving(true);
+    setResolutionError('');
+    try {
+      await updateTicketResolutionPlan(ticket.id, {
+        steps: stepsFromTextarea(resolutionStepsText),
+        stage: resolutionStage,
+        pathway: resolutionPathway,
+        owner: resolutionOwner,
+        targetDate: resolutionTargetDate,
+        memberFollowUpChannel: resolutionFollowUpChannel,
+        memberResponse: resolutionMemberResponse,
+        escalationNeeded: resolutionEscalation,
+        ownerNotes: resolutionOwnerNotes,
+      });
+    } catch (error) {
+      setResolutionError(error instanceof Error ? error.message : 'Unable to save resolution plan.');
+    } finally {
+      setResolutionSaving(false);
     }
   };
 
@@ -471,6 +612,123 @@ export const TicketDetailDrawer: React.FC<Props> = ({ ticket, onClose }) => {
               </div>
             </div>
           )}
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.05)]">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-700">Resolution plan</div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Structured owner plan, member response path, and next actions. Editable by {ticket.assignedTo} and escalation manager {getEscalationTarget(ticket.assignedTo)}.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{resolutionStage || 'Not started'}</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">{resolutionPathway || 'Member communication'}</span>
+                {ticket.metadata?.resolutionPlan?.updatedAt && (
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    Updated {new Date(ticket.metadata.resolutionPlan.updatedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {!resolutionAllowed && (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                Only the ticket owner or escalation manager can edit this resolution plan.
+              </div>
+            )}
+
+            <div className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <EditSelect
+                  label="Resolution stage"
+                  value={resolutionStage}
+                  values={selectValues(RESOLUTION_STAGES, resolutionStage)}
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionStage}
+                />
+                <EditSelect
+                  label="Resolution pathway"
+                  value={resolutionPathway}
+                  values={selectValues(RESOLUTION_PATHWAYS, resolutionPathway)}
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionPathway}
+                />
+                <EditSelect
+                  label="Resolution owner"
+                  value={resolutionOwner}
+                  values={selectValues(ASSOCIATES.map((associate) => associate.name), resolutionOwner)}
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionOwner}
+                />
+                <EditText
+                  label="Target resolution date"
+                  value={resolutionTargetDate}
+                  type="date"
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionTargetDate}
+                />
+                <EditSelect
+                  label="Member follow-up channel"
+                  value={resolutionFollowUpChannel}
+                  values={selectValues(RESOLUTION_FOLLOW_UP_CHANNELS, resolutionFollowUpChannel)}
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionFollowUpChannel}
+                />
+                <EditSelect
+                  label="Member response"
+                  value={resolutionMemberResponse}
+                  values={selectValues(RESOLUTION_MEMBER_RESPONSES, resolutionMemberResponse)}
+                  disabled={!resolutionAllowed}
+                  onChange={setResolutionMemberResponse}
+                />
+                <div className="md:col-span-2">
+                  <EditSelect
+                    label="Escalation requirement"
+                    value={resolutionEscalation}
+                    values={selectValues(RESOLUTION_ESCALATION_OPTIONS, resolutionEscalation)}
+                    disabled={!resolutionAllowed}
+                    onChange={setResolutionEscalation}
+                  />
+                </div>
+              </div>
+              <label className="grid gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Recommended steps
+                <textarea
+                  value={resolutionStepsText}
+                  rows={7}
+                  disabled={!resolutionAllowed}
+                  onChange={(event) => setResolutionStepsText(event.target.value)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium normal-case tracking-normal text-stone-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100 disabled:text-slate-600"
+                />
+              </label>
+              <EditTextarea
+                label="Owner / manager notes"
+                value={resolutionOwnerNotes}
+                rows={3}
+                disabled={!resolutionAllowed}
+                onChange={setResolutionOwnerNotes}
+              />
+            </div>
+
+            {resolutionError && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                {resolutionError}
+              </div>
+            )}
+
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={saveResolutionPlan}
+                disabled={!resolutionAllowed || !resolutionChanged || resolutionSaving}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-stone-950 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Save className="h-3.5 w-3.5" />
+                {resolutionSaving ? 'Saving...' : 'Save resolution plan'}
+              </button>
+            </div>
+          </div>
 
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 block">Assigned To</label>

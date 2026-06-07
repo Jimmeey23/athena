@@ -14,8 +14,8 @@ describe('template form dialog layout', () => {
   it('uses a short warm personalized first message', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
 
-    expect(source).toContain('`Hi ${firstName}, happy to help. What should we log today? 🙂`');
-    expect(source).toContain('"Hi, happy to help. What should we log today? 🙂"');
+    expect(source).toContain("`Hey ${firstName}! 👋 What would you like to log today? Just describe what happened and I'll handle the rest.`");
+    expect(source).toContain('"Hey! I\'m Athena 👋 What would you like to log today? Tell me what happened and I\'ll take it from there."');
     expect(source).not.toContain('your ticket intake assistant.\\n\\nTell me what happened');
   });
 
@@ -139,7 +139,7 @@ describe('template form dialog layout', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
 
     expect(source).toContain('optimizeIntakePromptForAthena(input');
-    expect(source).toContain('aria-label="Optimize prompt for Athena"');
+    expect(source).toContain('aria-label="Optimise prompt for Athena"');
     expect(source).not.toContain('>Copilot</span>');
     expect(source).not.toContain('intakeCopilot.suggestions');
   });

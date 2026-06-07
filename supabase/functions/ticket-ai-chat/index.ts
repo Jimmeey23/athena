@@ -160,6 +160,7 @@ TICKET QUALITY:
 - Use "Internal report summary" for Internal Reporting. Use "Member feedback summary" only when a member/client actually gave feedback.
 - Do not include stale multi-value context (multiple studios, instructors, or sessions) unless the user explicitly selected multiple affected records.
 - Priority: Critical for safety or access risk; High for service failure affecting live classes; Medium for operational issues; Low for cosmetic or deferred items.
+- Every published draft must include ticket.metadata.recommendedResolutionSteps with 4-6 concise owner action steps. Steps must be operational, specific to the issue family, and include Momence verification when member/session/package data is involved.
 - Ticket creation happens only after explicit user approval of the displayed draft.
 `.trim();
 
@@ -765,7 +766,9 @@ function normalizeAiDetailForm(value: unknown): AiDetailForm | null {
 function normalizeAiIntakeResponse(value: Record<string, unknown> | null): AiIntakeResponse | null {
   if (!value) return null;
   const detailForm = normalizeAiDetailForm(value.detailForm);
-  const ticket = value.ticket && typeof value.ticket === 'object' ? value.ticket as DraftTicket : null;
+  const ticket = value.ticket && typeof value.ticket === 'object'
+    ? withRecommendedResolutionMetadata(value.ticket as DraftTicket)
+    : null;
   return {
     needsMoreInfo: Boolean(value.needsMoreInfo || detailForm),
     reply: cleanString(value.reply, detailForm ? 'Please complete the structured intake form below.' : 'I drafted the ticket below. Please review it before publishing.'),
@@ -778,6 +781,77 @@ function normalizeAiIntakeResponse(value: Record<string, unknown> | null): AiInt
     missingFields: Array.isArray(value.missingFields) ? value.missingFields.map(String) : [],
     publishable: typeof value.publishable === 'boolean' ? value.publishable : !(value.needsMoreInfo || detailForm),
     urgencyReason: cleanString(value.urgencyReason),
+  };
+}
+
+function safeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => cleanString(item)).filter(Boolean).slice(0, 8);
+}
+
+function recommendedResolutionStepsForDraft(draft: DraftTicket): string[] {
+  const combined = [
+    draft.title,
+    draft.description,
+    draft.category,
+    draft.subCategory,
+    draft.priority,
+    draft.sentiment || '',
+  ].join(' ').toLowerCase();
+
+  const steps: string[] = [];
+  if (/refund|billing|payment|membership|package|freeze|roll\s?over|credit|renewal|pricing/.test(combined)) {
+    steps.push(
+      'Verify the member, active package, purchase/payment context, and relevant Momence booking before taking action.',
+      'Confirm the member requested outcome, amount or credit impact, and preferred follow-up channel.',
+      'Document the approved resolution path, owner, and response deadline in the ticket.',
+    );
+  } else if (/facility|equipment|maintenance|repair|studio|temperature|clean|ac|plumbing|electrical|door|lock|tool|bike|machine/.test(combined)) {
+    steps.push(
+      'Confirm the exact studio space, equipment/tool, fault state, and current operational impact.',
+      'Assign the studio operations owner to inspect or coordinate the fix before the next affected session.',
+      'Record any temporary workaround and whether members or scheduled sessions were affected.',
+    );
+  } else if (/class|session|trainer|instructor|booking|waitlist|late|check.?in|schedule/.test(combined)) {
+    steps.push(
+      'Verify the Momence session, booking status, instructor, class time, and impacted member list.',
+      'Confirm what the member reported, what was offered in the moment, and what follow-up they requested.',
+      'Route to the class/session owner with the expected member-facing response timeline.',
+    );
+  } else {
+    steps.push(
+      'Acknowledge the documented member or staff concern and confirm the expected outcome.',
+      'Route the ticket to the assigned owner with the specific next action and due timeline.',
+      'Log the internal action taken and member-facing update before resolving the ticket.',
+    );
+  }
+
+  steps.push(
+    draft.memberName || draft.memberContact
+      ? 'Confirm the linked Momence member record and contact details before closure.'
+      : 'Attach the Momence member record if the resolution depends on a specific community member.',
+    draft.classType || draft.classDateTime
+      ? 'Confirm the selected Momence session context is accurate before closure.'
+      : 'Attach the relevant Momence session if the issue affected a class, booking, or instructor touchpoint.',
+  );
+
+  if (draft.priority === 'Critical' || /angry|frustrat|unsafe|injur|breach|legal|escalat/.test(combined)) {
+    steps.push('Escalate same day to the escalation manager with the risk, owner, and response timeline.');
+  }
+
+  return Array.from(new Set(steps)).slice(0, 6);
+}
+
+function withRecommendedResolutionMetadata(draft: DraftTicket): DraftTicket {
+  const metadata = draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {};
+  const existingSteps = safeStringList(metadata.recommendedResolutionSteps);
+  const recommendedResolutionSteps = existingSteps.length ? existingSteps : recommendedResolutionStepsForDraft(draft);
+  return {
+    ...draft,
+    metadata: {
+      ...metadata,
+      recommendedResolutionSteps,
+    },
   };
 }
 
@@ -879,7 +953,7 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       instructions,
       '',
       'Return JSON only using this schema:',
-      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": DraftTicket|null, "suggestedChips": []}',
+      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": {"title": string, "description": string, "category": string, "subCategory": string, "priority": string, "studio": string, "metadata": {"recommendedResolutionSteps": string[]}}|null, "suggestedChips": []}',
       '',
       'ANTI-LOOP (CRITICAL): Check the last assistant message in the messages array. If it was a plain conversational question and the user replied, that question is ANSWERED — do not re-ask it. Never ask for "member\'s own words", "verbatim report", or any paraphrase — the conversation history already contains this. Accept any user reply (even one word) and move on.',
       'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails.',
@@ -892,6 +966,7 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       'If memberName/memberContact is needed, use memberName so the frontend renders Momence member search.',
       'If class/session details are needed, use classType so the frontend renders Momence session search.',
       'Do not include memberName, memberContact, classType, sessionId, classDateTime, or trainer in detailForm or ticket unless those fields are necessary for the described incident.',
+      'When ticket is not null, include ticket.metadata.recommendedResolutionSteps with 4-6 issue-specific steps the owner can follow to resolve the ticket.',
     ].join('\n'),
     userContent: JSON.stringify({
       context: body.context || {},
@@ -1321,6 +1396,10 @@ function toTicketRow(
   conversationId?: string | null,
   createdBy?: string | null,
 ) {
+  const draftMetadata = draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {};
+  const recommendedResolutionSteps = safeStringList(draftMetadata.recommendedResolutionSteps).length
+    ? safeStringList(draftMetadata.recommendedResolutionSteps)
+    : recommendedResolutionStepsForDraft(draft);
   const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
   const recordOnly = !profileOnly && !ticketRequiresResolution(context);
   const priority = normalizePriority(draft.priority);
@@ -1368,7 +1447,8 @@ function toTicketRow(
     sentiment: draft.sentiment || null,
     conversation_summary: draft.conversationSummary || draft.description,
     metadata: {
-      ...(draft.metadata || {}),
+      ...draftMetadata,
+      recommendedResolutionSteps,
       source_ref: sourceRef,
       profileOnly,
       resolution_required: !recordOnly,
@@ -1611,7 +1691,7 @@ Deno.serve(async (request) => {
       const filteredAiForm = filterAiDetailFormFields(aiResponse.detailForm, guardedMissingFields);
 
       const needsMoreInfo = aiResponse.needsMoreInfo || filteredAiForm !== null || guardedMissingFields.length > 0;
-      const aiTicket = needsMoreInfo ? null : aiResponse.ticket || fallbackDraft(messages, aiContext);
+      const aiTicket = needsMoreInfo ? null : withRecommendedResolutionMetadata(aiResponse.ticket || fallbackDraft(messages, aiContext));
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
         promptProfile: `${promptProfile}:ai-dynamic`,
@@ -1661,7 +1741,7 @@ Deno.serve(async (request) => {
       });
     }
 
-    const draft = fallbackDraft(messages, effectiveContext);
+    const draft = withRecommendedResolutionMetadata(fallbackDraft(messages, effectiveContext));
     const draftMissingFields = requiredFieldsForIssue(latestUserMessage, {
       ...effectiveContext,
       ...draft,

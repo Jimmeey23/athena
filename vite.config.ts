@@ -1,10 +1,10 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-function resolveSupabaseEnv() {
-  const a = process.env.VITE_TICKETING_SUPABASE_URL || '';
-  const b = process.env.VITE_TICKETING_SUPABASE_ANON_KEY || '';
+export function resolveSupabaseEnv(env: Record<string, string | undefined> = process.env) {
+  const a = env.VITE_TICKETING_SUPABASE_URL || '';
+  const b = env.VITE_TICKETING_SUPABASE_ANON_KEY || '';
   const aIsUrl = a.startsWith('http://') || a.startsWith('https://');
   const bIsUrl = b.startsWith('http://') || b.startsWith('https://');
   if (!aIsUrl && bIsUrl) {
@@ -13,9 +13,14 @@ function resolveSupabaseEnv() {
   return { url: a, anonKey: b };
 }
 
-const { url: supabaseUrl, anonKey: supabaseAnonKey } = resolveSupabaseEnv();
+export default defineConfig(({ mode }) => {
+  const env = {
+    ...loadEnv(mode, process.cwd(), ''),
+    ...process.env,
+  };
+  const { url: supabaseUrl, anonKey: supabaseAnonKey } = resolveSupabaseEnv(env);
 
-export default defineConfig(({ mode }) => ({
+  return {
   server: {
     host: "0.0.0.0",
     port: 5000,
@@ -52,4 +57,5 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-}));
+  };
+});

@@ -9,7 +9,7 @@ const corsHeaders = {
 type SearchBody = {
   path?: string;
   method?: string;
-  params?: Record<string, string | number | boolean | undefined>;
+  params?: Record<string, string | number | boolean | Array<string | number | boolean> | undefined>;
   body?: unknown;
 };
 
@@ -21,11 +21,23 @@ type TokenResponse = {
 const ALLOWED_REQUESTS: Array<{ method: string; pattern: RegExp }> = [
   { method: 'GET', pattern: /^\/host\/members$/ },
   { method: 'GET', pattern: /^\/host\/members\/\d+$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/name$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/email$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/phone-number$/ },
+  { method: 'DELETE', pattern: /^\/host\/members\/\d+\/phone-number$/ },
+  { method: 'GET', pattern: /^\/host\/members\/\d+\/appointments$/ },
   { method: 'GET', pattern: /^\/host\/members\/\d+\/bought-memberships\/active$/ },
+  { method: 'PUT', pattern: /^\/host\/members\/\d+\/bought-memberships\/\d+\/credits$/ },
   { method: 'GET', pattern: /^\/host\/members\/\d+\/notes$/ },
   { method: 'GET', pattern: /^\/host\/members\/\d+\/sessions$/ },
+  { method: 'GET', pattern: /^\/host\/appointments\/reservations$/ },
   { method: 'GET', pattern: /^\/host\/memberships$/ },
   { method: 'GET', pattern: /^\/host\/sales$/ },
+  { method: 'POST', pattern: /^\/host\/reports$/ },
+  { method: 'GET', pattern: /^\/host\/reports\/\d+$/ },
+  { method: 'POST', pattern: /^\/host\/checkout$/ },
+  { method: 'POST', pattern: /^\/host\/checkout\/prices$/ },
+  { method: 'POST', pattern: /^\/host\/checkout\/compatible-memberships$/ },
   { method: 'GET', pattern: /^\/host\/sessions$/ },
   { method: 'GET', pattern: /^\/host\/sessions\/\d+$/ },
   { method: 'GET', pattern: /^\/host\/sessions\/\d+\/bookings$/ },
@@ -116,7 +128,14 @@ Deno.serve(async (request) => {
 
     const url = new URL(`${MOMENCE_BASE_URL}${path}`);
     Object.entries(body.params || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
+      if (value === undefined || value === '') return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (item !== '') url.searchParams.append(key, String(item));
+        });
+        return;
+      }
+      url.searchParams.set(key, String(value));
     });
 
     const token = await getAccessToken();

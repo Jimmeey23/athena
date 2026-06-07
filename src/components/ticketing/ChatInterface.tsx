@@ -2182,7 +2182,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   Online
                 </span>
                 <span className="hidden rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600 sm:inline-flex">
-                  o4-mini
+                  gpt-4o-mini
                 </span>
               </div>
               <p className="truncate text-xs text-slate-500">Your AI ops assistant · Physique 57 India</p>

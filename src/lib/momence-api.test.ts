@@ -3,6 +3,7 @@ import { backendSupabase } from './backend-supabase';
 import {
   buildMomenceInsightSummary,
   freezeMomenceMembership,
+  listMomenceMembers,
   listMomenceHostMembershipOptions,
   loadMomenceTicketContext,
   loadMomenceSessionsProgressively,
@@ -260,6 +261,48 @@ describe('Momence host membership options', () => {
   });
 });
 
+describe('Momence member listing', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', 'http://localhost/momence-search');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('loads the first host members page without requiring a search query', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      payload: [
+        { id: 42, firstName: 'Asha', lastName: 'Rao', email: 'asha@example.com', phoneNumber: '+919900000000' },
+      ],
+    }), { status: 200 })));
+
+    await expect(listMomenceMembers()).resolves.toEqual([
+      expect.objectContaining({
+        id: '42',
+        label: 'Asha Rao',
+        email: 'asha@example.com',
+      }),
+    ]);
+
+    expect(fetch).toHaveBeenCalledWith('http://localhost/momence-search', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        path: '/host/members',
+        method: 'GET',
+        params: {
+          page: 0,
+          pageSize: 20,
+          sortBy: 'lastSeenAt',
+          sortOrder: 'DESC',
+        },
+        body: undefined,
+      }),
+    }));
+  });
+});
+
 describe('Momence session search', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_MOMENCE_SESSION_FUNCTION_URL', 'http://localhost/momence-session-search');
@@ -338,6 +381,54 @@ describe('Momence session search', () => {
     const sessions = await loading;
     expect(onPage).toHaveBeenCalledTimes(2);
     expect(sessions.map((session) => session.id)).toEqual(['501', '502']);
+  });
+});
+
+describe('Momence session search configuration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('uses the configured generic Momence function when no dedicated session function is provided', async () => {
+    vi.stubEnv('VITE_MOMENCE_FUNCTION_URL', 'http://localhost/functions/v1/momence-search');
+    vi.stubEnv('VITE_MOMENCE_SESSION_FUNCTION_URL', '');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      payload: [{
+        id: 701,
+        name: 'Signature Barre',
+        startsAt: '2026-06-07T05:00:00.000Z',
+        teacher: { firstName: 'Anisha', lastName: 'Shah' },
+        inPersonLocation: { name: 'Bandra' },
+      }],
+      hasMore: false,
+    }), { status: 200 })));
+
+    const sessions = await searchMomenceSessions('barre');
+
+    expect(sessions[0]).toMatchObject({
+      id: '701',
+      classType: 'Signature Barre',
+      trainer: 'Anisha Shah',
+      studio: 'Bandra',
+    });
+    expect(fetch).toHaveBeenCalledWith('http://localhost/functions/v1/momence-search', expect.objectContaining({
+      method: 'POST',
+    }));
+    const body = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body));
+    expect(body).toMatchObject({
+      path: '/host/sessions',
+      method: 'GET',
+      params: {
+        page: 0,
+        pageSize: 40,
+        sortBy: 'startsAt',
+        sortOrder: 'DESC',
+        includeCancelled: false,
+        types: ['private'],
+      },
+    });
+    expect(body.body).toBeUndefined();
   });
 });
 

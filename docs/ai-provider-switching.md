@@ -23,7 +23,7 @@ Set the matching server-side provider and API key on the Supabase project that h
 
 ```bash
 supabase secrets set AI_PROVIDER=deepseek DEEPSEEK_API_KEY=... DEEPSEEK_MODEL=deepseek-v4-pro --project-ref nujgmxqefoumhhreqzxm
-supabase secrets set AI_PROVIDER=openai OPENAI_API_KEY=... OPENAI_MODEL=gpt-4.1 --project-ref nujgmxqefoumhhreqzxm
+supabase secrets set AI_PROVIDER=openai OPENAI_API_KEY=... OPENAI_MODEL=gpt-4o-mini --project-ref nujgmxqefoumhhreqzxm
 supabase secrets set AI_PROVIDER=claude ANTHROPIC_API_KEY=... ANTHROPIC_MODEL=claude-3-5-haiku-latest --project-ref nujgmxqefoumhhreqzxm
 ```
 

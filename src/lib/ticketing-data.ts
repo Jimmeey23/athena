@@ -886,12 +886,82 @@ export interface TicketResolutionDetail {
 }
 
 export interface TicketMetadata {
+  recommendedResolutionSteps?: string[];
+  resolutionPlan?: TicketResolutionPlan;
   latestResolution?: TicketResolutionDetail;
   resolutionHistory?: TicketResolutionDetail[];
   followUpHistory?: TicketFollowUpDetail[];
   resolvedAt?: string;
   closedAt?: string;
   [key: string]: unknown;
+}
+
+export const RESOLUTION_STAGES = [
+  'Not started',
+  'Investigating',
+  'Awaiting internal owner',
+  'Awaiting member response',
+  'Ready for member response',
+  'Resolved pending confirmation',
+  'Blocked / escalated',
+] as const;
+
+export const RESOLUTION_PATHWAYS = [
+  'Member communication',
+  'Momence correction',
+  'Service recovery',
+  'Billing adjustment',
+  'Operations repair',
+  'Training coaching',
+  'Policy clarification',
+  'Partnership follow-up',
+] as const;
+
+export const RESOLUTION_FOLLOW_UP_CHANNELS = [
+  'No follow-up needed',
+  'Phone call',
+  'Email',
+  'WhatsApp',
+  'In-person next visit',
+  'Instagram DM',
+] as const;
+
+export const RESOLUTION_MEMBER_RESPONSES = [
+  'Not captured',
+  'Member satisfied with resolution',
+  'Member accepted but not fully satisfied',
+  'Member requested escalation',
+  'Member declined offered solution',
+  'Member requested different solution',
+  'Member wants follow-up call',
+  'Member wants written response',
+] as const;
+
+export const RESOLUTION_ESCALATION_OPTIONS = [
+  'No escalation needed',
+  'Escalation manager review',
+  'Department head review',
+  'Leadership review',
+] as const;
+
+export type TicketResolutionStage = typeof RESOLUTION_STAGES[number];
+export type TicketResolutionPathway = typeof RESOLUTION_PATHWAYS[number];
+export type TicketResolutionFollowUpChannel = typeof RESOLUTION_FOLLOW_UP_CHANNELS[number];
+export type TicketResolutionMemberResponse = typeof RESOLUTION_MEMBER_RESPONSES[number];
+export type TicketResolutionEscalation = typeof RESOLUTION_ESCALATION_OPTIONS[number];
+
+export interface TicketResolutionPlan {
+  steps: string[];
+  stage?: TicketResolutionStage | string;
+  pathway?: TicketResolutionPathway | string;
+  owner?: string;
+  targetDate?: string;
+  memberFollowUpChannel?: TicketResolutionFollowUpChannel | string;
+  memberResponse?: TicketResolutionMemberResponse | string;
+  escalationNeeded?: TicketResolutionEscalation | string;
+  ownerNotes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface Ticket {

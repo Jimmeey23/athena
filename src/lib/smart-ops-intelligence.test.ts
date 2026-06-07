@@ -3,6 +3,7 @@ import {
   buildDuplicatePatternInsights,
   buildIntakeCopilotState,
   buildNaturalLanguageAnalyticsAnswer,
+  buildRecommendedResolutionSteps,
   optimizeIntakePromptForAthena,
   buildResolutionAssistant,
   buildSmartOpsBriefing,
@@ -81,10 +82,9 @@ describe('smart ops intelligence', () => {
   it('extracts voice hints without creating static member or session values', () => {
     const hints = buildVoiceExtractionHints('Asha said she was angry about the Bandra barre class refund yesterday');
 
-    expect(hints).toContain('Likely member feedback captured');
-    expect(hints).toContain('Likely studio: Supreme HQ, Bandra');
-    expect(hints).toContain('Likely priority: High');
-    expect(hints).toContain('Search Momence for the member and session before publishing.');
+    expect(hints).toContain('📍 Supreme HQ, Bandra');
+    expect(hints).toContain('⚡ High priority signal detected');
+    expect(hints).toContain('🏋️ Session context detected');
   });
 
   it('builds an intake copilot state that asks for Momence-linked context first', () => {
@@ -131,6 +131,14 @@ describe('smart ops intelligence', () => {
     expect(assistant.suggestedMemberReply).toContain('Asha Mehta');
     expect(assistant.nextActions.length).toBeGreaterThanOrEqual(3);
     expect(assistant.closureChecklist).toContain('Member outcome or requested resolution is documented.');
+  });
+
+  it('builds recommended resolution steps for Athena ticket drafts', () => {
+    const steps = buildRecommendedResolutionSteps(baseTicket);
+
+    expect(steps.length).toBeGreaterThanOrEqual(4);
+    expect(steps[0]).toMatch(/Acknowledge|Confirm|Route/);
+    expect(steps.join(' ')).toContain('Momence');
   });
 
   it('optimizes only the rough user-entered text without adding sections or placeholders', () => {

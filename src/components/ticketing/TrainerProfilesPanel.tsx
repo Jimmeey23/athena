@@ -1,5 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Award, BarChart3, CalendarDays, ClipboardList, GraduationCap, MapPin, Target, TrendingUp } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity,
+  Award,
+  BarChart3,
+  CalendarDays,
+  ClipboardList,
+  Clock,
+  FileText,
+  GraduationCap,
+  MapPin,
+  MessageSquare,
+  ShieldCheck,
+  Tag,
+  Target,
+  TrendingUp,
+  User,
+} from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -263,6 +279,8 @@ const TrainerProfileDetail: React.FC<{
   activeReviewKey: string;
   onSelectReview: (key: string) => void;
 }> = ({ profile, ticketBySourceRef, activeReviewKey, onSelectReview }) => {
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const latest = profile.reviews[0];
   const activeReview = profile.reviews.find((review) => reviewKey(review) === activeReviewKey) || latest;
   const groupedReviews = groupReviewsByPeriod(profile.reviews);
@@ -286,6 +304,20 @@ const TrainerProfileDetail: React.FC<{
       score: review.scorePercent,
       date: formatReviewPeriod(review.reviewPeriod || review.createdAt),
     }));
+
+  useEffect(() => {
+    setPreviewTicket(null);
+  }, [profile.trainer]);
+
+  useEffect(() => {
+    if (!previewTicket) return;
+    previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [previewTicket]);
+
+  const selectHistoryItem = (key: string, ticket?: Ticket) => {
+    onSelectReview(key);
+    if (ticket) setPreviewTicket(ticket);
+  };
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -448,7 +480,7 @@ const TrainerProfileDetail: React.FC<{
                     <div key={key} className={`overflow-hidden rounded-xl border ${selected ? 'border-blue-300 bg-blue-50/70 shadow-[0_10px_30px_rgba(37,99,235,0.10)]' : 'border-slate-100 bg-white'}`}>
                       <button
                         type="button"
-                        onClick={() => onSelectReview(key)}
+                        onClick={() => selectHistoryItem(key, ticket)}
                         className="grid w-full gap-3 px-3 py-3 text-left transition hover:bg-slate-50 lg:grid-cols-[190px_1fr_125px]"
                       >
                         <div>
@@ -488,6 +520,10 @@ const TrainerProfileDetail: React.FC<{
           )}
         </div>
       </div>
+
+      {previewTicket && (
+        <TicketPreviewReport ticket={previewTicket} previewRef={previewRef} />
+      )}
     </div>
   );
 };
@@ -498,6 +534,75 @@ const ProfilePill: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon,
     <span className="truncate">{label}</span>
   </span>
 );
+
+const TicketPreviewReport: React.FC<{ ticket: Ticket; previewRef: React.RefObject<HTMLDivElement> }> = ({ ticket, previewRef }) => (
+  <div ref={previewRef} className="mt-5 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-[0_18px_54px_rgba(37,99,235,0.10)]">
+    <div className="border-b border-blue-100 bg-blue-50/80 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-blue-700">
+            <FileText className="h-4 w-4" />
+            Ticket Preview Report
+          </div>
+          <h4 className="mt-1 text-lg font-semibold leading-snug text-slate-950">{ticket.title}</h4>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-bold text-blue-700">Ticket ID: {ticket.id}</span>
+          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.status}</span>
+          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.priority}</span>
+        </div>
+      </div>
+    </div>
+    <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Ticket narrative</div>
+          <FormattedTrainerTicketText text={ticket.description} />
+        </div>
+        {ticket.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {ticket.tags.map((tag) => (
+              <span key={tag} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">#{tag}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="grid content-start gap-2">
+        <TicketPreviewFact icon={<Tag className="h-3.5 w-3.5" />} label="Classification" value={`${ticket.category} / ${ticket.subCategory}`} />
+        <TicketPreviewFact icon={<MapPin className="h-3.5 w-3.5" />} label="Studio" value={ticket.studio} />
+        <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Owner" value={ticket.assignedTo} />
+        <TicketPreviewFact icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Team" value={ticket.team} />
+        {ticket.trainer && <TicketPreviewFact icon={<GraduationCap className="h-3.5 w-3.5" />} label="Instructor" value={ticket.trainer} />}
+        {ticket.classType && <TicketPreviewFact icon={<Activity className="h-3.5 w-3.5" />} label="Session" value={ticket.classType} />}
+        {ticket.classDateTime && <TicketPreviewFact icon={<CalendarDays className="h-3.5 w-3.5" />} label="Session time" value={formatDate(ticket.classDateTime, 'Not captured')} />}
+        {ticket.memberName && <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Member" value={ticket.memberName} />}
+        {ticket.sentiment && <TicketPreviewFact icon={<MessageSquare className="h-3.5 w-3.5" />} label="Sentiment" value={ticket.sentiment} />}
+        <TicketPreviewFact icon={<Clock className="h-3.5 w-3.5" />} label="Created" value={formatDate(ticket.createdAt, 'Not captured')} />
+      </div>
+    </div>
+  </div>
+);
+
+const TicketPreviewFact: React.FC<{ icon: React.ReactNode; label: string; value: string }> = ({ icon, label, value }) => (
+  <div className="flex min-w-0 gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+    <span className="mt-0.5 shrink-0 text-blue-600">{icon}</span>
+    <span className="min-w-0">
+      <span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</span>
+      <span className="mt-0.5 block truncate font-semibold text-slate-800" title={value}>{value}</span>
+    </span>
+  </div>
+);
+
+const FormattedTrainerTicketText: React.FC<{ text: string }> = ({ text }) => {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  return (
+    <div className="space-y-2 text-sm leading-relaxed text-slate-700">
+      {(lines.length ? lines : ['No ticket description captured.']).map((line, index) => (
+        <p key={`${line}-${index}`}>{line.replace(/^[-*]\s+/, '')}</p>
+      ))}
+    </div>
+  );
+};
 
 const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: TrainerProfile; rows: CriterionRow[] }> = ({ review, profile, rows }) => {
   const sortedRows = [...rows].sort((a, b) => b.percent - a.percent);

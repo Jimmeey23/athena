@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { getEmployee, getEscalationTarget, isRecordOnlyTicket, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket, TicketMetadata } from '@/lib/ticketing-data';
+import { getEmployee, getEscalationTarget, isRecordOnlyTicket, isTicketBreached, PRIORITY_SLA, resolveTicketAssignee, resolveTicketDepartment, Ticket, TicketMetadata, TicketResolutionPlan } from '@/lib/ticketing-data';
 import { backendSupabase } from '@/lib/backend-supabase';
 import { getErrorMessage } from '@/lib/error-formatting';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import { ResolvedAssignment, resolveConfiguredAssignment } from '@/lib/routing-settings';
 import {
   canAccessTicket as canAccessTicketForIdentity,
+  canEditTicketResolution as canEditTicketResolutionForIdentity,
   canUpdateTicketStatus as canUpdateTicketStatusForIdentity,
 } from '@/lib/ticket-permissions';
+import { buildRecommendedResolutionSteps } from '@/lib/smart-ops-intelligence';
 import {
   buildTicketResolutionDetail,
   mergeTicketResolutionMetadata,
@@ -447,8 +449,26 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
     : computeSlaDueAt(priority);
   const status: Ticket['status'] = profileOnly || recordOnly ? 'Closed' : 'New';
   const formattedDescription = formatTicketBody(draft.description);
+  const draftMetadata = draft.metadata || {};
+  const recommendedResolutionSteps = Array.isArray(draftMetadata.recommendedResolutionSteps) && draftMetadata.recommendedResolutionSteps.length
+    ? draftMetadata.recommendedResolutionSteps.filter((step): step is string => typeof step === 'string' && step.trim().length > 0)
+    : buildRecommendedResolutionSteps({
+      title: draft.title,
+      description: draft.description,
+      category: draft.category,
+      subCategory: draft.subCategory,
+      priority,
+      studio: draft.studio,
+      assignedTo: effectiveAssignedTo,
+      memberName: draft.memberName || undefined,
+      memberContact: draft.memberContact || undefined,
+      classType: draft.classType || undefined,
+      classDateTime: draft.classDateTime || undefined,
+      sentiment: draft.sentiment as Ticket['sentiment'] | undefined,
+    });
   const metadata = {
-    ...(draft.metadata || {}),
+    ...draftMetadata,
+    recommendedResolutionSteps,
     resolution_required: !recordOnly,
     no_sla: recordOnly,
     source_ref: buildSourceRef(draft, context),
@@ -591,6 +611,14 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const canUpdateTicketStatus = useCallback((ticket: Ticket) => (
     canUpdateTicketStatusForIdentity({
+      accessRole,
+      identityValues: visibleIdentityValues,
+      ticket,
+    })
+  ), [accessRole, visibleIdentityValues]);
+
+  const canEditTicketResolution = useCallback((ticket: Ticket) => (
+    canEditTicketResolutionForIdentity({
       accessRole,
       identityValues: visibleIdentityValues,
       ticket,
@@ -890,6 +918,41 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [canUpdateTicketStatus, tickets, updateTicket, user]
   );
 
+  const updateTicketResolutionPlan = useCallback(
+    async (id: string, plan: TicketResolutionPlan, actor = getReporterNameFromAuthUser(user)) => {
+      const current = tickets.find((ticket) => ticket.id === id);
+      if (!current) throw new Error('Ticket not found for resolution plan update.');
+      if (!canEditTicketResolution(current)) {
+        throw new Error('Only the ticket owner, escalation manager, or admin can edit the resolution plan.');
+      }
+
+      const nextPlan: TicketResolutionPlan = {
+        steps: Array.from(new Set(plan.steps.map((step) => step.trim()).filter(Boolean))).slice(0, 12),
+        stage: plan.stage?.trim() || undefined,
+        pathway: plan.pathway?.trim() || undefined,
+        owner: plan.owner?.trim() || undefined,
+        targetDate: plan.targetDate?.trim() || undefined,
+        memberFollowUpChannel: plan.memberFollowUpChannel?.trim() || undefined,
+        memberResponse: plan.memberResponse?.trim() || undefined,
+        escalationNeeded: plan.escalationNeeded?.trim() || undefined,
+        ownerNotes: plan.ownerNotes?.trim() || undefined,
+        updatedAt: new Date().toISOString(),
+        updatedBy: actor,
+      };
+      const currentMetadata = current.metadata || {};
+      await updateTicket(id, {
+        metadata: {
+          ...currentMetadata,
+          recommendedResolutionSteps: nextPlan.steps.length
+            ? nextPlan.steps
+            : currentMetadata.recommendedResolutionSteps,
+          resolutionPlan: nextPlan,
+        },
+      }, actor);
+    },
+    [canEditTicketResolution, tickets, updateTicket, user]
+  );
+
   const createManualTicket = useCallback(
     async (input: ManualTicketInput) => {
       const { data: authData } = await backendSupabase.auth.getSession();
@@ -1151,7 +1214,9 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         error,
         updateTicket,
         updateTicketStatus,
+        updateTicketResolutionPlan,
         canUpdateTicketStatus,
+        canEditTicketResolution,
         clearAllNotifications,
         createApprovedTicket,
         createManualTicket,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAccessTicket, canUpdateTicketStatus } from './ticket-permissions';
+import { canAccessTicket, canEditTicketResolution, canUpdateTicketStatus } from './ticket-permissions';
 
 describe('ticket status permissions', () => {
   it('allows admins to update any ticket status', () => {
@@ -80,6 +80,28 @@ describe('ticket visibility permissions', () => {
         accessRole: 'support',
         identityValues: new Set(['operations@physique57india.com']),
         ticket: { createdBy: 'user-123', assignedTo: 'Anisha Shah', reportedBy: 'Priya' },
+      })
+    ).toBe(false);
+  });
+});
+
+describe('ticket resolution plan permissions', () => {
+  it('allows the escalation manager to edit the resolution plan', () => {
+    expect(
+      canEditTicketResolution({
+        accessRole: 'support',
+        identityValues: new Set(['saachi shetty']),
+        ticket: { assignedTo: 'Zahur Shaikh' },
+      })
+    ).toBe(true);
+  });
+
+  it('blocks unrelated support users from editing the resolution plan', () => {
+    expect(
+      canEditTicketResolution({
+        accessRole: 'support',
+        identityValues: new Set(['frontdesk@physique57india.com']),
+        ticket: { assignedTo: 'Zahur Shaikh' },
       })
     ).toBe(false);
   });

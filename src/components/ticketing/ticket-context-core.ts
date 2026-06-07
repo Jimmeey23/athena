@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { Ticket } from '@/lib/ticketing-data';
+import { Ticket, TicketResolutionPlan } from '@/lib/ticketing-data';
 
 export interface TicketNotification {
   id: string;
@@ -73,7 +73,9 @@ export interface TicketContextValue {
   error: string | null;
   updateTicket: (id: string, patch: Partial<Ticket>, actor?: string) => Promise<void>;
   updateTicketStatus: (id: string, detail: TicketStatusUpdateInput, actor?: string) => Promise<void>;
+  updateTicketResolutionPlan: (id: string, plan: TicketResolutionPlan, actor?: string) => Promise<void>;
   canUpdateTicketStatus: (ticket: Ticket) => boolean;
+  canEditTicketResolution: (ticket: Ticket) => boolean;
   clearAllNotifications: () => void;
   createApprovedTicket: (draft: ApprovedTicketDraft, conversationId?: string | null, context?: Record<string, unknown>, attachments?: File[]) => Promise<Ticket>;
   createManualTicket: (draft: ManualTicketInput) => Promise<Ticket>;

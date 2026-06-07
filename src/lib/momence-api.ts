@@ -135,6 +135,52 @@ export interface MomenceTag {
   badgeColor?: string | null;
 }
 
+export interface MomenceSale {
+  id: number;
+  createdAt?: string;
+  member?: {
+    id?: number;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phoneNumber?: string | null;
+  };
+  items?: Array<{
+    id?: number;
+    type?: string;
+    name?: string;
+    amountInCurrency?: number;
+    amountInCurrencyWithoutTax?: number;
+  }>;
+  paymentMethod?: string;
+  amountInCurrency?: number;
+  currency?: string;
+}
+
+export interface MomenceAppointmentReservation {
+  id: number;
+  startsAt?: string;
+  endsAt?: string;
+  cancelledAt?: string | null;
+  member?: {
+    id?: number;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+  };
+  service?: {
+    id?: number;
+    name?: string;
+  };
+}
+
+export interface MomenceReportRun {
+  id?: number;
+  status?: string;
+  parameters?: Record<string, unknown>;
+  data?: unknown;
+}
+
 export interface MomenceMemberOption {
   id: string;
   label: string;
@@ -261,6 +307,16 @@ export interface SearchMomenceSessionsOptions {
   types?: string[];
 }
 
+export interface ListMomenceMembersOptions {
+  query?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: 'lastSeenAt' | 'firstName' | 'lastName' | 'email';
+  sortOrder?: 'ASC' | 'DESC';
+  filterPreset?: 'with-active-membership';
+  staticSegmentId?: string | number;
+}
+
 interface MomenceSessionPageResponse extends PaginatedMomenceResponse<MomenceSession> {
   page?: number;
   pageSize?: number;
@@ -272,9 +328,11 @@ interface MomenceSessionPageResult {
   hasMore: boolean;
 }
 
+type MomenceParamValue = string | number | boolean | Array<string | number | boolean> | undefined;
+
 interface MomenceRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  params?: Record<string, string | number | boolean | undefined>;
+  params?: Record<string, MomenceParamValue>;
   body?: unknown;
 }
 
@@ -445,13 +503,7 @@ function payloadFrom<T>(response: PaginatedMomenceResponse<T> | T[]): T[] {
 
 function resolveSessionFunctionUrl(): string | undefined {
   const explicitUrl = import.meta.env.VITE_MOMENCE_SESSION_FUNCTION_URL as string | undefined;
-  if (explicitUrl) return explicitUrl;
-
-  const genericUrl = import.meta.env.VITE_MOMENCE_FUNCTION_URL as string | undefined;
-  if (!genericUrl) return undefined;
-  return genericUrl
-    .replace(/\/momence-search-js(?:\/)?$/, '/momence-session-search')
-    .replace(/\/momence-search(?:\/)?$/, '/momence-session-search');
+  return explicitUrl || undefined;
 }
 
 function resolveSessionFunctionAnonKey(): string | undefined {
@@ -475,6 +527,19 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   if (!text.trim()) return {} as T;
   return JSON.parse(text) as T;
+}
+
+function appendMomenceParams(url: URL, params: Record<string, MomenceParamValue>) {
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== '') url.searchParams.append(key, String(item));
+      });
+      return;
+    }
+    url.searchParams.set(key, String(value));
+  });
 }
 
 async function callMomence<T>(path: string, options: MomenceRequestOptions = {}) {
@@ -509,9 +574,7 @@ async function callMomence<T>(path: string, options: MomenceRequestOptions = {})
 
   if (proxyUrl) {
     const url = new URL(path.replace(/^\/api\/v2\//, ''), proxyUrl.endsWith('/') ? proxyUrl : `${proxyUrl}/`);
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
-    });
+    appendMomenceParams(url, params);
     const response = await fetch(url.toString());
     if (!response.ok) throw new Error(`Momence proxy returned ${response.status}`);
     return parseResponse<T>(response);
@@ -519,9 +582,7 @@ async function callMomence<T>(path: string, options: MomenceRequestOptions = {})
 
   if (accessToken) {
     const url = new URL(`${MOMENCE_BASE_URL}${path}`);
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
-    });
+    appendMomenceParams(url, params);
     const response = await fetch(url.toString(), {
       method,
       headers: {
@@ -657,30 +718,41 @@ export async function searchMomenceMembers(query: string): Promise<MomenceMember
   const normalizedQuery = query.trim();
   if (normalizedQuery.length < 2) return [];
 
+  return listMomenceMembers({ query: normalizedQuery });
+}
+
+function momenceMemberOptionFromMember(member: MomenceMember): MomenceMemberOption {
+  const name = compact([member.firstName, member.lastName]) || `Momence member #${member.id}`;
+  const contact = compact([member.email, member.phoneNumber && `+${member.phoneNumber.replace(/^\+/, '')}`]);
+  return {
+    id: String(member.id),
+    label: name,
+    description: contact || 'No contact details returned by Momence',
+    name,
+    email: member.email,
+    phoneNumber: member.phoneNumber || undefined,
+    firstSeen: member.firstSeen,
+    lastSeen: member.lastSeen,
+  };
+}
+
+export async function listMomenceMembers(options: ListMomenceMembersOptions = {}): Promise<MomenceMemberOption[]> {
+  const normalizedQuery = options.query?.trim();
+  const params: Record<string, MomenceParamValue> = {
+    page: options.page ?? 0,
+    pageSize: options.pageSize ?? DEFAULT_PAGE_SIZE,
+    sortBy: options.sortBy || 'lastSeenAt',
+    sortOrder: options.sortOrder || 'DESC',
+  };
+  if (normalizedQuery) params.query = normalizedQuery;
+  if (options.filterPreset) params.filterPreset = options.filterPreset;
+  if (options.staticSegmentId != null && options.staticSegmentId !== '') params.staticSegmentId = options.staticSegmentId;
+
   const response = await callMomence<PaginatedMomenceResponse<MomenceMember>>('/host/members', {
-    params: {
-      page: 0,
-      pageSize: DEFAULT_PAGE_SIZE,
-      sortBy: 'lastSeenAt',
-      sortOrder: 'DESC',
-      query: normalizedQuery,
-    },
+    params,
   });
 
-  return payloadFrom(response).map((member) => {
-    const name = compact([member.firstName, member.lastName]) || `Momence member #${member.id}`;
-    const contact = compact([member.email, member.phoneNumber && `+${member.phoneNumber.replace(/^\+/, '')}`]);
-    return {
-      id: String(member.id),
-      label: name,
-      description: contact || 'No contact details returned by Momence',
-      name,
-      email: member.email,
-      phoneNumber: member.phoneNumber || undefined,
-      firstSeen: member.firstSeen,
-      lastSeen: member.lastSeen,
-    };
-  });
+  return payloadFrom(response).map(momenceMemberOptionFromMember);
 }
 
 function momenceSessionOptionsFromResponse(
@@ -770,7 +842,7 @@ async function searchMomenceSessionPage(
         sortBy: 'startsAt',
         sortOrder: 'DESC',
         includeCancelled: false,
-        types: requestedSessionTypes[0] || SESSION_SEARCH_TYPE,
+        types: requestedSessionTypes,
         startAfter: lookback.toISOString(),
         startBefore: lookahead.toISOString(),
       },
@@ -816,6 +888,31 @@ export async function searchMomenceSessions(query: string, options: SearchMomenc
 
 export async function getMomenceMember(memberId: string | number) {
   return callMomence<MomenceMemberDetail>(`/host/members/${memberId}`);
+}
+
+export async function updateMomenceMemberName(memberId: string | number, firstName: string, lastName: string) {
+  return callMomence(`/host/members/${memberId}/name`, {
+    method: 'PUT',
+    body: { firstName: firstName.trim(), lastName: lastName.trim() },
+  });
+}
+
+export async function updateMomenceMemberEmail(memberId: string | number, email: string) {
+  return callMomence(`/host/members/${memberId}/email`, {
+    method: 'PUT',
+    body: { email: email.trim() },
+  });
+}
+
+export async function updateMomenceMemberPhoneNumber(memberId: string | number, phoneNumber: string) {
+  return callMomence(`/host/members/${memberId}/phone-number`, {
+    method: 'PUT',
+    body: { phoneNumber: phoneNumber.trim() },
+  });
+}
+
+export async function deleteMomenceMemberPhoneNumbers(memberId: string | number) {
+  return callMomence(`/host/members/${memberId}/phone-number`, { method: 'DELETE' });
 }
 
 export async function listMomenceHostMembershipOptions(): Promise<string[]> {
@@ -919,6 +1016,30 @@ export async function getMomenceMemberNotes(memberId: string | number) {
   return payloadFrom(response);
 }
 
+export async function getMomenceMemberAppointments(memberId: string | number) {
+  const now = new Date();
+  const past = new Date(now);
+  past.setDate(past.getDate() - 90);
+  const future = new Date(now);
+  future.setDate(future.getDate() + 45);
+
+  const response = await callMomence<PaginatedMomenceResponse<MomenceAppointmentReservation>>(
+    `/host/members/${memberId}/appointments`,
+    {
+      params: {
+        page: 0,
+        pageSize: 20,
+        sortBy: 'startsAt',
+        sortOrder: 'DESC',
+        includeCancelled: true,
+        startAfter: past.toISOString(),
+        startBefore: future.toISOString(),
+      },
+    }
+  );
+  return payloadFrom(response);
+}
+
 export async function getMomenceSession(sessionId: string | number) {
   return callMomence<MomenceSessionDetail>(`/host/sessions/${sessionId}`);
 }
@@ -966,6 +1087,20 @@ export async function freezeMomenceMembership(
       unfreezeAt: options.unfreezeAt || null,
       reason: options.reason?.trim() || null,
     },
+  });
+}
+
+export async function updateMomenceMembershipCredits(
+  memberId: string | number,
+  boughtMembershipId: string | number,
+  credits: { eventCreditsLeft?: number | null; moneyCreditsLeft?: number | null }
+) {
+  const body: Record<string, number> = {};
+  if (credits.eventCreditsLeft != null) body.eventCreditsLeft = credits.eventCreditsLeft;
+  if (credits.moneyCreditsLeft != null) body.moneyCreditsLeft = credits.moneyCreditsLeft;
+  return callMomence(`/host/members/${memberId}/bought-memberships/${boughtMembershipId}/credits`, {
+    method: 'PUT',
+    body,
   });
 }
 
@@ -1031,10 +1166,68 @@ export async function cancelMomenceBooking(
   });
 }
 
+export async function cancelMomenceRecurringBooking(
+  bookingId: string | number,
+  options: { afterSessionId?: string | number | null } = {}
+) {
+  return callMomence(`/host/session-recurring-bookings/${bookingId}`, {
+    method: 'DELETE',
+    body: options.afterSessionId ? { afterSessionId: Number(options.afterSessionId) } : {},
+  });
+}
+
 export async function assignMomenceTag(memberId: string | number, tagId: string | number) {
   return callMomence(`/host/members/${memberId}/tags/${tagId}`, { method: 'POST' });
 }
 
 export async function unassignMomenceTag(memberId: string | number, tagId: string | number) {
   return callMomence(`/host/members/${memberId}/tags/${tagId}`, { method: 'DELETE' });
+}
+
+export async function listMomenceSales(page = 0, pageSize = 20) {
+  const response = await callMomence<PaginatedMomenceResponse<MomenceSale>>('/host/sales', {
+    params: { page, pageSize, sortBy: 'createdAt', sortOrder: 'DESC' },
+  });
+  return payloadFrom(response);
+}
+
+export async function listMomenceAppointmentReservations(page = 0, pageSize = 20) {
+  const now = new Date();
+  const future = new Date(now);
+  future.setDate(future.getDate() + 45);
+  const response = await callMomence<PaginatedMomenceResponse<MomenceAppointmentReservation>>('/host/appointments/reservations', {
+    params: {
+      page,
+      pageSize,
+      sortBy: 'startsAt',
+      sortOrder: 'DESC',
+      includeCancelled: true,
+      startAfter: now.toISOString(),
+      startBefore: future.toISOString(),
+    },
+  });
+  return payloadFrom(response);
+}
+
+export async function createMomenceReportRun(parameters: Record<string, unknown>) {
+  return callMomence<MomenceReportRun>('/host/reports', {
+    method: 'POST',
+    body: { parameters },
+  });
+}
+
+export async function getMomenceReportRun(reportRunId: string | number) {
+  return callMomence<MomenceReportRun>(`/host/reports/${reportRunId}`);
+}
+
+export async function getMomenceCheckoutPrices(body: Record<string, unknown>) {
+  return callMomence('/host/checkout/prices', { method: 'POST', body });
+}
+
+export async function getMomenceCompatibleMemberships(body: Record<string, unknown>) {
+  return callMomence('/host/checkout/compatible-memberships', { method: 'POST', body });
+}
+
+export async function performMomenceCheckout(body: Record<string, unknown>) {
+  return callMomence('/host/checkout', { method: 'POST', body });
 }

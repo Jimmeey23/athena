@@ -56,9 +56,9 @@ describe('ChatInterface intake flow', () => {
     const user = userEvent.setup();
     render(<ChatInterface />);
 
-    const input = screen.getByPlaceholderText('Describe the incident, feedback or complaint…') as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText("Tell me what happened — I'll take care of the rest…") as HTMLTextAreaElement;
     await user.type(input, 'CLIENT SMITA MODI WANTS A REFUND');
-    await user.click(screen.getByLabelText('Optimize prompt for Athena'));
+    await user.click(screen.getByLabelText('Optimise prompt for Athena'));
 
     expect(input.value).toBe('Client Smita Modi requested a refund.');
     expect(hoisted.invokeTicketingFunction).not.toHaveBeenCalled();
@@ -111,7 +111,7 @@ describe('ChatInterface intake flow', () => {
     const user = userEvent.setup();
     const { container } = render(<ChatInterface />);
 
-    const input = screen.getByPlaceholderText('Describe the incident, feedback or complaint…');
+    const input = screen.getByPlaceholderText("Tell me what happened — I'll take care of the rest…");
     await user.type(input, 'CLIENT SMITA MODI WANTS A REFUND');
     const sendButton = container.querySelector('svg.lucide-send')?.closest('button');
     expect(sendButton).toBeTruthy();
@@ -123,7 +123,7 @@ describe('ChatInterface intake flow', () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText(/I just need the remaining required details before I draft this/i)).toBeTruthy();
+        expect(screen.getByText(/Just a couple more details and we'll have a clean draft ready/i)).toBeTruthy();
       },
       { timeout: 3000 }
     );
@@ -166,14 +166,14 @@ describe('ChatInterface intake flow', () => {
     const user = userEvent.setup();
     const { container } = render(<ChatInterface />);
 
-    const input = screen.getByPlaceholderText('Describe the incident, feedback or complaint…');
+    const input = screen.getByPlaceholderText("Tell me what happened — I'll take care of the rest…");
     await user.type(input, 'SMITA PATIL IS ASKING FOR A REFUND OF HER MEMBERSHIP FEES.');
     const sendButton = container.querySelector('svg.lucide-send')?.closest('button');
     expect(sendButton).toBeTruthy();
     await user.click(sendButton as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(screen.getByText(/I just need the remaining required details before I draft this/i)).toBeTruthy();
+      expect(screen.getByText(/Just a couple more details and we'll have a clean draft ready/i)).toBeTruthy();
     });
     expect(screen.queryByText(/I drafted the ticket below/i)).toBeNull();
     expect(screen.queryByText(/Ticket draft ready for review/i)).toBeNull();

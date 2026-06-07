@@ -28,7 +28,7 @@ describe('AI provider selection', () => {
     expect(request.url).toBe('https://api.openai.com/v1/chat/completions');
     expect(request.headers.Authorization).toBe('Bearer openai-key');
     expect(request.body).toMatchObject({
-      model: 'gpt-4.1',
+      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       temperature: 0.2,
     });
@@ -43,7 +43,7 @@ describe('AI provider selection', () => {
     expect(request.url).toBe('https://api.anthropic.com/v1/messages');
     expect(request.headers['x-api-key']).toBe('claude-key');
     expect(request.body).toMatchObject({
-      model: 'claude-3-5-haiku-latest',
+      model: 'claude-haiku-4-5',
       system: 'system prompt',
       temperature: 0.1,
     });
