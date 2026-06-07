@@ -93,6 +93,28 @@ describe('intake publishability rules', () => {
     expect(isIntakePublishable(context)).toBe(true);
   });
 
+  it('accepts concise member voice when refund reason details were captured separately', () => {
+    const context: IntakeContext = {
+      intakeRoute: 'Request',
+      category: 'Pricing and Memberships',
+      subCategory: 'Refund and Cancellation Policy Issue',
+      clientsAffected: 'Yes - directly affected',
+      memberId: '29887042',
+      memberName: 'Smita Modi',
+      memberContact: 'smita.modi@ymail.com',
+      desiredResolution: 'Full refund of entire 3-month membership',
+      reportedBy: 'Jimmeey',
+      priority: 'High',
+      initialReport: 'smita modi wants a refund of her membership',
+      description: 'i want a refund by tomorrow orelse il sue you',
+      refundRequestReason: 'overcrowding in class',
+      resolutionRequired: 'Yes',
+    };
+
+    expect(getMissingIntakeFields(context)).toEqual([]);
+    expect(isIntakePublishable(context)).toBe(true);
+  });
+
   it('does not ask for reportedBy when auth has supplied a real user', () => {
     const context: IntakeContext = {
       intakeRoute: 'Complaint',
@@ -302,7 +324,7 @@ describe('intake publishability rules', () => {
     })).not.toContain('memberName');
   });
 
-  it('asks for member, incident detail, and requested resolution for brief refund complaints', () => {
+  it('asks for member, requested resolution, and substance for brief refund complaints without fixed Momence/payment fields', () => {
     const text = 'A member complained about refund delay';
     const context = {
       ...inferIntakeContextFromText(text),
@@ -313,18 +335,13 @@ describe('intake publishability rules', () => {
 
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual([
       'memberName',
-      'studio',
-      'membership',
-      'incidentDateTime',
-      'momencePurchaseContext',
       'desiredResolution',
-      'memberSentiment',
       'description',
       'resolutionRequired',
     ]);
   });
 
-  it('requires commercial verification for named refund requests even when member/client is omitted', () => {
+  it('does not force fixed commercial verification fields for named refund requests', () => {
     const text = 'SMITA PATIL IS ASKING FOR A REFUND OF HER MEMBERSHIP FEES.';
     const context: IntakeContext = {
       ...inferIntakeContextFromText(text),
@@ -337,19 +354,20 @@ describe('intake publishability rules', () => {
     };
 
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
-      'studio',
       'memberName',
+      'description',
+    ]));
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toEqual(expect.arrayContaining([
+      'studio',
       'membership',
       'incidentDateTime',
       'momencePurchaseContext',
-      'desiredResolution',
       'memberSentiment',
-      'description',
     ]));
     expect(isIntakePublishable(context)).toBe(false);
   });
 
-  it('requires commercial Momence context for member package and class access disputes', () => {
+  it('lets AI choose follow-up context for member package and class access disputes', () => {
     const text = [
       'Client Shaziya Andhyrujina is currently on a 3-month unlimited package.',
       'She came in for the 4:30 PM Power Cycle but was denied entry because it was her first Power Cycle class.',
@@ -364,11 +382,11 @@ describe('intake publishability rules', () => {
     };
 
     expect(context.membership).toBe('Studio 3 Month Unlimited Membership');
-    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toContain('memberName');
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toEqual(expect.arrayContaining([
       'studio',
-      'memberName',
       'incidentDateTime',
-      'desiredResolution',
+      'momencePurchaseContext',
       'memberSentiment',
     ]));
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toContain('classType');

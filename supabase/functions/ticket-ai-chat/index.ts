@@ -73,6 +73,15 @@ Identify only what's missing from the initial report. Plan the full conversation
 Do not use a fixed list of fields. Reason about this specific incident and decide what gaps exist.
 For example: a broken door at the studio entrance raises different questions than one in the locker room — one has overnight security implications, the other does not. A washing machine not draining needs different questions than one that won't turn on. A trainer late to a 7am class has different urgency than one late to a 7pm class. Always think contextually.
 
+You are NOT limited to canonical/master-data fields. You are expected to add the incident-specific questions an owner would need. Build the form from what THIS incident requires — invent targeted snake_case fields freely for anything that isn't a canonical field.
+Worked example — "Instructor arrived late for the barre class". A good intake does NOT stop at studio + member. Plan and ask the gaps that actually let an owner act and close the loop:
+- which session and its scheduled start time (use classType for the Momence session picker), and how late the instructor was;
+- whether advance notice was given, and if so how far ahead;
+- the reason for the late arrival;
+- how members reacted — were they upset, did anyone leave, was the class shortened or delayed;
+- whether service recovery or a member-facing follow-up is expected, and the requested outcome.
+Apply the same depth to every incident family: capture cause, timing, impact, and expected outcome — not just identifiers. Ask the 1-2 highest-value gaps per turn until the picture is complete, then draft.
+
 IMPORTANT — for physical, maintenance, or facility issues:
 Never use 'description' as a field ID. Generate specific, targeted field IDs describing exactly what you're asking (e.g. latch_fault_type, door_access_status, water_source, machine_symptom, security_concern, resolution_approach). Collect the full operational picture — fault specifics, current access or safety implications, expected resolution — over short 1-2 question turns. Do not produce a generic description box; produce questions whose answers let the assigned owner act immediately.
 
@@ -107,13 +116,14 @@ Ask yourself: does resolving this issue require knowing who a specific member is
 If the answer is no — do not include entity fields.
 Before the client-impact check, issues that do not need entity fields include anything physical (door, machine, AC, plumbing, lighting, pest), ambient environment, tech/ops systems, app or Wi-Fi issues.
 Issues that need entity fields: a named member's billing request, a freeze or rollover for a specific person, a complaint about how a trainer treated a named member in a specific class.
-For membership/billing requests: require the member selection first, then ask about their specific package and dates.
+For membership/billing requests: require member selection only when the member is named or otherwise identifiable. Ask about package, purchase, dates, or payment only when the resolution decision actually depends on that specific record.
 
 MEMBER COMMERCIAL / CLASS-ACCESS INCIDENTS:
-When the report involves a named or identifiable member plus any package, payment, purchase, refund, billing, membership, renewal, expiry, credit, waiver, class-entry, eligibility, first-class restriction, late-entry, or policy-dispute issue, do not draft a ticket until the operational verification context is complete.
-Reason from the issue family, not from fixed examples or canned responses. The missing context may vary, but the owner usually needs: studio, selected Momence member, active package/membership, relevant Momence purchase/payment context available to staff (amount paid, purchase date, invoice/receipt/payment status, or a note that it is not visible), relevant class/session when the dispute is tied to a session or entry decision, what policy or communication the member says they received, what resolution was offered, the member's response, member sentiment, and the requested outcome.
-Use existing canonical fields where possible: studio, memberName, membership, classType, incidentDateTime, momencePurchaseContext, desiredResolution, and memberSentiment. For issue-specific gaps such as "policy communication received" or "resolution offered", create targeted snake_case fields rather than a generic description field.
-Do not hardcode member names, studio names, instructors, package names, or response scripts. Ask only for context that is missing from the current conversation or selected Momence context.
+For commercial, refund, billing, membership, class-entry, and policy-dispute reports, reason from the current issue rather than a fixed verification checklist.
+Do not automatically ask for Momence purchase/payment context, membership, studio, incident date, or sentiment. Ask for one of those only when the current ticket cannot be routed or resolved without it.
+Use existing canonical fields when they are genuinely relevant: memberName for a named/identifiable member, membership for a specific package decision, classType for a specific session dispute, desiredResolution for an unclear requested outcome, and momencePurchaseContext only when payment/purchase evidence is central to the decision.
+For issue-specific gaps such as "reason for refund", "policy communication received", or "resolution already offered", create targeted snake_case fields rather than a generic description field.
+Do not hardcode member names, studio names, instructors, package names, or response scripts. Ask only for context that is missing from the current conversation, selected Momence context, or the draft itself.
 
 ROUTING AND MASTER DATA:
 - Use only approved master-data values for studios, trainers, class types, categories, subcategories, priorities, and associates
@@ -160,7 +170,7 @@ TICKET QUALITY:
 - Use "Internal report summary" for Internal Reporting. Use "Member feedback summary" only when a member/client actually gave feedback.
 - Do not include stale multi-value context (multiple studios, instructors, or sessions) unless the user explicitly selected multiple affected records.
 - Priority: Critical for safety or access risk; High for service failure affecting live classes; Medium for operational issues; Low for cosmetic or deferred items.
-- Every published draft must include ticket.metadata.recommendedResolutionSteps with 4-6 concise owner action steps. Steps must be operational, specific to the issue family, and include Momence verification when member/session/package data is involved.
+- Every published draft must include ticket.metadata.recommendedResolutionSteps with 4-6 concise owner action steps. The steps MUST reference the concrete details captured in this conversation — the actual fault, person, session, time, cause, and requested outcome. Name them. Generic placeholders are forbidden: never write "Confirm the exact studio space, tool, or environmental condition", "Route to the studio owner with the affected session and member impact", "Close the loop with the member once the issue is checked", or any step that would read identically for an unrelated ticket. A reviewer must be able to tell which ticket the steps belong to from the wording alone. Include Momence verification only when member/session/package data is actually involved. Order them as the owner would actually work the ticket.
 - Ticket creation happens only after explicit user approval of the displayed draft.
 `.trim();
 
@@ -468,67 +478,6 @@ function shouldRequireNamedMemberContext(
     && /refund|billing|payment|membership|package|freeze|roll\s?over|extension|renewal|cancel|complain|complaint|follow-up|follow up|contact|whatsapp|email|phone|profile|account/.test(lower);
 }
 
-function shouldRequireCommercialVerificationContext(
-  text: string,
-  context: Record<string, unknown>,
-  category: string,
-): boolean {
-  if (['Repair and Maintenance', 'Studio Amenities and Facilities', 'Facility & Equipment', 'Operating Systems', 'Tech Issues', 'App & Digital'].includes(category)) {
-    return false;
-  }
-
-  const lower = [
-    text,
-    cleanString(context.initialReport),
-    cleanString(context.description),
-    cleanString(context.requestType),
-    cleanString(context.category),
-    cleanString(context.subCategory),
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  const memberReference =
-    hasPersonalCommercialReference(lower) ||
-    Boolean(cleanString(context.memberId)) ||
-    Boolean(cleanString(context.memberName));
-  if (!memberReference) return false;
-
-  const commercialConcern =
-    /refund|billing|payment|paid|amount|charge|charged|invoice|receipt|purchase|membership|package|renewal|expiry|credit|waiver|freeze|pause|roll\s?over|extension|pricing|price/.test(lower) ||
-    ['Pricing and Memberships', 'Billing & Membership'].includes(category);
-
-  const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
-  const classAccessConcern =
-    mentionsClassContext &&
-    (
-      /(denied|not allowed|unable to join|could not join|cannot join|would not be able|restriction|protocol|policy)/.test(lower) ||
-      /\blate\s+(entry|arrival|cancellation|cancel|policy)\b/.test(lower) ||
-      /\barrived\s+late\b.{0,60}\b(denied|not allowed|unable|could not|cannot|entry|policy|restriction)\b/.test(lower) ||
-      /\bfirst\s+(class|barre|power\s?cycle|cycle|session)\b/.test(lower)
-    );
-
-  return commercialConcern || classAccessConcern;
-}
-
-function shouldRequireClassAccessVerification(
-  text: string,
-  context: Record<string, unknown>,
-  category: string,
-): boolean {
-  if (!shouldRequireCommercialVerificationContext(text, context, category)) return false;
-
-  const lower = [
-    text,
-    cleanString(context.initialReport),
-    cleanString(context.description),
-    cleanString(context.requestType),
-    cleanString(context.category),
-    cleanString(context.subCategory),
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  return /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower) &&
-    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
-}
-
 function hasAffectedClassSignal(text: string, context: Record<string, unknown>): boolean {
   const lower = [
     text,
@@ -569,6 +518,71 @@ function shouldRequireComplaintResolution(
   return /complain|complaint|refund|billing|payment|delay|not resolved|follow-?up/.test(lower);
 }
 
+const STANDARD_CONTEXT_DETAIL_KEYS = new Set([
+  'intakeRoute',
+  'requestType',
+  'clientsAffected',
+  'memberId',
+  'memberName',
+  'memberContact',
+  'sessionId',
+  'studio',
+  'trainer',
+  'classType',
+  'classDateTime',
+  'membership',
+  'category',
+  'subCategory',
+  'reportedBy',
+  'priority',
+  'description',
+  'incidentDateTime',
+  'desiredResolution',
+  'urgencyReason',
+  'memberSentiment',
+  'resolutionRequired',
+  'momencePurchaseContext',
+  'classImpactType',
+  'classImpactDetails',
+  'freezeStartDate',
+  'freezeEndDate',
+  'freezeReason',
+  'classesRemaining',
+  'packageExpiryDate',
+  'requestedRolloverDate',
+  'rolloverReason',
+  'partnerName',
+  'hostedFeedbackArea',
+  'attendeeCount',
+  'prospectQuality',
+  'followUpPreference',
+  'initialReport',
+]);
+
+function hasSpecificConcernDetail(text?: string): boolean {
+  const value = cleanString(text).toLowerCase();
+  if (!value) return false;
+
+  return /\b(?:because|due to|since|as\s+(?:she|he|they|the member|client))\b/.test(value)
+    || /\b(?:overcrowd|too\s+loud|music|unhappy|dissatisfied|poor|denied|dirty|unclean|hot|cold|unsafe|injur|pain|not\s+(?:received|resolved|allowed|working|happy)|unable|could\s+not|wasn['’]?t|isn['’]?t)\b/.test(value);
+}
+
+function hasSupplementalIssueSpecifics(context: Record<string, unknown>): boolean {
+  return Object.entries(context).some(([key, value]) => {
+    if (STANDARD_CONTEXT_DETAIL_KEYS.has(key)) return false;
+    if (!cleanString(value) || PLACEHOLDER_VALUE_PATTERN.test(cleanString(value))) return false;
+    const normalizedKey = key
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_:-]+/g, ' ')
+      .toLowerCase();
+    const normalizedValue = cleanString(value);
+    if (normalizedValue.length < 5) return false;
+
+    return /\b(?:reason|why|because|concern|issue|problem|experience|feedback|dissatisfaction|impact)\b/.test(normalizedKey)
+      || hasSpecificConcernDetail(normalizedValue);
+  });
+}
+
 function shouldRequireFullIssueSummary(
   text: string,
   context: Record<string, unknown>,
@@ -584,7 +598,10 @@ function shouldRequireFullIssueSummary(
     description,
   ].filter(Boolean).join(' ').toLowerCase();
 
-  return description.length < 60 && /complain|complaint|refund|billing|payment|delay|not resolved/.test(lower);
+  if (description.length >= 60) return false;
+  if (!/complain|complaint|refund|billing|payment|delay|not resolved/.test(lower)) return false;
+
+  return !hasSpecificConcernDetail(description) && !hasSupplementalIssueSpecifics(context);
 }
 
 function computeSlaDueAt(priority: Priority): string {
@@ -871,62 +888,17 @@ const PROTECTED_ENTITY_FIELD_IDS = new Set([
   'membership',
 ]);
 
-const KNOWN_DETAIL_FIELD_IDS = new Set([
-  'intakeRoute',
-  'requestType',
-  'clientsAffected',
-  'studio',
-  'category',
-  'subCategory',
-  'trainer',
-  'classType',
-  'membership',
-  'memberName',
-  'memberContact',
-  'reportedBy',
-  'priority',
-  'description',
-  'desiredResolution',
-  'resolutionRequired',
-  'incidentDateTime',
-  'memberSentiment',
-  'momencePurchaseContext',
-  'classImpactType',
-  'classImpactDetails',
-  'freezeStartDate',
-  'freezeEndDate',
-  'freezeReason',
-  'classesRemaining',
-  'packageExpiryDate',
-  'requestedRolloverDate',
-  'rolloverReason',
-  'partnerName',
-  'hostedFeedbackArea',
-  'attendeeCount',
-  'prospectQuality',
-  'followUpPreference',
-  'machineSymptom',
-  'bikeSymptom',
-  'equipmentSymptom',
-  'hvacSymptom',
-  'lockFaultType',
-  'accessStatus',
-  'securityRisk',
-  'plumbingSymptom',
-  'electricalSymptom',
-  'affectedArea',
-  'operationalImpact',
-  'currentWorkaround',
-  'resolutionRequirement',
-  'appIssueSurface',
-  'appErrorObserved',
-  'deviceContext',
-]);
-
 /**
- * Removes protected entity fields from the AI's proposed detailForm unless the business
- * rules guard also flagged them as required. Non-entity (issue-specific) fields from
- * the AI are always kept so the AI can still ask its own contextual questions.
+ * AI drives, guard is a floor. The AI owns which contextual questions to ask, so its
+ * proposed fields are kept — both canonical and invented snake_case fields. The guard
+ * only enforces a minimum: it never deletes the AI's questions. Two safety rules remain:
+ *   1. reportedBy is always dropped (supplied by the signed-in user).
+ *   2. Protected entity fields (member/class Momence pickers) are dropped UNLESS the guard
+ *      flagged them — this stops the AI from rendering a member/session search on a pure
+ *      facility/ops incident that does not involve a specific person or booking.
+ * Guard-required fields the AI included are forced required; guard-required fields the AI
+ * omitted are appended by the caller so the hard gates (clientsAffected, resolutionRequired,
+ * studio) still hold.
  */
 function filterAiDetailFormFields(
   form: AiDetailForm | null | undefined,
@@ -936,13 +908,35 @@ function filterAiDetailFormFields(
   const guardedSet = new Set<string>(guardedFields);
   const filteredFields = form.fields.map((field) => {
     if (field.id === 'reportedBy') return false;
-    if (field.id === 'description' && guardedSet.size > 0 && !guardedSet.has('description')) return false;
-    if (KNOWN_DETAIL_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return false;
     if (PROTECTED_ENTITY_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return false;
     return guardedSet.has(field.id) ? { ...field, required: true } : field;
   }).filter(Boolean) as AiDetailField[];
   if (filteredFields.length === 0) return null;
   return { ...form, fields: filteredFields };
+}
+
+/**
+ * Appends guard-required fields the AI omitted, so the deterministic floor (the hard intake
+ * gates) is always satisfied even when the AI's form focused only on contextual questions.
+ */
+function mergeGuardFloorIntoForm(
+  form: AiDetailForm | null,
+  guardedFields: DetailFieldId[],
+): AiDetailForm | null {
+  if (!guardedFields.length) return form;
+  const present = new Set((form?.fields || []).map((field) => field.id));
+  const missingGuardFields = guardedFields.filter((id) => !present.has(id));
+  if (!missingGuardFields.length) return form;
+  const guardFieldEntries = missingGuardFields.map((id) => ({ id, label: id, type: 'text' as const, required: true }));
+  if (!form) {
+    return {
+      title: 'Complete ticket intake details',
+      description: 'Athena inferred the classification and needs these details before drafting.',
+      fields: guardFieldEntries,
+      submitLabel: 'Continue drafting ticket',
+    };
+  }
+  return { ...form, fields: [...form.fields, ...guardFieldEntries] };
 }
 
 async function askAiForIntake(body: RequestBody, instructions: string): Promise<AiIntakeResponse | null> {
@@ -975,8 +969,17 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       messages: body.messages || [],
     }),
   });
-  if (!result) return null;
-  return normalizeAiIntakeResponse(parseJsonObject(result.content));
+  if (!result) {
+    console.warn('[athena-intake] AI provider unavailable or request failed — falling back to regex intake. Check AI_PROVIDER + API key/model secrets.');
+    return null;
+  }
+  const parsed = normalizeAiIntakeResponse(parseJsonObject(result.content));
+  if (!parsed) {
+    console.warn(`[athena-intake] AI provider=${result.provider} model=${result.model} returned unparseable output — falling back to regex intake.`);
+    return null;
+  }
+  console.log(`[athena-intake] AI provider=${result.provider} model=${result.model} drove intake (needsMoreInfo=${parsed.needsMoreInfo}).`);
+  return parsed;
 }
 
 type AiReportNarrative = {
@@ -1234,8 +1237,6 @@ function requiredFieldsForIssue(
   ]);
   const classContextCategories = new Set(['Scheduling', 'Class Experience', 'Trainer Feedback', 'Instructor & Class Quality', 'Booking & Schedule']);
   const membershipSpecific = /freeze|pause|roll|extension|membership|package|renewal|upgrade|downgrade|auto-renew|refund|expiry|credit|class pack|billing|payment/.test(lower);
-  const commercialVerification = shouldRequireCommercialVerificationContext(text, context, category);
-  const classAccessVerification = shouldRequireClassAccessVerification(text, context, category);
   const hostedSpecific = /hosted|partner|influencer|partnership/.test(lower) || category === 'Hosted Class & Partnerships';
   const prioritySpecific = route !== 'feedback' || /safety|security|theft|repair|maintenance|tech|operating|pricing|membership|customer service|complaint|urgent|injury|hazard/.test(`${category} ${subCategory} ${lower}`.toLowerCase());
   const includeClientImpact = options.includeClientImpact ?? true;
@@ -1301,18 +1302,6 @@ function requiredFieldsForIssue(
   }
   if (shouldRequireNamedMemberContext(text, context, category)) {
     add('memberName', context.memberId || context.memberName);
-  }
-  if (commercialVerification) {
-    add('studio', context.studio);
-    add('memberName', context.memberId || context.memberName);
-    add('membership', context.membership);
-    add('incidentDateTime', context.incidentDateTime);
-    add('momencePurchaseContext', context.momencePurchaseContext);
-    add('desiredResolution', context.desiredResolution);
-    add('memberSentiment', context.memberSentiment);
-    if (classAccessVerification) {
-      add('classType', context.sessionId || context.classType);
-    }
   }
   if (hasConfirmedAffectedClients(context.clientsAffected)) {
     add('memberName', context.memberId || context.memberName);
@@ -1686,27 +1675,23 @@ Deno.serve(async (request) => {
       const aiContext = { ...effectiveBodyContext, ...(aiResponse.inferredContext || {}) };
       const guardedMissingFields = requiredFieldsForIssue(latestUserMessage, aiContext);
 
-      // Filter the AI's proposed form: remove entity fields (member/class) that the
-      // business-logic guard did not flag as required for this specific incident.
-      const filteredAiForm = filterAiDetailFormFields(aiResponse.detailForm, guardedMissingFields);
+      // AI drives the form: keep the AI's contextual questions (canonical + invented), only
+      // dropping reportedBy and member/class pickers the guard did not flag. Then merge in any
+      // guard-required fields the AI omitted so the hard intake gates are always satisfied.
+      const aiDrivenForm = filterAiDetailFormFields(aiResponse.detailForm, guardedMissingFields);
+      const finalForm = mergeGuardFloorIntoForm(aiDrivenForm, guardedMissingFields);
 
-      const needsMoreInfo = aiResponse.needsMoreInfo || filteredAiForm !== null || guardedMissingFields.length > 0;
+      const needsMoreInfo = aiResponse.needsMoreInfo || finalForm !== null || guardedMissingFields.length > 0;
       const aiTicket = needsMoreInfo ? null : withRecommendedResolutionMetadata(aiResponse.ticket || fallbackDraft(messages, aiContext));
+      console.log(`[athena-intake] path=ai-dynamic needsMoreInfo=${needsMoreInfo} formFields=${finalForm?.fields?.length ?? 0}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
         promptProfile: `${promptProfile}:ai-dynamic`,
         needsMoreInfo,
-        reply: needsMoreInfo && !filteredAiForm
+        reply: needsMoreInfo && !finalForm
           ? 'I need a few details before drafting this ticket. Please complete the form below.'
           : aiResponse.reply,
-        detailForm: filteredAiForm || (guardedMissingFields.length > 0
-          ? {
-              title: 'Complete ticket intake details',
-              description: 'Athena inferred the classification and needs these details before drafting.',
-              fields: Array.from(new Set(guardedMissingFields)),
-              submitLabel: 'Continue drafting ticket',
-            }
-          : null),
+        detailForm: finalForm,
         ticket: aiTicket,
         suggestedChips: aiResponse.suggestedChips || [],
         inferredContext: aiResponse.inferredContext || {},
@@ -1720,6 +1705,7 @@ Deno.serve(async (request) => {
     const effectiveContext = { ...effectiveBodyContext, ...inferredContext };
     const missingFields = requiredFieldsForIssue(latestUserMessage, effectiveContext);
     if (missingFields.length > 0) {
+      console.warn(`[athena-intake] path=fallback (regex) missingFields=${missingFields.length}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
         promptProfile: `${promptProfile}:fallback`,
@@ -1751,6 +1737,7 @@ Deno.serve(async (request) => {
       description: draft.description || (effectiveContext as Record<string, unknown>).description,
     });
     if (draftMissingFields.length > 0) {
+      console.warn(`[athena-intake] path=incomplete (regex) missingFields=${draftMissingFields.length}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
         promptProfile: `${promptProfile}:incomplete`,
@@ -1771,6 +1758,7 @@ Deno.serve(async (request) => {
           : '',
       });
     }
+    console.warn(`[athena-intake] path=drafted (regex fallback draft) — AI did not run`);
     return json({
       conversationId: body.conversationId || crypto.randomUUID(),
       promptProfile: `${promptProfile}:drafted`,

@@ -36,6 +36,22 @@ describe('shouldAcceptAiDetailForm', () => {
       remainingMissingFieldCount: 2,
     })).toBe(true);
   });
+
+  it('accepts the AI contextual follow-up form once the floor is met when the AI asks for more', () => {
+    expect(shouldAcceptAiDetailForm({
+      remainingMissingFieldCount: 0,
+      aiNeedsMoreInfo: true,
+      aiProposedFieldCount: 2,
+    })).toBe(true);
+  });
+
+  it('does not accept an empty AI follow-up form even when the AI flags more info', () => {
+    expect(shouldAcceptAiDetailForm({
+      remainingMissingFieldCount: 0,
+      aiNeedsMoreInfo: true,
+      aiProposedFieldCount: 0,
+    })).toBe(false);
+  });
 });
 
 describe('shouldReplaceInferredCategory', () => {

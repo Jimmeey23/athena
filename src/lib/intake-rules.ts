@@ -415,55 +415,6 @@ function shouldRequireNamedMemberContext(context: IntakeContext, issueText: stri
   return mentionsMember && needsPersonalFollowUp;
 }
 
-function shouldRequireCommercialVerificationContext(context: IntakeContext, issueText: string): boolean {
-  const category = context.category || '';
-  if (PHYSICAL_ONLY_CATEGORIES.has(category)) return false;
-
-  const lower = [
-    issueText,
-    context.initialReport,
-    context.description,
-    context.requestType,
-    context.category,
-    context.subCategory,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  const memberReference = hasPersonalCommercialReference(lower) || !isMissingIntakeValue(context.memberId) || !isMissingIntakeValue(context.memberName);
-  if (!memberReference) return false;
-
-  const commercialConcern =
-    /refund|billing|payment|paid|amount|charge|charged|invoice|receipt|purchase|membership|package|renewal|expiry|credit|waiver|freeze|pause|roll\s?over|extension|pricing|price/.test(lower) ||
-    ['Pricing and Memberships', 'Billing & Membership'].includes(category);
-
-  const mentionsClassContext = /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower);
-  const classAccessConcern =
-    mentionsClassContext &&
-    (
-      /(denied|not allowed|unable to join|could not join|cannot join|would not be able|restriction|protocol|policy)/.test(lower) ||
-      /\blate\s+(entry|arrival|cancellation|cancel|policy)\b/.test(lower) ||
-      /\barrived\s+late\b.{0,60}\b(denied|not allowed|unable|could not|cannot|entry|policy|restriction)\b/.test(lower) ||
-      /\bfirst\s+(class|barre|power\s?cycle|cycle|session)\b/.test(lower)
-    );
-
-  return commercialConcern || classAccessConcern;
-}
-
-function shouldRequireClassAccessVerification(context: IntakeContext, issueText: string): boolean {
-  if (!shouldRequireCommercialVerificationContext(context, issueText)) return false;
-
-  const lower = [
-    issueText,
-    context.initialReport,
-    context.description,
-    context.requestType,
-    context.category,
-    context.subCategory,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  return /(class|session|booking|barre|cycle|power\s?cycle|late entry)/.test(lower) &&
-    /(denied|not allowed|unable to join|could not join|cannot join|would not be able|first|late|restriction|protocol|policy)/.test(lower);
-}
-
 function shouldRequireComplaintResolution(context: IntakeContext, issueText: string): boolean {
   if (!isMissingIntakeValue(context.desiredResolution)) return false;
   if (!shouldRequireNamedMemberContext({ ...context, memberId: undefined, memberName: undefined }, issueText)) return false;
@@ -483,6 +434,71 @@ function shouldRequireComplaintResolution(context: IntakeContext, issueText: str
   return /complain|complaint|refund|billing|payment|delay|not resolved|follow-?up/.test(lower);
 }
 
+const STANDARD_CONTEXT_DETAIL_KEYS = new Set([
+  'intakeRoute',
+  'requestType',
+  'clientsAffected',
+  'memberId',
+  'memberName',
+  'memberContact',
+  'sessionId',
+  'studio',
+  'trainer',
+  'classType',
+  'classDateTime',
+  'membership',
+  'category',
+  'subCategory',
+  'reportedBy',
+  'priority',
+  'description',
+  'incidentDateTime',
+  'desiredResolution',
+  'urgencyReason',
+  'memberSentiment',
+  'resolutionRequired',
+  'momencePurchaseContext',
+  'classImpactType',
+  'classImpactDetails',
+  'freezeStartDate',
+  'freezeEndDate',
+  'freezeReason',
+  'classesRemaining',
+  'packageExpiryDate',
+  'requestedRolloverDate',
+  'rolloverReason',
+  'partnerName',
+  'hostedFeedbackArea',
+  'attendeeCount',
+  'prospectQuality',
+  'followUpPreference',
+  'initialReport',
+]);
+
+function hasSpecificConcernDetail(text?: string): boolean {
+  const value = text?.trim().toLowerCase() || '';
+  if (!value) return false;
+
+  return /\b(?:because|due to|since|as\s+(?:she|he|they|the member|client))\b/.test(value)
+    || /\b(?:overcrowd|too\s+loud|music|unhappy|dissatisfied|poor|denied|dirty|unclean|hot|cold|unsafe|injur|pain|not\s+(?:received|resolved|allowed|working|happy)|unable|could\s+not|wasn['’]?t|isn['’]?t)\b/.test(value);
+}
+
+function hasSupplementalIssueSpecifics(context: IntakeContext): boolean {
+  return Object.entries(context).some(([key, value]) => {
+    if (STANDARD_CONTEXT_DETAIL_KEYS.has(key)) return false;
+    if (isMissingIntakeValue(value)) return false;
+    const normalizedKey = key
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_:-]+/g, ' ')
+      .toLowerCase();
+    const normalizedValue = String(value).trim();
+    if (normalizedValue.length < 5) return false;
+
+    return /\b(?:reason|why|because|concern|issue|problem|experience|feedback|dissatisfaction|impact)\b/.test(normalizedKey)
+      || hasSpecificConcernDetail(normalizedValue);
+  });
+}
+
 function shouldRequireFullIssueSummary(context: IntakeContext, issueText: string): boolean {
   const description = context.description?.trim() || '';
   if (!description) return true;
@@ -493,7 +509,10 @@ function shouldRequireFullIssueSummary(context: IntakeContext, issueText: string
     context.description,
   ].filter(Boolean).join(' ').toLowerCase();
 
-  return description.length < 60 && /complain|complaint|refund|billing|payment|delay|not resolved/.test(lower);
+  if (description.length >= 60) return false;
+  if (!/complain|complaint|refund|billing|payment|delay|not resolved/.test(lower)) return false;
+
+  return !hasSpecificConcernDetail(description) && !hasSupplementalIssueSpecifics(context);
 }
 
 export function isMissingIntakeValue(value: unknown): boolean {
@@ -917,8 +936,6 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
   const categoryPathText = `${category} ${subCategory} ${issueText}`.toLowerCase();
   const membershipSpecific =
     /freeze|pause|roll|extension|membership|package|renewal|upgrade|downgrade|auto-renew|refund|expiry|credit|class pack|billing|payment/.test(issueText);
-  const commercialVerification = shouldRequireCommercialVerificationContext(context, issueText);
-  const classAccessVerification = shouldRequireClassAccessVerification(context, issueText);
   const hostedSpecific = /hosted|partner|influencer|partnership/.test(issueText) || category === 'Hosted Class & Partnerships';
   const prioritySpecific =
     routeLower !== 'feedback' ||
@@ -939,19 +956,6 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
 
   if (shouldRequireNamedMemberContext(context, issueText)) {
     add('memberName', context.memberId || context.memberName);
-  }
-
-  if (commercialVerification) {
-    add('studio', context.studio);
-    add('memberName', context.memberId || context.memberName);
-    add('membership', context.membership);
-    add('incidentDateTime', context.incidentDateTime);
-    add('momencePurchaseContext', context.momencePurchaseContext);
-    add('desiredResolution', context.desiredResolution);
-    add('memberSentiment', context.memberSentiment);
-    if (classAccessVerification) {
-      add('classType', context.sessionId || context.classType);
-    }
   }
 
   const requireAffectedClientSelection = hasConfirmedAffectedClients(context.clientsAffected);

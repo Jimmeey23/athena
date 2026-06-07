@@ -32,7 +32,7 @@ if (!/function\s+detailFormForContext\b/.test(sourceWithoutComments)) {
 }
 
 requirePattern(
-  /import\s*\{[\s\S]*captureMemberVoiceFromText[\s\S]*getMissingIntakeFields[\s\S]*isMissingIntakeValue[\s\S]*IntakeContext[\s\S]*\}\s*from\s*['"]@\/lib\/intake-rules['"]/,
+  /import\s*\{[\s\S]*captureMemberFeedbackFromText[\s\S]*getMissingIntakeFields[\s\S]*isMissingIntakeValue[\s\S]*IntakeContext[\s\S]*\}\s*from\s*['"]@\/lib\/intake-rules['"]/,
   'Intake regression: ChatInterface must import all shared intake-rule helpers.'
 );
 
@@ -71,9 +71,9 @@ requirePattern(
   'Intake regression: ChatInterface must seed reportedBy from the signed-in user.'
 );
 
-rejectPattern(
-  /description:\s*ctx\.description\s*\|\|\s*draft\.description/,
-  'Intake regression: AI draft descriptions must not mask missing captured member voice.'
+requirePattern(
+  /description:\s*ctx\.description\s*\|\|\s*draft\.description\s*\|\|\s*draft\.conversationSummary/,
+  'Intake regression: AI draft validation must treat the returned draft description as captured issue context.'
 );
 
 rejectPattern(
@@ -82,13 +82,18 @@ rejectPattern(
 );
 
 requirePattern(
-  /function\s+requiredFieldsForIssue[\s\S]*return\s+getMissingIntakeFields\(mergedContext\)/,
+  /function\s+requiredFieldsForIssue[\s\S]*getMissingIntakeFields\(mergedContext/,
   'Intake regression: ChatInterface must delegate missing intake fields to getMissingIntakeFields.'
 );
 
 requirePattern(
-  /const\s+capturedVoice\s*=[\s\S]*captureMemberVoiceFromText\(text,\s*activeContext\)[\s\S]*applyDetailValue\(activeContext,\s*['"]description['"],\s*capturedVoice\)/,
-  'Intake regression: ChatInterface must capture free-form member voice through captureMemberVoiceFromText.'
+  /const\s+localMissingForm\s*=\s*normalizedAiTicket\s*\?\s*null\s*:\s*detailFormForContext\(responseContext\)/,
+  'Intake regression: context-only missing forms must not override an AI-returned draft.'
+);
+
+requirePattern(
+  /const\s+capturedFeedback\s*=[\s\S]*captureMemberFeedbackFromText\(text,\s*activeContext\)[\s\S]*applyDetailValue\(activeContext,\s*['"]description['"],\s*capturedFeedback\)/,
+  'Intake regression: ChatInterface must capture free-form member feedback through captureMemberFeedbackFromText.'
 );
 
 if (!/export\s+function\s+getMissingIntakeFields\b/.test(intakeRulesWithoutComments)) {

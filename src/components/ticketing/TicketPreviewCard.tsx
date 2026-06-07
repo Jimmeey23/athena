@@ -468,7 +468,7 @@ const TicketReviewPanel: React.FC<{
         )}
         <ReviewBeforePublish sections={insights.sections} />
       </div>
-      <SmartOpsReviewBlock intelligence={smart} />
+      <SmartOpsReviewBlock intelligence={smart} resolutionSteps={getDraftResolutionSteps(draft)} />
     </div>
   </div>
   );
@@ -518,7 +518,11 @@ const DecisionMetric: React.FC<{ label: string; value: string; detail: string; t
   );
 };
 
-const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence }> = ({ intelligence }) => (
+const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence; resolutionSteps?: string[] }> = ({ intelligence, resolutionSteps }) => {
+  // Prefer the AI's incident-specific resolution steps over the generic playbook template.
+  const steps = resolutionSteps && resolutionSteps.length ? resolutionSteps : intelligence.playbook.steps;
+  const stepsTitle = resolutionSteps && resolutionSteps.length ? 'Recommended resolution steps' : intelligence.playbook.title;
+  return (
   <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 bg-slate-950 p-3 text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)]">
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -535,8 +539,8 @@ const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence }> =
         </div>
         <div className="mt-2 text-[11px] leading-relaxed text-slate-300">{intelligence.urgencyExplanation}</div>
       </div>
-      <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title={intelligence.playbook.title} compact>
-        <StructuredLineList lines={intelligence.playbook.steps} />
+      <ReviewBlock icon={<Brain className="h-3.5 w-3.5" />} title={stepsTitle} compact>
+        <StructuredLineList lines={steps} />
       </ReviewBlock>
       <ReviewBlock icon={<Sparkles className="h-3.5 w-3.5" />} title="Quick actions" compact>
         <div className="flex flex-wrap gap-1.5">
@@ -554,7 +558,8 @@ const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence }> =
         <StructuredLineList lines={intelligence.nextBestQuestions} />
       </ReviewBlock>
   </div>
-);
+  );
+};
 
 const ReviewBlock: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; compact?: boolean }> = ({ icon, title, children, compact = false }) => (
   <div className={`rounded-xl border border-slate-200 bg-white ${compact ? 'p-2.5' : 'p-3'}`}>

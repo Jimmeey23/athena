@@ -64,7 +64,7 @@ describe('ChatInterface intake flow', () => {
     expect(hoisted.invokeTicketingFunction).not.toHaveBeenCalled();
   });
 
-  it('asks for a fuller member report instead of showing a draft when the local required description is still incomplete', async () => {
+  it('shows the AI draft instead of forcing a local description form when the AI returns a ticket', async () => {
     hoisted.invokeTicketingFunction.mockResolvedValue({
       data: {
         conversationId: 'conversation-1',
@@ -123,12 +123,12 @@ describe('ChatInterface intake flow', () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText(/Just a couple more details and we'll have a clean draft ready/i)).toBeTruthy();
+        expect(screen.getAllByText(/Draft ready/i).length).toBeGreaterThan(0);
       },
       { timeout: 3000 }
     );
-    expect(screen.queryByText(/Drafting the ticket now with the provided details/i)).toBeNull();
-    expect(screen.queryByText(/Ticket draft ready for review/i)).toBeNull();
+    expect(screen.queryByText(/Just a couple more details and we'll have a clean draft ready/i)).toBeNull();
+    expect(screen.queryByText(/Momence purchase\/payment context/i)).toBeNull();
   });
 
   it('does not draft a named membership refund after only the resolution answer is present', async () => {

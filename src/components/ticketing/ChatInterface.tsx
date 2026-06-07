@@ -245,8 +245,18 @@ function writingPauseMs(content: string): number {
   return Math.min(1150, Math.max(420, 300 + length * 4));
 }
 
-const ATHENA_CHAT_RESPONSE_TIMEOUT_MS = 12_000;
+const ATHENA_CHAT_RESPONSE_TIMEOUT_MS = 30_000;
 const ATHENA_CHAT_TIMEOUT_MESSAGE = 'Athena chat response timed out';
+const ATHENA_AI_PROVIDER_LABELS: Record<string, string> = {
+  claude: 'Claude Haiku',
+  openai: 'OpenAI',
+  deepseek: 'DeepSeek',
+};
+
+function aiProviderBadgeLabel(provider?: string): string {
+  const normalizedProvider = (provider || 'openai').trim().toLowerCase();
+  return ATHENA_AI_PROVIDER_LABELS[normalizedProvider] || 'OpenAI';
+}
 
 const USER_TONES = [
   {
@@ -755,10 +765,11 @@ function pruneDetailForm(form: DetailForm | null, ctx: DetailContext): DetailFor
 
 function filterAiDetailForm(form: DetailForm | null, ctx: DetailContext, requiredFields: Set<string>): DetailForm | null {
   if (!form) return null;
+  // AI drives, guard is a floor. Keep the AI's contextual questions (canonical + invented).
+  // Only drop reportedBy (supplied by signed-in user) and member/class pickers the guard did
+  // not flag, so a pure facility/ops incident never renders a member/session search.
   const fields = form.fields.map((field) => {
     if (field.id === 'reportedBy') return false;
-    if (field.id === 'description' && requiredFields.size > 0 && !requiredFields.has('description')) return false;
-    if (getDetailField(field.id) && !requiredFields.has(field.id)) return false;
     if (isProtectedEntityField(field.id) && !requiredFields.has(field.id)) return false;
     return requiredFields.has(field.id) ? { ...field, required: true } : field;
   }).filter(Boolean) as DetailFormField[];
@@ -892,6 +903,7 @@ function contextFromDraft(draft: DraftTicket, ctx: DetailContext): DetailContext
     assignedTo: draft.assignedTo || ctx.assignedTo || ctx.owner,
     department: draft.department || ctx.department || ctx.team,
     memberSentiment: draft.sentiment || ctx.memberSentiment,
+    description: ctx.description || draft.description || draft.conversationSummary,
   };
 }
 
@@ -910,9 +922,15 @@ function requiredFieldsForIssue(ctx: DetailContext, draft?: DraftTicket | null):
         memberContact: ctx.memberContact || draft.memberContact || undefined,
         reportedBy: ctx.reportedBy || draft.reportedBy || undefined,
         memberSentiment: ctx.memberSentiment || draft.sentiment || undefined,
+        description: ctx.description || draft.description || draft.conversationSummary || undefined,
       }
     : ctx;
-  if (draft) return getMissingIntakeFields(mergedContext, { includeClientImpact: true });
+  if (draft) {
+    const fields = getMissingIntakeFields(mergedContext, { includeClientImpact: true });
+    return draft.description?.trim()
+      ? fields.filter((field) => field !== 'description')
+      : fields;
+  }
   return getMissingIntakeFields(mergedContext);
 }
 
@@ -1142,6 +1160,8 @@ function buildTrainerEvaluationDraft(input: TrainerEvaluationInput): DraftTicket
 export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) => void; resetVersion?: number }> = ({ onOpenExistingTicket, resetVersion = 0 }) => {
   const { createApprovedTicket, tickets, setSelectedTicket } = useTickets();
   const { user } = useBackendAuth();
+  const activeAiProvider = import.meta.env.VITE_AI_PROVIDER || 'openai';
+  const providerBadgeLabel = aiProviderBadgeLabel(activeAiProvider);
   const reporterName = getReporterName(user);
   const reporterFirstName = getReporterFirstName(reporterName);
   const [messages, setMessages] = useState<Message[]>(() => [buildGreetingMessage(reporterName)]);
@@ -1580,7 +1600,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const { data, error } = await withTimeout(
         invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
           body: buildAthenaDraftRequestBody({
-            aiProvider: import.meta.env.VITE_AI_PROVIDER || 'openai',
+            aiProvider: activeAiProvider,
             messages: newMessages,
             preamble,
             conversationId,
@@ -1616,10 +1636,12 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const remainingMissingFields = requiredFieldsForIssue(responseContext, normalizedAiTicket || undefined);
       const requiredFieldSet = new Set(remainingMissingFields);
       const incompleteDraftForm = detailFormForIncompleteDraft(normalizedAiTicket, responseContext);
-      const localMissingForm = detailFormForContext(responseContext);
+      const localMissingForm = normalizedAiTicket ? null : detailFormForContext(responseContext);
       const deterministicForm = incompleteDraftForm || localMissingForm;
       const acceptsAiDetailForm = shouldAcceptAiDetailForm({
         remainingMissingFieldCount: remainingMissingFields.length,
+        aiNeedsMoreInfo: data?.needsMoreInfo,
+        aiProposedFieldCount: data?.detailForm?.fields?.length ?? 0,
       });
       const normalizedForm = acceptsAiDetailForm
         ? pruneDetailForm(
@@ -2001,7 +2023,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       ].join('\n');
       const { data } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
         body: buildAthenaDraftRequestBody({
-        aiProvider: import.meta.env.VITE_AI_PROVIDER || 'openai',
+          aiProvider: activeAiProvider,
           messages: [{ id: `text-to-ticket-${Date.now()}`, role: 'user', content: aiInstruction }],
           preamble: buildContextPreamble({ ...context, reportedBy: reporterName }),
           conversationId,
@@ -2182,7 +2204,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                   Online
                 </span>
                 <span className="hidden rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600 sm:inline-flex">
-                  gpt-4o-mini
+                  {providerBadgeLabel}
                 </span>
               </div>
               <p className="truncate text-xs text-slate-500">Your AI ops assistant · Physique 57 India</p>

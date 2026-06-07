@@ -143,4 +143,11 @@ describe('template form dialog layout', () => {
     expect(source).not.toContain('>Copilot</span>');
     expect(source).not.toContain('intakeCopilot.suggestions');
   });
+
+  it('renders the Athena model badge from the configured provider instead of a stale GPT label', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
+
+    expect(source).toContain('aiProviderBadgeLabel');
+    expect(source).not.toContain('gpt-4o-mini');
+  });
 });
