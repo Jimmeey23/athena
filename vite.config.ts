@@ -2,12 +2,28 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-// https://vitejs.dev/config/
+function resolveSupabaseEnv() {
+  const a = process.env.VITE_TICKETING_SUPABASE_URL || '';
+  const b = process.env.VITE_TICKETING_SUPABASE_ANON_KEY || '';
+  const aIsUrl = a.startsWith('http://') || a.startsWith('https://');
+  const bIsUrl = b.startsWith('http://') || b.startsWith('https://');
+  if (!aIsUrl && bIsUrl) {
+    return { url: b, anonKey: a };
+  }
+  return { url: a, anonKey: b };
+}
+
+const { url: supabaseUrl, anonKey: supabaseAnonKey } = resolveSupabaseEnv();
+
 export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 5000,
     allowedHosts: true,
+  },
+  define: {
+    'import.meta.env.VITE_TICKETING_SUPABASE_URL': JSON.stringify(supabaseUrl),
+    'import.meta.env.VITE_TICKETING_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
   },
   optimizeDeps: {
     include: ['recharts'],
