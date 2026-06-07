@@ -220,7 +220,7 @@ interface AiIntakeResponse {
 const GREETING: Message = {
   id: 'greet',
   role: 'assistant',
-  content: "Hi, happy to help. What should we log today? 🙂",
+  content: "Hey! I'm Athena 👋 What would you like to log today? Tell me what happened and I'll take it from there.",
 };
 
 function buildGreetingMessage(reporterName?: string): Message {
@@ -228,8 +228,8 @@ function buildGreetingMessage(reporterName?: string): Message {
   return {
     ...GREETING,
     content: firstName
-      ? `Hi ${firstName}, happy to help. What should we log today? 🙂`
-      : "Hi, happy to help. What should we log today? 🙂",
+      ? `Hey ${firstName}! 👋 What would you like to log today? Just describe what happened and I'll handle the rest.`
+      : "Hey! I'm Athena 👋 What would you like to log today? Tell me what happened and I'll take it from there.",
   };
 }
 
@@ -1635,10 +1635,10 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             reporterFirstName,
           })
         : finalDetailForm
-          ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}I just need the remaining required details before I draft this.`
+          ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}Just a couple more details and we'll have a clean draft ready! 🙂`
           : ticket
-            ? 'I drafted the ticket below. Please review it before publishing.'
-            : data?.reply || "I didn't quite catch that. Could you rephrase it?";
+            ? "Looks good — I've drafted the ticket below. Take a quick look before publishing."
+            : data?.reply || "Hmm, I didn't quite catch that. Could you tell me a bit more?";
       setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
       await sleep(writingPauseMs(assistantContent));
       if (requestEpoch !== activeChatEpochRef.current || requestNonce !== requestNonceRef.current) return;
@@ -1682,8 +1682,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         const fallbackContent = singleField
           ? buildNaturalSingleFieldPrompt({ field: singleField, reporterFirstName })
           : timeoutForm
-            ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}Athena is taking a little longer than expected, so I’ll continue with the local intake flow.`
-            : 'Athena is taking a little longer than expected, so I prepared a local draft for review.';
+            ? `${reporterFirstName ? `${reporterFirstName}, ` : ''}I’m taking a little longer than usual — continuing locally so you don’t lose momentum.`
+            : 'I’m taking a little longer than usual, so I’ve prepared a local draft for you to review.';
 
         setPendingSingleField(singleField && !singleFieldNeedsPicker && singleField.type !== 'select' ? singleField : null);
         const fallbackMessage: Message = {
@@ -1705,7 +1705,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         {
           id: `e-${Date.now()}`,
           role: 'assistant',
-          content: `Sorry, I hit an error: ${message}. Please try again.`,
+          content: `Something went wrong on my end — ${message}. Feel free to try again!`,
         },
       ]);
     } finally {
@@ -1813,7 +1813,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         {
           id: `publish-required-${Date.now()}`,
           role: 'assistant',
-          content: 'This ticket is not ready to publish. Submit the required details below first.',
+          content: 'Almost there! Just a few required details are missing — fill them in below and we can publish. 🙂',
           detailForm: missingDetailsForm,
           published: false,
         },
@@ -2118,17 +2118,9 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col bg-background lg:w-[68%]">
-        <div className={`animate-chat-header-in flex items-center justify-between border-b px-4 py-2.5 shadow-sm ${
-          instructorEvaluationMode
-            ? 'border-blue-100 bg-blue-50/70'
-            : 'border-blue-100 bg-blue-50/70'
-        }`}>
+        <div className="animate-chat-header-in flex items-center justify-between border-b border-blue-100/80 bg-gradient-to-r from-white via-blue-50/40 to-indigo-50/30 px-4 py-2.5 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
           <div className="flex min-w-0 items-center gap-4">
-            <div className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 shadow-sm ${
-              instructorEvaluationMode
-                ? 'border-blue-300/80 bg-gradient-to-br from-blue-100 to-cyan-100'
-                : 'border-blue-300/80 bg-gradient-to-br from-blue-100 to-cyan-100'
-            }`}>
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-blue-300/80 bg-gradient-to-br from-blue-100 to-indigo-100 shadow-[0_4px_14px_rgba(79,70,229,0.18)]">
               <img
                 src="/download-1.png"
                 alt="Athena"
@@ -2139,14 +2131,18 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-lg font-semibold text-slate-950">Athena</h1>
-                <span className={`inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold shadow-sm ${
-                  instructorEvaluationMode ? 'text-blue-700' : 'text-blue-700'
-                }`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 shadow-sm">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  </span>
                   Online
                 </span>
+                <span className="hidden rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600 sm:inline-flex">
+                  GPT-4.1
+                </span>
               </div>
-              <p className="truncate text-xs text-slate-500">Support, Smarter.</p>
+              <p className="truncate text-xs text-slate-500">Your AI ops assistant · Physique 57 India</p>
             </div>
           </div>
           <ChatExportMenu
@@ -2395,7 +2391,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                     sendMessage(input);
                   }
                 }}
-                placeholder="Describe the incident, feedback or complaint…"
+                placeholder="Tell me what happened — I'll take care of the rest…"
               className={`max-h-28 w-full resize-none rounded-full border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-950 shadow-[0_12px_34px_rgba(15,23,42,0.07)] outline-none transition duration-200 placeholder:text-slate-400 focus:ring-4 ${
                 instructorEvaluationMode ? 'focus:border-blue-400 focus:ring-blue-500/15' : 'focus:border-blue-400 focus:ring-blue-500/15'
               }`}
@@ -2482,8 +2478,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
               <Send className="w-4 h-4" />
             </button>
           </div>
-          <p className="mx-auto mt-1 w-full max-w-7xl px-1 text-[10px] font-medium text-stone-400">
-            Enter to send · Shift+Enter for new line · Attachments are optional and can help with faster resolution
+          <p className="mx-auto mt-1 w-full max-w-7xl px-1 text-[10px] font-medium text-slate-400">
+            Press Enter to send · Shift+Enter for new line · Attachments welcome if they help paint the picture
           </p>
         </div>
         </>
@@ -3294,33 +3290,33 @@ const MessageBubble: React.FC<{
     >
       {!isUser && message.aiGenerated && (
         <div
-          className="mb-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700"
+          className="mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-blue-200 bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-600 shadow-[0_2px_6px_rgba(79,70,229,0.15)]"
           title="AI generated"
           aria-label="AI generated"
         >
-          <Sparkles className="h-2.5 w-2.5" />
+          <Sparkles className="h-3 w-3" />
         </div>
       )}
       <div className={`flex w-full items-end gap-2 ${isUser ? 'flex-row-reverse justify-end' : ''}`}>
         {!isUser && (
-          <div className="h-6 w-6 rounded-full overflow-hidden bg-card border border-border/30 flex-shrink-0 p-0.5 mb-0.5">
+          <div className="h-8 w-8 rounded-full overflow-hidden bg-gradient-to-br from-blue-100 to-indigo-100 border-2 border-blue-200 flex-shrink-0 p-0.5 mb-0.5 shadow-sm">
             <img src="/download-1.png" alt="Athena" className="-scale-x-100 w-full h-full rounded-full object-cover" />
           </div>
         )}
         <div className={`${isUser ? 'ml-auto w-[52%] pl-12' : 'w-full pr-6'}`}>
           <div
-            className={`relative inline-block w-full rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm ${
+            className={`relative inline-block w-full rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed ${
               isUser
-                ? 'rounded-br-sm border border-gray-200 bg-gray-100 text-slate-900'
-                : 'rounded-bl-sm border border-[#e6e6e6] bg-white text-slate-900'
+                ? 'rounded-br-sm border border-indigo-200 bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-[0_4px_16px_rgba(79,70,229,0.28)]'
+                : 'rounded-bl-sm border border-blue-100/70 border-l-[3px] border-l-blue-400/60 bg-gradient-to-br from-white to-blue-50/50 text-slate-800 shadow-[0_2px_12px_rgba(15,23,42,0.06)]'
             }`}
           >
             {renderContent(previewContent)}
             <span
               className={`absolute bottom-0 h-3 w-3 rotate-45 ${
                 isUser
-                  ? '-right-1.5 bg-gray-100 border-r border-b border-gray-200'
-                  : '-left-1.5 bg-white border-l border-b border-[#e6e6e6]'
+                  ? '-right-1.5 bg-indigo-600 border-r border-b border-indigo-500'
+                  : '-left-1.5 bg-white border-l border-b border-blue-100'
               }`}
             />
             {shouldCollapse && (
@@ -3328,7 +3324,7 @@ const MessageBubble: React.FC<{
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 className={`mt-2 block text-xs font-semibold underline-offset-4 hover:underline ${
-                  isUser ? userTone.more : 'text-blue-700 hover:text-blue-900'
+                  isUser ? 'text-blue-100 hover:text-white' : 'text-blue-700 hover:text-blue-900'
                 }`}
               >
                 {expanded ? 'Show less' : 'Show more'}
@@ -3344,7 +3340,7 @@ const MessageBubble: React.FC<{
             <button
               key={i}
               onClick={() => onChipClick(c)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-slate-950"
+              className="rounded-full border border-blue-200 bg-gradient-to-br from-white to-blue-50 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-[0_2px_8px_rgba(37,99,235,0.10)] transition duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:text-blue-900 hover:shadow-[0_4px_12px_rgba(37,99,235,0.16)]"
             >
               {c.label}
             </button>
@@ -3364,17 +3360,17 @@ const MessageBubble: React.FC<{
             <button
               type="button"
               onClick={() => onOpenDraftReview(message.id)}
-              className="animate-draft-popout-cue flex w-full max-w-md items-center gap-3 rounded-2xl border border-blue-100 bg-white px-4 py-3 text-left shadow-[0_18px_48px_rgba(37,99,235,0.12)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50"
+              className="animate-draft-popout-cue flex w-full max-w-md items-center gap-3 rounded-2xl border border-blue-200 bg-gradient-to-r from-white to-blue-50/60 px-4 py-3.5 text-left shadow-[0_6px_24px_rgba(37,99,235,0.14)] transition hover:-translate-y-1 hover:border-blue-300 hover:shadow-[0_10px_30px_rgba(37,99,235,0.20)]"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
                 <ClipboardCheck className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-950">Ticket draft ready for review</span>
+                <span className="block text-sm font-semibold text-slate-900">Draft ready — tap to review ✅</span>
                 <span className="block truncate text-xs text-slate-500">{message.ticket.title}</span>
               </span>
-              <span className="rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white">
-                Open
+              <span className="rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_3px_10px_rgba(79,70,229,0.30)]">
+                Review →
               </span>
             </button>
           )}
@@ -3496,13 +3492,16 @@ const DraftTicketReviewPreview: React.FC<{
 
 const TypingIndicator: React.FC = () => (
   <div className="animate-p57-fade-up flex items-end gap-2">
-    <div className="h-7 w-7 rounded-full overflow-hidden bg-card border border-border/30 flex-shrink-0 p-0.5">
+    <div className="h-8 w-8 rounded-full overflow-hidden bg-gradient-to-br from-blue-100 to-indigo-100 border-2 border-blue-200 flex-shrink-0 p-0.5 shadow-sm">
       <img src="/download-1.png" alt="Athena" className="-scale-x-100 w-full h-full rounded-full object-cover" />
     </div>
-    <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm border border-[#e6e6e6] bg-white px-3.5 py-2.5 shadow-sm">
-      <span className="w-1.5 h-1.5 rounded-full bg-primary/30 animate-typing" style={{ animationDelay: '0s' }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-primary/30 animate-typing" style={{ animationDelay: '0.2s' }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-primary/30 animate-typing" style={{ animationDelay: '0.4s' }} />
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-blue-100/70 border-l-[3px] border-l-blue-400/60 bg-gradient-to-br from-white to-blue-50/50 px-4 py-3 shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
+        <span className="w-2 h-2 rounded-full bg-blue-400 animate-typing" style={{ animationDelay: '0s' }} />
+        <span className="w-2 h-2 rounded-full bg-blue-400 animate-typing" style={{ animationDelay: '0.2s' }} />
+        <span className="w-2 h-2 rounded-full bg-blue-400 animate-typing" style={{ animationDelay: '0.4s' }} />
+      </div>
+      <span className="pl-1 text-[11px] font-medium text-slate-400">Athena is thinking…</span>
     </div>
   </div>
 );

@@ -1,0 +1,3 @@
+- [AI model upgrade](ai-model-upgrade.md) — Claude upgraded to claude-opus-4-5, max tokens 8192 across all three AI providers.
+- [Vite dev server config](vite-dev-config.md) — must use host 0.0.0.0 and port 5000 for Replit webview workflow; IPv6 (::) is not supported.
+- [npm install blocked packages](npm-blocked.md) — vitest@2.1.9, @testing-library/* and jsdom are blocked by Replit security policy; temporarily remove from package.json to run npm install, then restore.
