@@ -712,7 +712,10 @@ function normalizeInferredContext(input: unknown): Partial<DetailContext> {
   assignString('resolutionRequired');
   assignString('desiredResolution');
   assignString('urgencyReason');
-  assignString('clientsAffected');
+  // clientsAffected is intentionally excluded here. It must ONLY come from explicit
+  // user form selection — never from AI inference. Accepting it here would let the AI
+  // silently satisfy the check (e.g. "Not confirmed yet"), bypass the question entirely,
+  // and prevent memberName from ever being required.
   assignString('membership');
   assignString('classImpactType');
   assignString('classImpactDetails');

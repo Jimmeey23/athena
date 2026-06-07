@@ -104,6 +104,14 @@ Draft immediately only if the initial report already contains everything the ass
 If any of the following is missing — exact nature of the fault, timing, operational impact, or resolution needed — collect it first.
 A one-sentence report is rarely enough to draft from. Probe before drafting.
 
+PRE-DRAFT CHECKLIST — do not set needsMoreInfo: false or produce a ticket until ALL five are true:
+1. clientsAffected is present in context.clientsAffected (explicitly answered by the user, not inferred by you).
+2. If clientsAffected starts with "Yes", memberName has been provided via Momence member search.
+3. studio has been confirmed.
+4. Incident-specific custom fields have been collected — not just canonical identifiers. Every ticket needs cause, timing, impact, and expected outcome. For a trainer/instructor issue this means at minimum: which session (classType), how late or what happened, reason provided, member reaction, and recovery offered. For a facility issue: fault specifics, operational impact, and workaround in place.
+5. resolutionRequired has been explicitly answered.
+Only after all five are satisfied should you set needsMoreInfo: false and produce a ticket.
+
 INTAKE INFERENCE:
 - Infer exactly one intake route: Request, Complaint, Feedback, or Internal Reporting
 - Infer the best category and subcategory from approved master data — do not require manual selection
@@ -135,6 +143,7 @@ CLIENT IMPACT CHECK:
 - This is required even for internal operational/facility issues, because the staff member must confirm whether members were directly or indirectly affected.
 - Use field ID clientsAffected with select options: Yes - directly affected, Yes - indirectly affected, Yes - directly and indirectly affected, No clients affected, Not confirmed yet.
 - Do not draft or publish when clientsAffected is unanswered.
+- CRITICAL: NEVER set clientsAffected in inferredContext — not even as "Not confirmed yet". If clientsAffected is absent from context.clientsAffected, it is unanswered and you MUST ask it explicitly. Ask clientsAffected FIRST, before studio or any other follow-up question. Setting it in inferredContext silently bypasses the check, prevents memberName from ever being asked, and produces an incomplete draft.
 - If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search. Staff may select one or multiple affected clients from Momence.
 - This client-impact rule is the exception to the usual physical/ops entity-field restriction: even an operational issue needs memberName when affected clients are confirmed.
 - If the report or selected context says a class/session/schedule was affected, require classType, classImpactType, and classImpactDetails after client impact is confirmed. The owner needs the exact Momence session plus whether the class was delayed, paused, moved, cancelled, disrupted, or otherwise affected.
@@ -947,9 +956,10 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       instructions,
       '',
       'Return JSON only using this schema:',
-      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": {"title": string, "description": string, "category": string, "subCategory": string, "priority": string, "studio": string, "metadata": {"recommendedResolutionSteps": string[]}}|null, "suggestedChips": []}',
+      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": {"title": string, "description": string, "category": string, "subCategory": string, "priority": string, "studio": string, "metadata": {"recommendedResolutionSteps": string[]}}|null, "suggestedChips": []}',
       '',
       'ANTI-LOOP (CRITICAL): Check the last assistant message in the messages array. If it was a plain conversational question and the user replied, that question is ANSWERED — do not re-ask it. Never ask for "member\'s own words", "verbatim report", or any paraphrase — the conversation history already contains this. Accept any user reply (even one word) and move on.',
+      'CRITICAL — clientsAffected schema rule: clientsAffected MUST NOT appear in inferredContext. It belongs only in detailForm.fields when it is unanswered. Ask it as a standalone conversational button question BEFORE any other follow-up. Setting it in inferredContext bypasses the guard, prevents memberName from being collected, and produces an incomplete draft.',
       'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails.',
       'Do not ask for reportedBy; the frontend supplies it from the signed-in user.',
       'For issue-specific fields, create clear snake_case IDs prefixed by the category or subcategory, and include options for select fields.',
@@ -1672,7 +1682,17 @@ Deno.serve(async (request) => {
     const aiResponse = await askAiForIntake(bodyWithEffectiveContext, instructions);
 
     if (aiResponse) {
-      const aiContext = { ...effectiveBodyContext, ...(aiResponse.inferredContext || {}) };
+      const aiInferred = { ...(aiResponse.inferredContext || {}) };
+      // clientsAffected must only be set via explicit user selection, never AI inference.
+      // If the AI sets it in inferredContext (e.g. "Not confirmed yet") before the user
+      // has been asked, the guard treats it as answered, memberName is never required,
+      // and the ticket is drafted without any member or impact details.
+      // Only preserve it if the user already answered it in a prior turn (i.e. it already
+      // lives in effectiveBodyContext from a form submission).
+      if (!cleanString(effectiveBodyContext.clientsAffected)) {
+        delete aiInferred.clientsAffected;
+      }
+      const aiContext = { ...effectiveBodyContext, ...aiInferred };
       const guardedMissingFields = requiredFieldsForIssue(latestUserMessage, aiContext);
 
       // AI drives the form: keep the AI's contextual questions (canonical + invented), only
