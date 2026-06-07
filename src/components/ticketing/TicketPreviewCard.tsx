@@ -507,7 +507,7 @@ const DecisionMetric: React.FC<{ label: string; value: string; detail: string; t
   return (
     <div className={`min-w-0 rounded-xl border px-3 py-2 ${tones[tone]}`}>
       <div className="text-[9px] font-bold uppercase tracking-[0.14em] opacity-65">{label}</div>
-      <div className="mt-1 truncate text-xs font-semibold" title={value}>{value}</div>
+      <div className="mt-1 truncate text-xs font-semibold tabular-nums" title={value}>{value}</div>
       <div className="mt-0.5 truncate text-[10px] opacity-70">{detail}</div>
       {typeof score === 'number' && (
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
@@ -528,7 +528,7 @@ const SmartOpsReviewBlock: React.FC<{ intelligence: SmartTicketIntelligence; res
         <div className="mb-2 flex items-center justify-between gap-3">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300">Smart risk</div>
-            <div className="mt-1 text-2xl font-bold leading-none">{intelligence.riskScore}</div>
+            <div className="mt-1 text-2xl font-bold leading-none tabular-nums">{intelligence.riskScore}</div>
           </div>
           <div className="h-16 w-16 rounded-full border-[8px] border-blue-400/80 bg-white/10 p-2 text-center text-[10px] font-bold uppercase leading-[34px] text-white">
             {intelligence.riskLevel}

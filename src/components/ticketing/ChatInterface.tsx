@@ -3486,16 +3486,16 @@ const MessageBubble: React.FC<{
           <div
             className={`relative inline-block w-full rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed ${
               isUser
-                ? 'rounded-br-sm border border-indigo-200 bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-[0_4px_16px_rgba(79,70,229,0.28)]'
-                : 'rounded-bl-sm border border-blue-100/70 border-l-[3px] border-l-blue-400/60 bg-gradient-to-br from-white to-blue-50/50 text-slate-800 shadow-[0_2px_12px_rgba(15,23,42,0.06)]'
+                ? 'rounded-br-sm border border-indigo-500/40 bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.10),0_12px_30px_-14px_rgba(79,70,229,0.55)]'
+                : 'rounded-bl-sm border border-slate-200/80 bg-white text-slate-800 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_-14px_rgba(15,23,42,0.18)]'
             }`}
           >
             {renderContent(previewContent)}
             <span
               className={`absolute bottom-0 h-3 w-3 rotate-45 ${
                 isUser
-                  ? '-right-1.5 bg-indigo-600 border-r border-b border-indigo-500'
-                  : '-left-1.5 bg-white border-l border-b border-blue-100'
+                  ? '-right-1.5 bg-indigo-600 border-r border-b border-indigo-500/40'
+                  : '-left-1.5 bg-white border-l border-b border-slate-200/80'
               }`}
             />
             {shouldCollapse && (

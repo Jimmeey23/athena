@@ -590,3 +590,80 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* --- Classy global polish: refined type rendering, headings, selection, scrollbars --- */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    letter-spacing: -0.006em;
+  }
+
+  /* Editorial, tightly-tracked headings read more sophisticated than default. */
+  h1, h2, h3, h4,
+  .font-bold, .font-extrabold, .font-semibold {
+    letter-spacing: -0.018em;
+  }
+
+  /* Numbers align cleanly — metrics, SLAs, IDs, counts. */
+  .tabular-nums,
+  [class*="tracking-"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: rgba(37, 99, 235, 0.16);
+    color: #0f172a;
+  }
+}
+
+@layer utilities {
+  /* Thin, restrained scrollbars — a hallmark of a polished surface. */
+  .scrollbar-classy {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.32) transparent;
+  }
+  .scrollbar-classy::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .scrollbar-classy::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-classy::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.28);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-classy::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(71, 85, 105, 0.45);
+  }
+}
+
+/* Apply the refined scrollbar to the whole app by default without per-element wiring. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.26);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(71, 85, 105, 0.42);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
