@@ -63,11 +63,14 @@ describe('ticket draft formatting', () => {
     expect(description).not.toContain('Member feedback summary');
     expect(description).not.toContain('Kwality House, Kemps Corner | Supreme HQ, Bandra');
     expect(description).not.toContain('Studio Mat 57 | Studio PowerCycle');
+    expect(description).not.toContain('Next step:');
+    expect(description).not.toContain('Athena review note');
   });
 
   it('flags raw email and member-feedback labels for rewrite on internal reports', () => {
     expect(draftDescriptionNeedsRewrite(`Member feedback summary: ${lateInstructorEmail}`, 'Internal Reporting')).toBe(true);
     expect(draftDescriptionNeedsRewrite(`Summary: ${lateInstructorEmail}`, 'Internal Reporting', lateInstructorEmail)).toBe(true);
     expect(draftDescriptionNeedsRewrite('Internal report summary: Instructor was late.', 'Internal Reporting')).toBe(false);
+    expect(draftDescriptionNeedsRewrite('Issue summary: Next step: Assigned owner to review and confirm the follow-up action.')).toBe(true);
   });
 });

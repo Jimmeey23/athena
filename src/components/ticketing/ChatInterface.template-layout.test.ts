@@ -110,9 +110,12 @@ describe('template form dialog layout', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ticketing/ChatInterface.tsx'), 'utf8');
 
     expect(source).toContain('suggestionsForTemplateTextField');
+    expect(source).toContain('suggestionsForTemplateTextField(label, value)');
+    expect(source).toContain('function suggestionsForDetailField(field: DetailFormField, values: Record<string, string>): string[]');
     expect(source).toContain('SuggestionChips');
-    expect(source).toContain('<SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />');
-    expect(source).toContain('<SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />');
+    expect(source).toContain('<SuggestionChips suggestions={suggestionsForTemplateTextField(label, value)} onPick={onChange} />');
+    expect(source).toContain('<SuggestionChips suggestions={suggestionsForDetailField(field, values)} onPick={(suggestion) => setValue(id, suggestion)} />');
+    expect(source).toContain('Choose the exact Momence session first so the report attaches to the right booking record.');
   });
 
   it('keeps the ticket review structure compact and grouped by decision area', () => {

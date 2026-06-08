@@ -27,6 +27,7 @@ describe('ticket AI chat payload', () => {
     const body = buildAthenaDraftRequestBody({
       aiProvider: 'deepseek',
       conversationId: 'conversation-1',
+      debugTrace: true,
       context: { studio: 'Supreme HQ, Bandra' },
       intakeContract: { missingFields: ['clientsAffected'] },
       messages: [{ id: 'u-1', role: 'user', content: 'AC is not cooling' }],
@@ -38,6 +39,7 @@ describe('ticket AI chat payload', () => {
       draftOnly: true,
       approved: false,
       aiProvider: 'deepseek',
+      debugTrace: true,
       promptProfile: ATHENA_PROMPT_PROFILE,
       conversationId: 'conversation-1',
       context: { studio: 'Supreme HQ, Bandra' },

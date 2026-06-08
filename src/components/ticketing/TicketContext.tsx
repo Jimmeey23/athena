@@ -9,7 +9,6 @@ import {
   canEditTicketResolution as canEditTicketResolutionForIdentity,
   canUpdateTicketStatus as canUpdateTicketStatusForIdentity,
 } from '@/lib/ticket-permissions';
-import { buildRecommendedResolutionSteps } from '@/lib/smart-ops-intelligence';
 import {
   buildTicketResolutionDetail,
   mergeTicketResolutionMetadata,
@@ -450,22 +449,9 @@ function toInsertRow(draft: DraftTicket, context: Record<string, unknown> = {}, 
   const status: Ticket['status'] = profileOnly || recordOnly ? 'Closed' : 'New';
   const formattedDescription = formatTicketBody(draft.description);
   const draftMetadata = draft.metadata || {};
-  const recommendedResolutionSteps = Array.isArray(draftMetadata.recommendedResolutionSteps) && draftMetadata.recommendedResolutionSteps.length
+  const recommendedResolutionSteps = Array.isArray(draftMetadata.recommendedResolutionSteps)
     ? draftMetadata.recommendedResolutionSteps.filter((step): step is string => typeof step === 'string' && step.trim().length > 0)
-    : buildRecommendedResolutionSteps({
-      title: draft.title,
-      description: draft.description,
-      category: draft.category,
-      subCategory: draft.subCategory,
-      priority,
-      studio: draft.studio,
-      assignedTo: effectiveAssignedTo,
-      memberName: draft.memberName || undefined,
-      memberContact: draft.memberContact || undefined,
-      classType: draft.classType || undefined,
-      classDateTime: draft.classDateTime || undefined,
-      sentiment: draft.sentiment as Ticket['sentiment'] | undefined,
-    });
+    : [];
   const metadata = {
     ...draftMetadata,
     recommendedResolutionSteps,

@@ -66,6 +66,16 @@ export interface IntakeContext {
   trainer?: string;
   classType?: string;
   classDateTime?: string;
+  reportedTime?: string;
+  actualStartTime?: string;
+  delayMinutes?: string;
+  advanceNoticeGiven?: string;
+  advanceNoticeTime?: string;
+  membersAffected?: string;
+  membersUpset?: string;
+  latenessReason?: string;
+  serviceRecoveryNeeded?: string;
+  serviceRecoveryAction?: string;
   membership?: string;
   category?: string;
   subCategory?: string;
@@ -187,6 +197,11 @@ const PHYSICAL_ONLY_CATEGORIES = new Set([
   'App & Digital',
 ]);
 
+function hasTrainerLateSignal(text: string): boolean {
+  return /\b(?:late|late arrival|arrived late|started late|delayed start|punctuality|punctuality issue|tardy)\b/i.test(text)
+    && /\b(?:trainer|instructor|coach|class|session|practice)\b/i.test(text);
+}
+
 type IntakeFieldType = 'select' | 'text' | 'textarea' | 'date' | 'datetime-local' | 'number';
 
 export interface IntakeFieldDefinition {
@@ -222,6 +237,28 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
   memberContact: { id: 'memberContact', label: 'Member Contact', type: 'text' },
   classType: { id: 'classType', label: 'Momence Class / Session', type: 'select', required: true },
   trainer: { id: 'trainer', label: 'Instructor', type: 'select', options: [...TRAINERS] },
+  reportedTime: { id: 'reportedTime', label: 'Reported time', type: 'datetime-local', required: true },
+  actualStartTime: { id: 'actualStartTime', label: 'Actual start time', type: 'datetime-local', required: true },
+  delayMinutes: { id: 'delayMinutes', label: 'Delay in minutes', type: 'number', required: true },
+  advanceNoticeGiven: {
+    id: 'advanceNoticeGiven',
+    label: 'Was the late arrival pre-informed by the instructor?',
+    type: 'select',
+    required: true,
+    options: ['Yes - before scheduled start', 'Yes - after scheduled start', 'No advance notice', 'Unable to confirm'],
+  },
+  advanceNoticeTime: { id: 'advanceNoticeTime', label: 'Advance notice time', type: 'datetime-local' },
+  membersAffected: { id: 'membersAffected', label: 'Members affected', type: 'textarea', required: true },
+  membersUpset: { id: 'membersUpset', label: 'Members upset / reaction', type: 'textarea', required: true },
+  latenessReason: { id: 'latenessReason', label: 'Reason for late arrival', type: 'textarea', required: true },
+  serviceRecoveryNeeded: {
+    id: 'serviceRecoveryNeeded',
+    label: 'Was service recovery needed?',
+    type: 'select',
+    required: true,
+    options: ['Yes', 'No', 'Unable to confirm'],
+  },
+  serviceRecoveryAction: { id: 'serviceRecoveryAction', label: 'Service recovery action', type: 'textarea' },
   membership: { id: 'membership', label: 'Active Package / Membership', type: 'select', required: true },
   desiredResolution: { id: 'desiredResolution', label: 'Requested resolution', type: 'textarea' },
   memberSentiment: { id: 'memberSentiment', label: 'Member Sentiment', type: 'select' },
@@ -967,6 +1004,26 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
       add('classImpactType', context.classImpactType);
       add('classImpactDetails', context.classImpactDetails);
     }
+  }
+
+  const trainerLateIssue =
+    (category === 'Trainer Feedback' && hasTrainerLateSignal(categoryPathText)) ||
+    /trainer punctuality issues/i.test(categoryPathText) ||
+    hasTrainerLateSignal(issueText);
+  if (trainerLateIssue) {
+    add('classType', context.sessionId || context.classType);
+    add('trainer', context.trainer);
+    add('classDateTime', context.classDateTime);
+    add('reportedTime', context.reportedTime);
+    add('actualStartTime', context.actualStartTime);
+    add('delayMinutes', context.delayMinutes);
+    add('advanceNoticeGiven', context.advanceNoticeGiven);
+    if (/yes/i.test(context.advanceNoticeGiven || '')) add('advanceNoticeTime', context.advanceNoticeTime);
+    add('latenessReason', context.latenessReason);
+    add('membersAffected', context.membersAffected);
+    add('membersUpset', context.membersUpset);
+    add('serviceRecoveryNeeded', context.serviceRecoveryNeeded);
+    if (/yes/i.test(context.serviceRecoveryNeeded || '')) add('serviceRecoveryAction', context.serviceRecoveryAction);
   }
 
   if (membershipSpecific && /select active membership|which membership|membership record|package record/.test(issueText)) {

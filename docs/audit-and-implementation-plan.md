@@ -2,7 +2,13 @@
 
 **Prepared:** May 19, 2026
 **Scope:** All source files under `src/`, `supabase/functions/`, `src/lib/`
-**Status:** Analysis only — no code changes made
+**Status:** Historical analysis. Several issues described below have since been superseded by later source changes; verify against current code before treating any item as actionable.
+
+## Current Re-audit Note
+
+- The AI detail-form handling now has server-side guard filtering, so the original "AI asks for member name / class date on unrelated issues" failure mode is no longer present in the same form.
+- The legacy SLA freeze described below is no longer present as live app logic in the current source tree.
+- Treat the remaining sections as historical context unless independently re-verified against the present codebase.
 
 ---
 

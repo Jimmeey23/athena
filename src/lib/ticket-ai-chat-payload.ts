@@ -9,6 +9,7 @@ export interface ChatPayloadMessage {
 export interface AthenaDraftRequestInput {
   aiProvider?: string;
   conversationId?: string | null;
+  debugTrace?: boolean;
   context: Record<string, unknown>;
   intakeContract?: Record<string, unknown>;
   messages: ChatPayloadMessage[];
@@ -68,6 +69,7 @@ export function buildAthenaDraftRequestBody(input: AthenaDraftRequestInput) {
     draftOnly: true,
     approved: false,
     aiProvider: input.aiProvider,
+    debugTrace: input.debugTrace === true,
     promptProfile: ATHENA_PROMPT_PROFILE,
     messages: buildCompactChatMessages(input.messages, input.preamble),
     conversationId: input.conversationId,

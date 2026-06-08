@@ -4,7 +4,7 @@ import { Sparkles, Check, Pencil, MapPin, User, Calendar, Tag, Clock, ShieldChec
 import { SlaCountdown } from './SlaCountdown';
 import { TicketReviewInsights } from '@/lib/ticket-review';
 import { MomenceMemberTicketField, MomenceSessionTicketField } from './MomenceTicketEntityFields';
-import { buildRecommendedResolutionSteps, buildSmartTicketIntelligence, DuplicatePatternInsights, SmartTicketIntelligence } from '@/lib/smart-ops-intelligence';
+import { buildSmartTicketIntelligence, DuplicatePatternInsights, SmartTicketIntelligence } from '@/lib/smart-ops-intelligence';
 
 interface DraftTicket {
   title: string;
@@ -58,22 +58,7 @@ function stepsFromText(value: string): string[] {
 }
 
 function getDraftResolutionSteps(draft: DraftTicket): string[] {
-  const metadataSteps = stringArray(draft.metadata?.recommendedResolutionSteps);
-  if (metadataSteps.length) return metadataSteps;
-  return buildRecommendedResolutionSteps({
-    title: draft.title,
-    description: draft.description,
-    category: draft.category,
-    subCategory: draft.subCategory,
-    priority: draft.priority,
-    studio: draft.studio,
-    assignedTo: draft.assignedTo || undefined,
-    memberName: draft.memberName || undefined,
-    memberContact: draft.memberContact || undefined,
-    classType: draft.classType || undefined,
-    classDateTime: draft.classDateTime || undefined,
-    sentiment: draft.sentiment as Ticket['sentiment'] | undefined,
-  });
+  return stringArray(draft.metadata?.recommendedResolutionSteps);
 }
 
 export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, onDiscard, onSaveEdit, confirmed, ticketId, confirmedTicket, publishing = false, reviewInsights, duplicatePatternInsights, momenceLoading = false, momenceError }) => {
@@ -145,13 +130,15 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
             rows={8}
             className="w-full resize-y rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-stone-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
-          <textarea
-            value={recommendedResolutionSteps.join('\n')}
-            onChange={(event) => updateRecommendedResolutionSteps(event.target.value)}
-            rows={5}
-            className="w-full resize-y rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-stone-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-            aria-label="Recommended resolution steps"
-          />
+          {recommendedResolutionSteps.length > 0 && (
+            <textarea
+              value={recommendedResolutionSteps.join('\n')}
+              onChange={(event) => updateRecommendedResolutionSteps(event.target.value)}
+              rows={5}
+              className="w-full resize-y rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-stone-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+              aria-label="Recommended resolution steps"
+            />
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <EditSelect
               label="Priority"
@@ -232,17 +219,19 @@ export const TicketPreviewCard: React.FC<Props> = ({ draft, onConfirm, onEdit, o
       ) : (
         <>
           <FormattedDescription text={draft.description} />
-          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-3">
-            <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-700">Recommended resolution steps</div>
-            <ol className="space-y-1.5 text-xs leading-relaxed text-slate-700">
-              {recommendedResolutionSteps.map((step, index) => (
-                <li key={`${step}-${index}`} className="grid grid-cols-[18px_1fr] gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-blue-700 ring-1 ring-blue-100">{index + 1}</span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
+          {recommendedResolutionSteps.length > 0 && (
+            <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-3">
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-700">Recommended resolution steps</div>
+              <ol className="space-y-1.5 text-xs leading-relaxed text-slate-700">
+                {recommendedResolutionSteps.map((step, index) => (
+                  <li key={`${step}-${index}`} className="grid grid-cols-[18px_1fr] gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-blue-700 ring-1 ring-blue-100">{index + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </>
       )}
 

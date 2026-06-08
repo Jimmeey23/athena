@@ -176,6 +176,33 @@ describe('intake publishability rules', () => {
     ]);
   });
 
+  it('requires trainer punctuality details when a late-start report is logged', () => {
+    const context: IntakeContext = {
+      intakeRoute: 'Complaint',
+      category: 'Trainer Feedback',
+      subCategory: 'Trainer Punctuality Issues',
+      clientsAffected: 'Yes - directly affected',
+      reportedBy: 'Priya Shah',
+      priority: 'High',
+      description: 'Trainer arrived late and the 7:15 class started behind schedule.',
+      classType: 'Studio Barre 57',
+      trainer: 'Siddhartha Kusuma',
+      classDateTime: '2026-06-08T07:15',
+      resolutionRequired: 'Yes',
+    };
+
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
+      'reportedTime',
+      'actualStartTime',
+      'delayMinutes',
+      'advanceNoticeGiven',
+      'latenessReason',
+      'membersAffected',
+      'membersUpset',
+      'serviceRecoveryNeeded',
+    ]));
+  });
+
   it('still treats AI Intake and empty auth fallbacks as missing reportedBy values', () => {
     const base: IntakeContext = {
       intakeRoute: 'Feedback',
@@ -413,7 +440,19 @@ describe('intake publishability rules', () => {
       category: 'Trainer Feedback',
       subCategory: 'Trainer Punctuality Issues',
     });
-    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(['resolutionRequired']);
+    expect(getMissingIntakeFields(context, { includeClientImpact: false })).toEqual(expect.arrayContaining([
+      'trainer',
+      'classDateTime',
+      'reportedTime',
+      'actualStartTime',
+      'delayMinutes',
+      'advanceNoticeGiven',
+      'latenessReason',
+      'membersAffected',
+      'membersUpset',
+      'serviceRecoveryNeeded',
+      'resolutionRequired',
+    ]));
     expect(getMissingIntakeFields(context, { includeClientImpact: false })).not.toEqual(expect.arrayContaining([
       'membership',
       'incidentDateTime',

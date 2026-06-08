@@ -44,6 +44,11 @@ function titleCaseStart(value: string): string {
   return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : trimmed;
 }
 
+function hasGenericResolutionLanguage(value: string): boolean {
+  return /(?:^|\n)\s*(?:next step|requested resolution|resolution pathway|athena review note)\s*:/i.test(value)
+    || /\b(?:assigned owner|review and confirm|close the loop|team will|we will|follow[- ]?up action)\b/i.test(value);
+}
+
 export function summarizeOperationalReport(sourceText: string): string {
   const lines = sourceText
     .split('\n')
@@ -143,6 +148,7 @@ export function draftDescriptionNeedsRewrite(description: string | undefined, in
   if (!value.trim()) return true;
   if (/hi all|best,\s*(?:\n|$)|team physique 57/i.test(value)) return true;
   if (/member feedback summary/i.test(value) && /internal reporting/i.test(intakeRoute || value)) return true;
+  if (hasGenericResolutionLanguage(value)) return true;
   if (sourceText && sourceText.trim().length > 80) {
     const normalizedDescription = normalizeText(value);
     const normalizedSource = normalizeText(sourceText);
@@ -159,12 +165,8 @@ export function buildOperationalTicketDescription({
 }: BuildDescriptionInput): string {
   const normalizedContext = normalizeDraftContextForSource(context, sourceText);
   const route = normalizedContext.intakeRoute || 'Internal Reporting';
-  const isInternal = route === 'Internal Reporting';
-  const summaryLabel = isInternal ? 'Internal report summary' : 'Issue summary';
+  const summaryLabel = route === 'Internal Reporting' ? 'Internal report summary' : 'Issue summary';
   const summary = summarizeOperationalReport(sourceText);
-  const nextStep = normalizedContext.desiredResolution
-    ? `Requested resolution: ${normalizedContext.desiredResolution}`
-    : 'Next step: Assigned owner to review and confirm the follow-up action.';
 
   return [
     `${summaryLabel}: ${summary}`,
@@ -179,9 +181,7 @@ export function buildOperationalTicketDescription({
     normalizedContext.classType ? `- Class/session: ${normalizedContext.classType}` : null,
     normalizedContext.incidentDateTime ? `- Approx. incident date/time: ${normalizedContext.incidentDateTime}` : null,
     normalizedContext.classDateTime ? `- Class/session date/time: ${normalizedContext.classDateTime}` : null,
+    normalizedContext.desiredResolution ? `- Member-requested outcome: ${normalizedContext.desiredResolution}` : null,
     '',
-    nextStep,
-    '',
-    'Athena review note: Validate the summary and routing before operational action.',
   ].filter((line) => line !== null).join('\n');
 }

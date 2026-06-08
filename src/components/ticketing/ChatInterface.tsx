@@ -205,6 +205,7 @@ interface Message {
   published?: boolean;
   detailForm?: DetailForm | null;
   publishedTicket?: Ticket;
+  debugTrace?: Record<string, unknown> | null;
 }
 
 interface AiIntakeResponse {
@@ -218,6 +219,7 @@ interface AiIntakeResponse {
   missingFields?: string[];
   publishable?: boolean;
   urgencyReason?: string;
+  debugTrace?: Record<string, unknown> | null;
 }
 
 const GREETING: Message = {
@@ -243,6 +245,17 @@ function sleep(ms: number): Promise<void> {
 function writingPauseMs(content: string): number {
   const length = content.trim().length;
   return Math.min(1150, Math.max(420, 300 + length * 4));
+}
+
+function isAthenaDebugTraceEnabled(): boolean {
+  if (import.meta.env.VITE_ATHENA_DEBUG_TRACE === 'true') return true;
+  if (typeof window === 'undefined') return false;
+  const url = new URL(window.location.href);
+  const queryValue = url.searchParams.get('athenaTrace');
+  if (queryValue !== null) {
+    return !/^(0|false|off)$/i.test(queryValue);
+  }
+  return window.localStorage.getItem('athena-debug-trace') === '1';
 }
 
 const ATHENA_CHAT_RESPONSE_TIMEOUT_MS = 30_000;
@@ -855,6 +868,21 @@ function detailFormFromQuestionText(text: string, ctx: DetailContext): DetailFor
       add('prospectQuality', ctx.prospectQuality);
       add('followUpPreference', ctx.followUpPreference);
     }
+    if (/(?:late|late arrival|arrived late|started late|punctuality|tardy)/.test(lower) && /(trainer|instructor|class|session|practice)/.test(lower)) {
+      add('classType', ctx.classType);
+      add('trainer', ctx.trainer);
+      add('classDateTime', ctx.classDateTime);
+      add('reportedTime', ctx.reportedTime);
+      add('actualStartTime', ctx.actualStartTime);
+      add('delayMinutes', ctx.delayMinutes);
+      add('advanceNoticeGiven', ctx.advanceNoticeGiven);
+      add('advanceNoticeTime', ctx.advanceNoticeTime);
+      add('latenessReason', ctx.latenessReason);
+      add('membersAffected', ctx.membersAffected);
+      add('membersUpset', ctx.membersUpset);
+      add('serviceRecoveryNeeded', ctx.serviceRecoveryNeeded);
+      add('serviceRecoveryAction', ctx.serviceRecoveryAction);
+    }
   }
 
   return normalizeDetailForm({
@@ -1082,9 +1110,15 @@ function normalizeDraftForReview(draft: DraftTicket, ctx: DetailContext, text: s
         subCategory,
       })
     : draft.description;
+  const metadata = draft.metadata && typeof draft.metadata === 'object'
+    ? Object.fromEntries(
+        Object.entries(draft.metadata).filter(([key]) => key !== 'recommendedResolutionSteps')
+      )
+    : draft.metadata;
 
   return {
     ...draft,
+    metadata,
     title: draft.title || [normalizedContext.intakeRoute || 'Ticket', subCategory, normalizedContext.trainer || null].filter(Boolean).join(' · ').slice(0, 96),
     description,
     category,
@@ -1161,6 +1195,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
   const { createApprovedTicket, tickets, setSelectedTicket } = useTickets();
   const { user } = useBackendAuth();
   const activeAiProvider = import.meta.env.VITE_AI_PROVIDER || 'openai';
+  const athenaDebugTraceEnabled = isAthenaDebugTraceEnabled();
   const providerBadgeLabel = aiProviderBadgeLabel(activeAiProvider);
   const reporterName = getReporterName(user);
   const reporterFirstName = getReporterFirstName(reporterName);
@@ -1455,6 +1490,11 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     if (ctx.classType) parts.push(`Class: ${ctx.classType}`);
     if (ctx.trainer) parts.push(`Trainer: ${ctx.trainer}`);
     if (ctx.classDateTime) parts.push(`Session date/time: ${ctx.classDateTime}`);
+    if (ctx.reportedTime) parts.push(`Reported time: ${ctx.reportedTime}`);
+    if (ctx.actualStartTime) parts.push(`Actual start time: ${ctx.actualStartTime}`);
+    if (ctx.delayMinutes) parts.push(`Delay minutes: ${ctx.delayMinutes}`);
+    if (ctx.advanceNoticeGiven) parts.push(`Advance notice: ${ctx.advanceNoticeGiven}`);
+    if (ctx.advanceNoticeTime) parts.push(`Advance notice time: ${ctx.advanceNoticeTime}`);
     if (ctx.sessionId) parts.push(`Momence session ID: ${ctx.sessionId}`);
 
     // --- Issue substance ---
@@ -1463,6 +1503,11 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
     if (ctx.memberSentiment) parts.push(`Sentiment: ${ctx.memberSentiment}`);
     if (ctx.urgencyReason) parts.push(`Urgency: ${ctx.urgencyReason}`);
     if (ctx.desiredResolution) parts.push(`Resolution requested: ${ctx.desiredResolution}`);
+    if (ctx.membersAffected) parts.push(`Members affected: ${ctx.membersAffected}`);
+    if (ctx.membersUpset) parts.push(`Members upset / reaction: ${ctx.membersUpset}`);
+    if (ctx.latenessReason) parts.push(`Late arrival reason: ${ctx.latenessReason}`);
+    if (ctx.serviceRecoveryNeeded) parts.push(`Service recovery needed: ${ctx.serviceRecoveryNeeded}`);
+    if (ctx.serviceRecoveryAction) parts.push(`Service recovery action: ${ctx.serviceRecoveryAction}`);
 
     // --- Remaining custom fields (catch-all) ---
     const HANDLED_KEYS = new Set([
@@ -1470,6 +1515,8 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       'intakeRoute', 'requestType', 'category', 'subCategory', 'priority', 'clientsAffected', 'reportedBy',
       'studio', 'classType', 'trainer', 'classDateTime', 'sessionId',
       'description', 'incidentDateTime', 'memberSentiment', 'urgencyReason', 'desiredResolution',
+      'reportedTime', 'actualStartTime', 'delayMinutes', 'advanceNoticeGiven', 'advanceNoticeTime',
+      'membersAffected', 'membersUpset', 'latenessReason', 'serviceRecoveryNeeded', 'serviceRecoveryAction',
       'conversationPlan', 'reporterFirstName', 'initialReport',
     ]);
     Object.entries(ctx).forEach(([key, value]) => {
@@ -1601,6 +1648,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
         invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
           body: buildAthenaDraftRequestBody({
             aiProvider: activeAiProvider,
+            debugTrace: athenaDebugTraceEnabled,
             messages: newMessages,
             preamble,
             conversationId,
@@ -2024,6 +2072,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
       const { data } = await invokeTicketingFunction<AiIntakeResponse>('ticket-ai-chat', {
         body: buildAthenaDraftRequestBody({
           aiProvider: activeAiProvider,
+          debugTrace: athenaDebugTraceEnabled,
           messages: [{ id: `text-to-ticket-${Date.now()}`, role: 'user', content: aiInstruction }],
           preamble: buildContextPreamble({ ...context, reportedBy: reporterName }),
           conversationId,
@@ -2246,6 +2295,7 @@ export const ChatInterface: React.FC<{ onOpenExistingTicket?: (ticket: Ticket) =
                 onDetailFormSubmit={submitDetailForm}
                 onOpenDraftReview={(messageId) => setActiveDraftReviewMessageId(messageId)}
                 context={context}
+                showDebugTrace={athenaDebugTraceEnabled}
               />
             ))}
             {!loading && messages.length === 1 && (
@@ -3217,7 +3267,7 @@ const TemplateTextarea: React.FC<{
       rows={3}
       className="mt-2 min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
-    <SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />
+    <SuggestionChips suggestions={suggestionsForTemplateTextField(label, value)} onPick={onChange} />
   </label>
 );
 
@@ -3237,12 +3287,22 @@ const TemplateTextInput: React.FC<{
       onChange={(event) => onChange(event.target.value)}
       className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none transition hover:bg-white focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
     />
-    <SuggestionChips suggestions={suggestionsForTemplateTextField(label)} onPick={onChange} />
+    <SuggestionChips suggestions={suggestionsForTemplateTextField(label, value)} onPick={onChange} />
   </label>
 );
 
-function suggestionsForTemplateTextField(label: string): string[] {
+function suggestionsForTemplateTextField(label: string, value = ''): string[] {
   const normalized = label.toLowerCase();
+  const current = value.toLowerCase();
+  const hasSessionContext = /\b(class|session|trainer|instructor|member|late|start|impact)\b/.test(current);
+  const hasLateSignal = /\b(late|delay|delayed|started late|punctual|tardy|behind schedule)\b/.test(current);
+  if (/session|class|trainer|instructor/.test(normalized) && hasSessionContext) {
+    return [
+      'Exact Momence session ID or booking reference if available.',
+      'The scheduled class, instructor and start time for this report.',
+      'How the session changed, including delay, late start, or member impact.',
+    ];
+  }
   if (/member feedback|feedback|highlight|comment/.test(normalized)) {
     return [
       'Member reported that the touchpoint affected their overall studio journey.',
@@ -3258,10 +3318,24 @@ function suggestionsForTemplateTextField(label: string): string[] {
     ];
   }
   if (/context|note|detail|reason|concern|issue|resolution|action/.test(normalized)) {
+    if (hasLateSignal) {
+      return [
+        'Trainer arrived late and the class started behind schedule.',
+        'The late start was noticed after the scheduled start time had passed.',
+        'Members were impacted and service recovery was discussed with the studio team.',
+      ];
+    }
     return [
       'Member reported the concern in person after the studio session.',
       'Team member offered an immediate workaround and member accepted follow-up.',
       'Member requested a clear resolution timeline and preferred WhatsApp follow-up.',
+    ];
+  }
+  if (hasLateSignal) {
+    return [
+      'Trainer arrived late and the class started behind schedule.',
+      'The instructor gave advance notice before the scheduled start.',
+      'Members were affected and the team discussed service recovery.',
     ];
   }
   return [
@@ -3271,9 +3345,26 @@ function suggestionsForTemplateTextField(label: string): string[] {
   ];
 }
 
-function suggestionsForDetailField(field: DetailFormField): string[] {
+function suggestionsForDetailField(field: DetailFormField, values: Record<string, string>): string[] {
   const id = field.id;
   const label = field.label.toLowerCase();
+  const sessionContext = [
+    values.sessionId || '',
+    values.classType || '',
+    values.trainer || '',
+    values.classDateTime || '',
+  ].join(' ').toLowerCase();
+  const lateContext = [
+    values.description || '',
+    values.memberFeedback || '',
+    values.classImpactDetails || '',
+    values.latenessReason || '',
+    values.lateArrivalReason || '',
+    values.serviceRecoveryAction || '',
+  ].join(' ').toLowerCase();
+  const hasSessionContext = Boolean(sessionContext.trim());
+  const hasLateSignal = /\b(late|delay|delayed|started late|punctual|tardy|behind schedule)\b/.test(lateContext);
+
   if (id === 'memberFeedback') {
     return [
       '"I was told I couldn\'t enter even though I was only 2 minutes late — this has never happened before."',
@@ -3288,11 +3379,11 @@ function suggestionsForDetailField(field: DetailFormField): string[] {
       'Policy was not formally explained at the time — member was turned away without a written or verbal reason.',
     ];
   }
-  if (id === 'lateArrivalReason') {
+  if (id === 'lateArrivalReason' || id === 'latenessReason') {
     return [
-      'Member cited heavy traffic and difficulty finding parking near the studio.',
-      'Member stated their Momence booking confirmation showed a different class time.',
-      'Member mentioned a work obligation that ran over and said this was a one-off situation.',
+      'Trainer cited traffic, transport issues, or an unavoidable commute delay.',
+      'Trainer said the previous session ran over and the next class started late.',
+      'Trainer gave an operational reason and the team recorded whether advance notice was shared.',
     ];
   }
   if (id === 'alternativeSolution') {
@@ -3309,19 +3400,46 @@ function suggestionsForDetailField(field: DetailFormField): string[] {
       'Member requested the late-arrival policy be reviewed and communicated more clearly to members.',
     ];
   }
-  if (id === 'reportedImpact') {
+  if (id === 'reportedImpact' || id === 'membersUpset') {
     return [
-      'Member felt unwelcome and stated they are reconsidering their membership renewal.',
-      'Member left without attending the session and said the experience affected their confidence in the studio.',
-      'Member was frustrated but remained calm — noted the issue was a first occurrence for them.',
+      'Members were visibly frustrated and asked whether the class would start soon.',
+      'A member left early after the delay and asked front desk for clarity.',
+      'No obvious frustration was reported, but the team still noted the late start.',
     ];
   }
-  if (id === 'immediateAction') {
+  if (id === 'membersAffected') {
+    return [
+      'A single member was affected because they arrived for the scheduled start time.',
+      'Several members were affected because the entire class began behind schedule.',
+      'The full session was impacted and the team is still confirming the total member count.',
+    ];
+  }
+  if (id === 'serviceRecoveryAction' || id === 'immediateAction') {
     return [
       'Apologised to the member on behalf of the studio and escalated to the studio manager.',
       'Offered a complimentary session credit immediately and logged the concern in Momence.',
       'No immediate action taken — member left before any resolution could be offered.',
     ];
+  }
+  if (id === 'serviceRecoveryNeeded') {
+    return [
+      'Yes - a follow-up or goodwill action is needed for the affected session.',
+      'No - the incident was documented only and no recovery is required.',
+      'Unable to confirm whether service recovery is needed yet.',
+    ];
+  }
+  if (id === 'advanceNoticeGiven') {
+    return hasSessionContext
+      ? [
+          'Yes - the instructor informed the studio before the scheduled start.',
+          'No - the studio learned about the delay only after members were waiting.',
+          'Unable to confirm whether advance notice was shared.',
+        ]
+      : [
+          'Yes - the issue was shared before the session started.',
+          'No - the issue surfaced only after it impacted the touchpoint.',
+          'Unable to confirm the timing of the notice.',
+        ];
   }
   if (id === 'sessionFeedback') {
     return [
@@ -3337,7 +3455,14 @@ function suggestionsForDetailField(field: DetailFormField): string[] {
       'Reception and waiting area — member noted the area felt overcrowded before the 7 AM class.',
     ];
   }
-  if (id.toLowerCase().includes('description') || /describe|issue|detail/.test(label)) {
+  if (id === 'description' || id === 'classImpactDetails') {
+    if (hasLateSignal || hasSessionContext) {
+      return [
+        'The trainer arrived late, the class started behind schedule, and members wanted the exact session attached.',
+        'The session started late, members were impacted, and the front desk discussed service recovery with the team.',
+        'Members asked whether the delay was pre-informed and whether a follow-up was needed.',
+      ];
+    }
     return [
       'Member reported the concern during a studio touchpoint and requested follow-up.',
       'Member stated the issue affected their session experience and wants a resolution timeline.',
@@ -3345,11 +3470,17 @@ function suggestionsForDetailField(field: DetailFormField): string[] {
     ];
   }
   if (id.toLowerCase().includes('resolution') || /resolution|outcome|action/.test(label)) {
-    return [
-      'Member requested a callback with the confirmed next step.',
-      'Member requested written confirmation by WhatsApp or email.',
-      'Team member offered an interim solution while the issue is reviewed.',
-    ];
+    return hasSessionContext
+      ? [
+          'Member requested a callback with the confirmed next step for this session.',
+          'Member asked for written confirmation on the follow-up and any service recovery.',
+          'Team member documented the recovery step and whether the session should be reviewed further.',
+        ]
+      : [
+          'Member requested a callback with the confirmed next step.',
+          'Member requested written confirmation by WhatsApp or email.',
+          'Team member offered an interim solution while the issue is reviewed.',
+        ];
   }
   if (id.toLowerCase().includes('feedback') || /feedback|comment/.test(label)) {
     return [
@@ -3358,7 +3489,7 @@ function suggestionsForDetailField(field: DetailFormField): string[] {
       'Member stated the touchpoint did not meet their expected Physique 57 standard.',
     ];
   }
-  return suggestionsForTemplateTextField(field.label);
+  return suggestionsForTemplateTextField(field.label, values[id] || '');
 }
 
 const SuggestionChips: React.FC<{ suggestions: string[]; onPick: (value: string) => void }> = ({ suggestions, onPick }) => (
@@ -3409,7 +3540,8 @@ const MessageBubble: React.FC<{
   onDetailFormSubmit: (values: Record<string, string>, form?: DetailForm) => void;
   onOpenDraftReview: (messageId: string) => void;
   context: DetailContext;
-}> = ({ message, index, onChipClick, onDetailFormSubmit, onOpenDraftReview, context }) => {
+  showDebugTrace: boolean;
+}> = ({ message, index, onChipClick, onDetailFormSubmit, onOpenDraftReview, context, showDebugTrace }) => {
   const isUser = message.role === 'user';
   const userTone = USER_TONES[index % USER_TONES.length];
   const visibleChips = (message.suggestedChips || []).filter((chip) => !context[chip.field]);
@@ -3565,6 +3697,54 @@ const MessageBubble: React.FC<{
       )}
       {message.published && !message.ticket && message.ticketId && (
         <PublishedTicketSummary ticketId={message.ticketId} ticket={message.publishedTicket} />
+      )}
+
+      {showDebugTrace && message.debugTrace && (
+        (() => {
+          const traceRecord = message.debugTrace as Record<string, unknown>;
+          const final = traceRecord.final as Record<string, unknown> | undefined;
+          const guard = traceRecord.guard as Record<string, unknown> | undefined;
+          const steps = Array.isArray(traceRecord.decisionSteps) ? (traceRecord.decisionSteps as string[]) : [];
+          const guardedMissingFields = Array.isArray(guard?.guardedMissingFields) ? (guard?.guardedMissingFields as string[]) : [];
+          const finalDetailFormFieldIds = Array.isArray(final?.detailFormFieldIds) ? (final?.detailFormFieldIds as string[]) : [];
+          return (
+        <details className="mt-2 w-full rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-[11px] text-amber-950 shadow-sm">
+          <summary className="cursor-pointer font-semibold uppercase tracking-[0.14em] text-amber-800">
+            Athena decision trace
+          </summary>
+          <div className="mt-2 space-y-2">
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="rounded-xl bg-white/90 p-2">
+                <div className="font-semibold text-amber-900">Final decision</div>
+                <div className="mt-1 text-slate-700">Path: {String(traceRecord.path || 'n/a')}</div>
+                <div className="text-slate-700">Needs more info: {String(final?.needsMoreInfo ?? false)}</div>
+                <div className="text-slate-700">Ticket returned: {String(final?.ticketPresent ?? false)}</div>
+                {finalDetailFormFieldIds.length > 0 && (
+                  <div className="text-slate-700">Final form fields: {finalDetailFormFieldIds.join(', ')}</div>
+                )}
+              </div>
+              <div className="rounded-xl bg-white/90 p-2">
+                <div className="font-semibold text-amber-900">Guard fields</div>
+                <div className="mt-1 text-slate-700">
+                  {guardedMissingFields.length > 0 ? guardedMissingFields.join(', ') : 'None'}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/90 p-2">
+              <div className="font-semibold text-amber-900">Decision steps</div>
+              <ol className="mt-1 list-decimal space-y-1 pl-4 text-slate-700">
+                {steps.map((step: string, stepIndex: number) => (
+                  <li key={stepIndex}>{step}</li>
+                ))}
+              </ol>
+            </div>
+            <pre className="max-h-64 overflow-auto rounded-xl bg-slate-950 p-3 text-[10px] leading-relaxed text-slate-100">
+              {JSON.stringify(message.debugTrace, null, 2)}
+            </pre>
+          </div>
+        </details>
+          );
+        })()
       )}
     </div>
   );
@@ -3997,7 +4177,18 @@ const fieldHelpText = (field: DetailFormField): string => {
   if (id === 'clientsAffected') return 'Confirm whether clients were impacted before publishing the ticket.';
   if (id === 'memberName' || id === 'memberContact') return 'Use Momence search where possible so the member record and contact stay consistent.';
   if (id === 'membership') return 'Choose the active package from Momence results when available, or from the standard membership list.';
-  if (id === 'classType' || id === 'sessionId' || id === 'classDateTime' || id === 'trainer') return 'Choose the relevant class/session context for the member issue.';
+  if (id === 'sessionId') return 'Choose the exact Momence session first so the report attaches to the right booking record.';
+  if (id === 'classType' || id === 'classDateTime' || id === 'trainer') return 'Choose the relevant class/session context for the member issue.';
+  if (id === 'reportedTime') return 'Capture when the late arrival was first noticed or reported.';
+  if (id === 'actualStartTime') return 'Capture the actual start time so the delay is explicit.';
+  if (id === 'delayMinutes') return 'Capture the delay duration in minutes.';
+  if (id === 'advanceNoticeGiven') return 'Capture whether the instructor informed the studio in advance.';
+  if (id === 'advanceNoticeTime') return 'Capture when the advance notice was shared, if it was shared.';
+  if (id === 'membersAffected') return 'Capture which members or how many members were affected.';
+  if (id === 'membersUpset') return 'Capture any member frustration, disruption, or early exit that was reported.';
+  if (id === 'latenessReason') return 'Capture the reason given for the late arrival.';
+  if (id === 'serviceRecoveryNeeded') return 'Capture whether any service recovery was needed.';
+  if (id === 'serviceRecoveryAction') return 'Capture the recovery action that was offered or taken.';
   if (id === 'classImpactType') return 'Classify the class/session impact so routing and urgency are clear before asking for details.';
   if (id === 'classImpactDetails') return 'Capture exactly how the selected class/session changed, such as delay, pause, cancellation, relocation, or member response.';
   if (id === 'priority') return 'Choose the operational urgency. Safety, access and retention-risk issues should be High or Critical.';
@@ -4437,7 +4628,7 @@ const DetailCaptureForm: React.FC<{
                     className="min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-stone-900 outline-none transition hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
                     placeholder={field.placeholder || 'Describe the issue and relevant details...'}
                   />
-                  <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
+                  <SuggestionChips suggestions={suggestionsForDetailField(field, values)} onPick={(suggestion) => setValue(id, suggestion)} />
                 </>
               ) : (
                 <>
@@ -4450,7 +4641,7 @@ const DetailCaptureForm: React.FC<{
                     placeholder={field.placeholder || field.label}
                   />
                   {field.type === 'text' && (
-                    <SuggestionChips suggestions={suggestionsForDetailField(field)} onPick={(suggestion) => setValue(id, suggestion)} />
+                    <SuggestionChips suggestions={suggestionsForDetailField(field, values)} onPick={(suggestion) => setValue(id, suggestion)} />
                   )}
                 </>
               )}

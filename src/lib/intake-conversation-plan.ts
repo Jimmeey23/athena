@@ -66,6 +66,11 @@ function hasClientImpactSignal(value: string): boolean {
   return /\b(member|client|customer|guest|prospect|attendee|lead|complain|complaint|said|reported|requested|felt|uncomfortable|walked out|class|session|booking)\b/i.test(value);
 }
 
+function hasTrainerLateSignal(value: string): boolean {
+  return /\b(?:late|late arrival|arrived late|started late|delayed start|punctuality|punctuality issue|tardy)\b/i.test(value)
+    && /\b(?:trainer|instructor|coach|class|session|practice)\b/i.test(value);
+}
+
 function compactSignal(text: string): string {
   const value = text.replace(/\s+/g, ' ').trim();
   if (value.length <= 180) return value;
@@ -141,6 +146,49 @@ export function buildIntakeConversationPlan({
     });
   }
 
+  if (hasTrainerLateSignal(combined) || context.subCategory === 'Trainer Punctuality Issues') {
+    followUpFieldIds.add('sessionId');
+    followUpFieldIds.add('classType');
+    followUpFieldIds.add('trainer');
+    followUpFieldIds.add('classDateTime');
+    followUpFieldIds.add('reportedTime');
+    followUpFieldIds.add('actualStartTime');
+    followUpFieldIds.add('delayMinutes');
+    followUpFieldIds.add('advanceNoticeGiven');
+    followUpFieldIds.add('advanceNoticeTime');
+    followUpFieldIds.add('latenessReason');
+    followUpFieldIds.add('membersAffected');
+    followUpFieldIds.add('membersUpset');
+    followUpFieldIds.add('serviceRecoveryNeeded');
+    followUpFieldIds.add('serviceRecoveryAction');
+    steps.push({
+      id: 'trainer-session',
+      title: 'Identify the affected Momence session',
+      fieldIds: ['sessionId'],
+      reason: 'The exact session should be identified first so the late-arrival report is attached to the right Momence record.',
+    });
+    steps.push({
+      id: 'trainer-punctuality',
+      title: 'Capture trainer punctuality details',
+      fieldIds: [
+        'classType',
+        'trainer',
+        'classDateTime',
+        'reportedTime',
+        'actualStartTime',
+        'delayMinutes',
+        'advanceNoticeGiven',
+        'advanceNoticeTime',
+        'latenessReason',
+        'membersAffected',
+        'membersUpset',
+        'serviceRecoveryNeeded',
+        'serviceRecoveryAction',
+      ],
+      reason: 'Late arrival incidents need the session timeline, notice, impact, and recovery facts after the exact session is known.',
+    });
+  }
+
   steps.push({
     id: 'resolution-required',
     title: 'Confirm whether this ticket requires a resolution',
@@ -200,8 +248,41 @@ export function buildNaturalSingleFieldPrompt({ field, reporterFirstName }: Natu
   if (field.id === 'memberName') {
     return `${prefix}which affected member(s) should I link from Momence?`;
   }
-  if (field.id === 'classType' || field.id === 'sessionId') {
+  if (field.id === 'sessionId') {
+    return `${prefix}which exact Momence session should this late-arrival report be attached to?`;
+  }
+  if (field.id === 'classType') {
     return `${prefix}which class/session was affected?`;
+  }
+  if (field.id === 'reportedTime') {
+    return `${prefix}when was the delay first reported or noticed?`;
+  }
+  if (field.id === 'actualStartTime') {
+    return `${prefix}when did the class actually start?`;
+  }
+  if (field.id === 'delayMinutes') {
+    return `${prefix}how many minutes was the start delayed?`;
+  }
+  if (field.id === 'advanceNoticeGiven') {
+    return `${prefix}did the instructor inform the studio in advance?`;
+  }
+  if (field.id === 'advanceNoticeTime') {
+    return `${prefix}when was the advance notice shared?`;
+  }
+  if (field.id === 'membersAffected') {
+    return `${prefix}which members or how many members were affected?`;
+  }
+  if (field.id === 'membersUpset') {
+    return `${prefix}did any members express frustration, leave early, or raise a concern?`;
+  }
+  if (field.id === 'latenessReason') {
+    return `${prefix}what reason was given for the late arrival?`;
+  }
+  if (field.id === 'serviceRecoveryNeeded') {
+    return `${prefix}was service recovery needed?`;
+  }
+  if (field.id === 'serviceRecoveryAction') {
+    return `${prefix}what service recovery was offered or taken?`;
   }
   if (field.id === 'classImpactDetails') {
     return `${prefix}what changed for the affected class/session? For example, was it delayed, paused, moved, cancelled, or did members share a specific concern?`;

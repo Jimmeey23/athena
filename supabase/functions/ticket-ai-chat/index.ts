@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 import { callJsonAi, type AiProvider } from '../_shared/ai-provider.ts';
+import { buildGuardFieldDefinition, getGuardFieldType } from '../_shared/intake-fields.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,6 +41,7 @@ type RequestBody = {
   approved?: boolean;
   draftOnly?: boolean;
   instructions?: string;
+  debugTrace?: boolean;
   draft?: DraftTicket;
   ticket?: DraftTicket;
   messages?: ChatMessage[];
@@ -170,7 +172,7 @@ TICKET QUALITY:
 - Use "Internal report summary" for Internal Reporting. Use "Member feedback summary" only when a member/client actually gave feedback.
 - Do not include stale multi-value context (multiple studios, instructors, or sessions) unless the user explicitly selected multiple affected records.
 - Priority: Critical for safety or access risk; High for service failure affecting live classes; Medium for operational issues; Low for cosmetic or deferred items.
-- Every published draft must include ticket.metadata.recommendedResolutionSteps with 4-6 concise owner action steps. The steps MUST reference the concrete details captured in this conversation — the actual fault, person, session, time, cause, and requested outcome. Name them. Generic placeholders are forbidden: never write "Confirm the exact studio space, tool, or environmental condition", "Route to the studio owner with the affected session and member impact", "Close the loop with the member once the issue is checked", or any step that would read identically for an unrelated ticket. A reviewer must be able to tell which ticket the steps belong to from the wording alone. Include Momence verification only when member/session/package data is actually involved. Order them as the owner would actually work the ticket.
+- Do not invent resolution steps or generic next actions. Keep the publishable draft factual. If the member or staff member explicitly stated an outcome, capture that outcome verbatim in the description or context. Otherwise omit resolution language.
 - Ticket creation happens only after explicit user approval of the displayed draft.
 `.trim();
 
@@ -200,6 +202,42 @@ type AiIntakeResponse = {
   missingFields?: string[];
   publishable?: boolean;
   urgencyReason?: string;
+  debugTrace?: Record<string, unknown> | null;
+  provider?: string;
+  model?: string;
+};
+
+type IntakeDecisionTrace = {
+  traceId: string;
+  conversationId: string;
+  promptProfile: string;
+  requestedDebug: boolean;
+  path: 'greeting' | 'ai-dynamic' | 'fallback-regex' | 'incomplete-regex' | 'drafted-regex';
+  provider?: string;
+  model?: string;
+  rawIssueText: string;
+  effectiveContext: Record<string, unknown>;
+  ai: {
+    present: boolean;
+    needsMoreInfo?: boolean;
+    publishable?: boolean;
+    reply?: string;
+    detailFormFieldIds: string[];
+    missingFields: string[];
+    ticketPresent: boolean;
+  };
+  guard: {
+    guardedMissingFields: string[];
+    finalDetailFormFieldIds: string[];
+    remainingMissingFields: string[];
+  };
+  final: {
+    needsMoreInfo: boolean;
+    publishable: boolean;
+    ticketPresent: boolean;
+    detailFormFieldIds: string[];
+  };
+  decisionSteps: string[];
 };
 
 type DetailFieldId =
@@ -669,9 +707,8 @@ function professionalDescription(text: string, context: Record<string, unknown>,
     incidentDateTime ? `- Approx. incident date/time: ${incidentDateTime}` : null,
     membership ? `- Active package/membership: ${membership}` : null,
     '',
-    `Requested resolution: ${resolution || 'Resolution pathway to be confirmed by the assigned owner after review.'}`,
+    resolution ? `Member-requested outcome: ${resolution}` : null,
     '',
-    'Athena review note: Ticket was drafted from internal intake details and should be validated before operational action.',
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -780,11 +817,18 @@ function normalizeAiDetailForm(value: unknown): AiDetailForm | null {
   };
 }
 
+function sanitizeDraftTicket(draft: DraftTicket): DraftTicket {
+  return {
+    ...draft,
+    metadata: sanitizeDraftMetadata(draft.metadata),
+  };
+}
+
 function normalizeAiIntakeResponse(value: Record<string, unknown> | null): AiIntakeResponse | null {
   if (!value) return null;
   const detailForm = normalizeAiDetailForm(value.detailForm);
   const ticket = value.ticket && typeof value.ticket === 'object'
-    ? withRecommendedResolutionMetadata(value.ticket as DraftTicket)
+    ? sanitizeDraftTicket(value.ticket as DraftTicket)
     : null;
   return {
     needsMoreInfo: Boolean(value.needsMoreInfo || detailForm),
@@ -801,75 +845,85 @@ function normalizeAiIntakeResponse(value: Record<string, unknown> | null): AiInt
   };
 }
 
-function safeStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => cleanString(item)).filter(Boolean).slice(0, 8);
+function detailFormFieldIds(form?: AiDetailForm | null): string[] {
+  return (form?.fields || []).map((field) => field.id);
 }
 
-function recommendedResolutionStepsForDraft(draft: DraftTicket): string[] {
-  const combined = [
-    draft.title,
-    draft.description,
-    draft.category,
-    draft.subCategory,
-    draft.priority,
-    draft.sentiment || '',
-  ].join(' ').toLowerCase();
+function buildDecisionTrace(input: {
+  traceId: string;
+  conversationId: string;
+  promptProfile: string;
+  requestedDebug: boolean;
+  path: 'greeting' | 'ai-dynamic' | 'fallback-regex' | 'incomplete-regex' | 'drafted-regex';
+  provider?: string;
+  model?: string;
+  rawIssueText: string;
+  effectiveContext: Record<string, unknown>;
+  aiResponse?: AiIntakeResponse | null;
+  guardedMissingFields?: string[];
+  finalForm?: AiDetailForm | null;
+  remainingMissingFields?: string[];
+  finalNeedsMoreInfo: boolean;
+  finalPublishable: boolean;
+  finalTicketPresent: boolean;
+}): IntakeDecisionTrace {
+  const aiResponse = input.aiResponse;
+  const aiDetailFormFieldIds = detailFormFieldIds(aiResponse?.detailForm);
+  const finalDetailFormFieldIds = detailFormFieldIds(input.finalForm);
+  const guardedMissingFields = input.guardedMissingFields || [];
+  const remainingMissingFields = input.remainingMissingFields || [];
+  const decisionSteps = [
+    input.path === 'ai-dynamic' && aiResponse ? 'AI returned a structured intake response.' : 'AI was not used for this branch; regex logic handled the intake.',
+    aiResponse?.detailForm ? `AI proposed ${aiDetailFormFieldIds.length} detail field(s).` : 'AI did not propose a detail form.',
+    guardedMissingFields.length ? `Deterministic guard still required: ${guardedMissingFields.join(', ')}.` : 'Deterministic guard found no missing required fields.',
+    input.finalForm ? `Final form contains ${finalDetailFormFieldIds.length} field(s) after normalization.` : 'Final form was not needed.',
+    input.finalNeedsMoreInfo ? 'Athena asked for more details before drafting.' : 'Athena considered the draft ready to return.',
+    input.finalTicketPresent ? 'A draft ticket was returned.' : 'No draft ticket was returned yet.',
+  ];
 
-  const steps: string[] = [];
-  if (/refund|billing|payment|membership|package|freeze|roll\s?over|credit|renewal|pricing/.test(combined)) {
-    steps.push(
-      'Verify the member, active package, purchase/payment context, and relevant Momence booking before taking action.',
-      'Confirm the member requested outcome, amount or credit impact, and preferred follow-up channel.',
-      'Document the approved resolution path, owner, and response deadline in the ticket.',
-    );
-  } else if (/facility|equipment|maintenance|repair|studio|temperature|clean|ac|plumbing|electrical|door|lock|tool|bike|machine/.test(combined)) {
-    steps.push(
-      'Confirm the exact studio space, equipment/tool, fault state, and current operational impact.',
-      'Assign the studio operations owner to inspect or coordinate the fix before the next affected session.',
-      'Record any temporary workaround and whether members or scheduled sessions were affected.',
-    );
-  } else if (/class|session|trainer|instructor|booking|waitlist|late|check.?in|schedule/.test(combined)) {
-    steps.push(
-      'Verify the Momence session, booking status, instructor, class time, and impacted member list.',
-      'Confirm what the member reported, what was offered in the moment, and what follow-up they requested.',
-      'Route to the class/session owner with the expected member-facing response timeline.',
-    );
-  } else {
-    steps.push(
-      'Acknowledge the documented member or staff concern and confirm the expected outcome.',
-      'Route the ticket to the assigned owner with the specific next action and due timeline.',
-      'Log the internal action taken and member-facing update before resolving the ticket.',
-    );
-  }
-
-  steps.push(
-    draft.memberName || draft.memberContact
-      ? 'Confirm the linked Momence member record and contact details before closure.'
-      : 'Attach the Momence member record if the resolution depends on a specific community member.',
-    draft.classType || draft.classDateTime
-      ? 'Confirm the selected Momence session context is accurate before closure.'
-      : 'Attach the relevant Momence session if the issue affected a class, booking, or instructor touchpoint.',
-  );
-
-  if (draft.priority === 'Critical' || /angry|frustrat|unsafe|injur|breach|legal|escalat/.test(combined)) {
-    steps.push('Escalate same day to the escalation manager with the risk, owner, and response timeline.');
-  }
-
-  return Array.from(new Set(steps)).slice(0, 6);
-}
-
-function withRecommendedResolutionMetadata(draft: DraftTicket): DraftTicket {
-  const metadata = draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {};
-  const existingSteps = safeStringList(metadata.recommendedResolutionSteps);
-  const recommendedResolutionSteps = existingSteps.length ? existingSteps : recommendedResolutionStepsForDraft(draft);
   return {
-    ...draft,
-    metadata: {
-      ...metadata,
-      recommendedResolutionSteps,
+    traceId: input.traceId,
+    conversationId: input.conversationId,
+    promptProfile: input.promptProfile,
+    requestedDebug: input.requestedDebug,
+    path: input.path,
+    provider: input.provider,
+    model: input.model,
+    rawIssueText: input.rawIssueText,
+    effectiveContext: input.effectiveContext,
+    ai: {
+      present: Boolean(aiResponse),
+      needsMoreInfo: aiResponse?.needsMoreInfo,
+      publishable: aiResponse?.publishable,
+      reply: aiResponse?.reply,
+      detailFormFieldIds: aiDetailFormFieldIds,
+      missingFields: aiResponse?.missingFields || [],
+      ticketPresent: Boolean(aiResponse?.ticket),
     },
+    guard: {
+      guardedMissingFields,
+      finalDetailFormFieldIds,
+      remainingMissingFields,
+    },
+    final: {
+      needsMoreInfo: input.finalNeedsMoreInfo,
+      publishable: input.finalPublishable,
+      ticketPresent: input.finalTicketPresent,
+      detailFormFieldIds: finalDetailFormFieldIds,
+    },
+    decisionSteps,
   };
+}
+
+function logDecisionTrace(trace: IntakeDecisionTrace): void {
+  console.log('[athena-intake-trace]', JSON.stringify(trace));
+}
+
+function sanitizeDraftMetadata(metadata: unknown): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+  const next = { ...metadata } as Record<string, unknown>;
+  delete next.recommendedResolutionSteps;
+  return Object.keys(next).length ? next : undefined;
 }
 
 /**
@@ -906,11 +960,27 @@ function filterAiDetailFormFields(
 ): AiDetailForm | null {
   if (!form) return null;
   const guardedSet = new Set<string>(guardedFields);
-  const filteredFields = form.fields.map((field) => {
-    if (field.id === 'reportedBy') return false;
-    if (PROTECTED_ENTITY_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return false;
-    return guardedSet.has(field.id) ? { ...field, required: true } : field;
-  }).filter(Boolean) as AiDetailField[];
+  const filteredFields = form.fields.flatMap((field) => {
+    if (field.id === 'reportedBy') return [];
+    if (PROTECTED_ENTITY_FIELD_IDS.has(field.id) && !guardedSet.has(field.id)) return [];
+
+    const canonicalType = getGuardFieldType(field.id);
+    if (!canonicalType) {
+      return [field];
+    }
+
+    const normalizedField: AiDetailField = {
+      ...field,
+      label: '',
+      type: canonicalType,
+    };
+    if (guardedSet.has(field.id)) {
+      normalizedField.required = true;
+    } else {
+      delete normalizedField.required;
+    }
+    return [normalizedField];
+  });
   if (filteredFields.length === 0) return null;
   return { ...form, fields: filteredFields };
 }
@@ -927,7 +997,7 @@ function mergeGuardFloorIntoForm(
   const present = new Set((form?.fields || []).map((field) => field.id));
   const missingGuardFields = guardedFields.filter((id) => !present.has(id));
   if (!missingGuardFields.length) return form;
-  const guardFieldEntries = missingGuardFields.map((id) => ({ id, label: id, type: 'text' as const, required: true }));
+  const guardFieldEntries = missingGuardFields.map((id) => buildGuardFieldDefinition(id));
   if (!form) {
     return {
       title: 'Complete ticket intake details',
@@ -947,20 +1017,21 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
       instructions,
       '',
       'Return JSON only using this schema:',
-      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": {"title": string, "description": string, "category": string, "subCategory": string, "priority": string, "studio": string, "metadata": {"recommendedResolutionSteps": string[]}}|null, "suggestedChips": []}',
+      '{"needsMoreInfo": boolean, "reply": string, "inferredContext": {"intakeRoute": string, "category": string, "subCategory": string, "priority": string, "clientsAffected": string, "classImpactType": string, "memberSentiment": string, "desiredResolution": string, "membership": string}, "urgencyReason": string, "missingFields": string[], "publishable": boolean, "detailForm": {"title": string, "description": string, "fields": [{"id": string, "label": string, "type": "select|text|textarea|date|datetime-local|number", "required": boolean, "options": string[]}], "submitLabel": string}, "ticket": {"title": string, "description": string, "category": string, "subCategory": string, "priority": string, "studio": string, "metadata": object}|null, "suggestedChips": []}',
       '',
       'ANTI-LOOP (CRITICAL): Check the last assistant message in the messages array. If it was a plain conversational question and the user replied, that question is ANSWERED — do not re-ask it. Never ask for "member\'s own words", "verbatim report", or any paraphrase — the conversation history already contains this. Accept any user reply (even one word) and move on.',
-      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails.',
+      'Master-data fields must use these exact IDs when needed: intakeRoute, category, subCategory, clientsAffected, studio, trainer, classType, membership, memberName, memberContact, priority, description, desiredResolution, incidentDateTime, memberSentiment, momencePurchaseContext, classImpactType, classImpactDetails, reportedTime, actualStartTime, delayMinutes, advanceNoticeGiven, advanceNoticeTime, membersAffected, membersUpset, latenessReason, serviceRecoveryNeeded, serviceRecoveryAction.',
       'Do not ask for reportedBy; the frontend supplies it from the signed-in user.',
       'For issue-specific fields, create clear snake_case IDs prefixed by the category or subcategory, and include options for select fields.',
       'Infer category and subCategory from the report whenever possible. Ask for category or subCategory only when the text is genuinely ambiguous after using the approved master data.',
       `Always use clientsAffected as a required select before drafting or publishing; valid values are: ${CLIENTS_AFFECTED_OPTIONS.join(', ')}.`,
       'If clientsAffected starts with "Yes", require memberName so the frontend renders Momence member search for the affected clients.',
       `If a class/session/schedule was affected, require classType, classImpactType, and classImpactDetails. classImpactType options: ${CLASS_IMPACT_TYPE_OPTIONS.join(', ')}.`,
+      'If the report is about a trainer arriving late, starting late, or a delayed class start, capture the punctuality slot set rather than asking one generic question. The slot set is: classType, trainer, classDateTime, reportedTime, actualStartTime, delayMinutes, advanceNoticeGiven, advanceNoticeTime, latenessReason, membersAffected, membersUpset, serviceRecoveryNeeded, serviceRecoveryAction. Ask naturally and only for slots that are still missing.',
       'If memberName/memberContact is needed, use memberName so the frontend renders Momence member search.',
       'If class/session details are needed, use classType so the frontend renders Momence session search.',
       'Do not include memberName, memberContact, classType, sessionId, classDateTime, or trainer in detailForm or ticket unless those fields are necessary for the described incident.',
-      'When ticket is not null, include ticket.metadata.recommendedResolutionSteps with 4-6 issue-specific steps the owner can follow to resolve the ticket.',
+      'Do not invent resolution steps. The ticket description should stay factual and specific to the reported facts.',
     ].join('\n'),
     userContent: JSON.stringify({
       context: body.context || {},
@@ -979,7 +1050,11 @@ async function askAiForIntake(body: RequestBody, instructions: string): Promise<
     return null;
   }
   console.log(`[athena-intake] AI provider=${result.provider} model=${result.model} drove intake (needsMoreInfo=${parsed.needsMoreInfo}).`);
-  return parsed;
+  return {
+    ...parsed,
+    provider: result.provider,
+    model: result.model,
+  };
 }
 
 type AiReportNarrative = {
@@ -1385,10 +1460,7 @@ function toTicketRow(
   conversationId?: string | null,
   createdBy?: string | null,
 ) {
-  const draftMetadata = draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {};
-  const recommendedResolutionSteps = safeStringList(draftMetadata.recommendedResolutionSteps).length
-    ? safeStringList(draftMetadata.recommendedResolutionSteps)
-    : recommendedResolutionStepsForDraft(draft);
+  const draftMetadata = sanitizeDraftMetadata(draft.metadata) || {};
   const profileOnly = draft.metadata?.profileOnly === true || draft.tags?.includes('profile-only');
   const recordOnly = !profileOnly && !ticketRequiresResolution(context);
   const priority = normalizePriority(draft.priority);
@@ -1437,7 +1509,6 @@ function toTicketRow(
     conversation_summary: draft.conversationSummary || draft.description,
     metadata: {
       ...draftMetadata,
-      recommendedResolutionSteps,
       source_ref: sourceRef,
       profileOnly,
       resolution_required: !recordOnly,
@@ -1599,12 +1670,33 @@ Deno.serve(async (request) => {
     const messages = body.messages || [];
     const promptProfile = cleanString(body.promptProfile, 'athena-intake-v1');
     const instructions = ATHENA_SYSTEM_PROMPT;
+    const debugTraceRequested = body.debugTrace === true;
+    const traceId = crypto.randomUUID();
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content || '';
 
     // Strip context preamble the frontend prepends to get the raw issue text
     const rawIssueText = latestUserMessage.replace(/^\[Context[^\]]*\]\s*/i, '').trim();
 
     if (isCasualGreeting(rawIssueText)) {
+      const trace = debugTraceRequested
+        ? buildDecisionTrace({
+            traceId,
+            conversationId: body.conversationId || traceId,
+            promptProfile: `${promptProfile}:greeting`,
+            requestedDebug: debugTraceRequested,
+            path: 'greeting',
+            rawIssueText,
+            effectiveContext: effectiveBodyContext,
+            aiResponse: null,
+            guardedMissingFields: [],
+            finalForm: null,
+            remainingMissingFields: [],
+            finalNeedsMoreInfo: false,
+            finalPublishable: false,
+            finalTicketPresent: false,
+          })
+        : null;
+      if (trace) logDecisionTrace(trace);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
         promptProfile: `${promptProfile}:greeting`,
@@ -1621,6 +1713,7 @@ Deno.serve(async (request) => {
         missingFields: [],
         publishable: false,
         urgencyReason: '',
+        debugTrace: trace,
       });
     }
 
@@ -1682,7 +1775,28 @@ Deno.serve(async (request) => {
       const finalForm = mergeGuardFloorIntoForm(aiDrivenForm, guardedMissingFields);
 
       const needsMoreInfo = aiResponse.needsMoreInfo || finalForm !== null || guardedMissingFields.length > 0;
-      const aiTicket = needsMoreInfo ? null : withRecommendedResolutionMetadata(aiResponse.ticket || fallbackDraft(messages, aiContext));
+      const aiTicket = needsMoreInfo ? null : sanitizeDraftTicket(aiResponse.ticket || fallbackDraft(messages, aiContext));
+      const trace = debugTraceRequested
+        ? buildDecisionTrace({
+            traceId,
+            conversationId: body.conversationId || traceId,
+            promptProfile: `${promptProfile}:ai-dynamic`,
+            requestedDebug: debugTraceRequested,
+            path: 'ai-dynamic',
+            provider: aiResponse.provider,
+            model: aiResponse.model,
+            rawIssueText,
+            effectiveContext: aiContext,
+            aiResponse,
+            guardedMissingFields,
+            finalForm,
+            remainingMissingFields: guardedMissingFields,
+            finalNeedsMoreInfo: needsMoreInfo,
+            finalPublishable: !needsMoreInfo && aiResponse.publishable === true,
+            finalTicketPresent: Boolean(aiTicket),
+          })
+        : null;
+      if (trace) logDecisionTrace(trace);
       console.log(`[athena-intake] path=ai-dynamic needsMoreInfo=${needsMoreInfo} formFields=${finalForm?.fields?.length ?? 0}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
@@ -1698,6 +1812,7 @@ Deno.serve(async (request) => {
         missingFields: guardedMissingFields.length > 0 ? guardedMissingFields : aiResponse.missingFields || [],
         publishable: !needsMoreInfo && aiResponse.publishable === true,
         urgencyReason: aiResponse.urgencyReason || '',
+        debugTrace: trace,
       });
     }
 
@@ -1705,6 +1820,25 @@ Deno.serve(async (request) => {
     const effectiveContext = { ...effectiveBodyContext, ...inferredContext };
     const missingFields = requiredFieldsForIssue(latestUserMessage, effectiveContext);
     if (missingFields.length > 0) {
+      const trace = debugTraceRequested
+        ? buildDecisionTrace({
+            traceId,
+            conversationId: body.conversationId || traceId,
+            promptProfile: `${promptProfile}:fallback`,
+            requestedDebug: debugTraceRequested,
+            path: 'fallback-regex',
+            rawIssueText,
+            effectiveContext,
+            aiResponse: null,
+            guardedMissingFields: missingFields,
+            finalForm: null,
+            remainingMissingFields: missingFields,
+            finalNeedsMoreInfo: true,
+            finalPublishable: false,
+            finalTicketPresent: false,
+          })
+        : null;
+      if (trace) logDecisionTrace(trace);
       console.warn(`[athena-intake] path=fallback (regex) missingFields=${missingFields.length}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
@@ -1724,10 +1858,11 @@ Deno.serve(async (request) => {
         urgencyReason: inferredContext.priority
           ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
           : '',
+        debugTrace: trace,
       });
     }
 
-    const draft = withRecommendedResolutionMetadata(fallbackDraft(messages, effectiveContext));
+    const draft = sanitizeDraftTicket(fallbackDraft(messages, effectiveContext));
     const draftMissingFields = requiredFieldsForIssue(latestUserMessage, {
       ...effectiveContext,
       ...draft,
@@ -1737,6 +1872,25 @@ Deno.serve(async (request) => {
       description: draft.description || (effectiveContext as Record<string, unknown>).description,
     });
     if (draftMissingFields.length > 0) {
+      const trace = debugTraceRequested
+        ? buildDecisionTrace({
+            traceId,
+            conversationId: body.conversationId || traceId,
+            promptProfile: `${promptProfile}:incomplete`,
+            requestedDebug: debugTraceRequested,
+            path: 'incomplete-regex',
+            rawIssueText,
+            effectiveContext: { ...effectiveContext, ...draft },
+            aiResponse: null,
+            guardedMissingFields: draftMissingFields,
+            finalForm: null,
+            remainingMissingFields: draftMissingFields,
+            finalNeedsMoreInfo: true,
+            finalPublishable: false,
+            finalTicketPresent: false,
+          })
+        : null;
+      if (trace) logDecisionTrace(trace);
       console.warn(`[athena-intake] path=incomplete (regex) missingFields=${draftMissingFields.length}`);
       return json({
         conversationId: body.conversationId || crypto.randomUUID(),
@@ -1756,8 +1910,28 @@ Deno.serve(async (request) => {
         urgencyReason: inferredContext.priority
           ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
           : '',
+        debugTrace: trace,
       });
     }
+    const trace = debugTraceRequested
+      ? buildDecisionTrace({
+          traceId,
+          conversationId: body.conversationId || traceId,
+          promptProfile: `${promptProfile}:drafted`,
+          requestedDebug: debugTraceRequested,
+          path: 'drafted-regex',
+          rawIssueText,
+          effectiveContext: { ...effectiveContext, ...draft },
+          aiResponse: null,
+          guardedMissingFields: [],
+          finalForm: null,
+          remainingMissingFields: [],
+          finalNeedsMoreInfo: false,
+          finalPublishable: true,
+          finalTicketPresent: true,
+        })
+      : null;
+    if (trace) logDecisionTrace(trace);
     console.warn(`[athena-intake] path=drafted (regex fallback draft) — AI did not run`);
     return json({
       conversationId: body.conversationId || crypto.randomUUID(),
@@ -1772,6 +1946,7 @@ Deno.serve(async (request) => {
       urgencyReason: inferredContext.priority
         ? `Fallback priority inferred as ${inferredContext.priority} from the report.`
         : '',
+      debugTrace: trace,
     });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Ticket AI chat failed' }, 500);

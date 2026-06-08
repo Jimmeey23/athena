@@ -49,6 +49,37 @@ describe('intake conversation planning', () => {
     expect(plan.followUpFieldIds).toContain('clientsAffected');
     expect(serializeConversationPlan(plan)).toContain('Confirm whether any members were directly or indirectly affected');
   });
+
+  it('captures trainer punctuality slot groups when late arrival is reported', () => {
+    const plan = buildIntakeConversationPlan({
+      initialText: 'Trainer arrived late and the 7:15 class started behind schedule.',
+      reporterName: 'Priya Shah',
+      context: {
+        category: 'Trainer Feedback',
+        subCategory: 'Trainer Punctuality Issues',
+      },
+    });
+
+    expect(plan.followUpFieldIds).toEqual(expect.arrayContaining([
+      'sessionId',
+      'classType',
+      'trainer',
+      'classDateTime',
+      'reportedTime',
+      'actualStartTime',
+      'delayMinutes',
+      'advanceNoticeGiven',
+      'latenessReason',
+      'membersAffected',
+      'membersUpset',
+      'serviceRecoveryNeeded',
+      'serviceRecoveryAction',
+    ]));
+    const serialized = serializeConversationPlan(plan);
+    expect(serialized).toContain('Identify the affected Momence session');
+    expect(serialized).toContain('Capture trainer punctuality details');
+    expect(serialized.indexOf('Identify the affected Momence session')).toBeLessThan(serialized.indexOf('Capture trainer punctuality details'));
+  });
 });
 
 describe('conversational field batching', () => {
@@ -125,5 +156,39 @@ describe('natural single-field prompts', () => {
         },
       })
     ).toBe('Does this ticket require a resolution?');
+  });
+
+  it('asks trainer punctuality follow-ups as slot-focused prompts', () => {
+    expect(
+      buildNaturalSingleFieldPrompt({
+        field: {
+          id: 'sessionId',
+          label: 'Momence session',
+          type: 'select',
+          options: ['Session 1'],
+        },
+        reporterFirstName: 'Priya',
+      })
+    ).toContain('which exact Momence session should this late-arrival report be attached to');
+    expect(
+      buildNaturalSingleFieldPrompt({
+        field: {
+          id: 'advanceNoticeGiven',
+          label: 'Was the late arrival pre-informed by the instructor?',
+          type: 'select',
+          options: ['Yes - before scheduled start', 'No advance notice'],
+        },
+        reporterFirstName: 'Priya',
+      })
+    ).toContain('did the instructor inform the studio in advance');
+    expect(
+      buildNaturalSingleFieldPrompt({
+        field: {
+          id: 'serviceRecoveryAction',
+          label: 'Service recovery action',
+          type: 'textarea',
+        },
+      })
+    ).toContain('what service recovery was offered or taken');
   });
 });

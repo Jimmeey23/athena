@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowUpRight,
   Activity,
   Award,
   BarChart3,
@@ -8,13 +9,17 @@ import {
   Clock,
   FileText,
   GraduationCap,
+  Gauge,
+  Layers3,
   MapPin,
   MessageSquare,
   ShieldCheck,
   Tag,
   Target,
+  Sparkles,
   TrendingUp,
   User,
+  Flame,
 } from 'lucide-react';
 import {
   Bar,
@@ -183,17 +188,18 @@ export const TrainerProfilesPanel: React.FC = () => {
   );
 
   return (
-    <div className="h-full overflow-hidden bg-slate-50/70">
-      <div className="flex h-full min-h-0 flex-col">
-        <div className="flex-shrink-0 border-b border-slate-200 bg-white/90 px-5 py-4 shadow-[0_10px_36px_rgba(15,23,42,0.04)] backdrop-blur-xl">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="relative h-full overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f8fbff_0%,_#f8fafc_42%,_#eef4ff_100%)]">
+      <div className="absolute inset-x-0 top-0 h-48 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0))]" />
+      <div className="relative flex h-full min-h-0 flex-col">
+        <div className="flex-shrink-0 border-b border-slate-200/80 bg-white/90 px-5 py-4 shadow-[0_10px_36px_rgba(15,23,42,0.05)] backdrop-blur-xl">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
                 <GraduationCap className="h-4 w-4" />
                 Instructor Intelligence
               </div>
-              <h2 className="mt-1 text-xl font-semibold text-slate-950">Trainer Profiles</h2>
-              <p className="mt-1 max-w-2xl text-xs text-slate-500">Assessment history, score trends, coaching focus, and criterion-level performance by instructor.</p>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Trainer Profiles</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">Assessment history, score trends, coaching focus, and criterion-level performance by instructor.</p>
             </div>
             <div className="grid grid-cols-3 gap-2">
               <Metric label="Profiles" value={profiles.length} />
@@ -267,7 +273,7 @@ export const TrainerProfilesPanel: React.FC = () => {
 };
 
 const Metric: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
-  <div className="min-w-24 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+  <div className="min-w-24 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-right shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
     <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
     <div className="mt-1 text-lg font-semibold text-slate-950">{value}</div>
   </div>
@@ -281,6 +287,7 @@ const TrainerProfileDetail: React.FC<{
 }> = ({ profile, ticketBySourceRef, activeReviewKey, onSelectReview }) => {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
+  const [mounted, setMounted] = useState(false);
   const latest = profile.reviews[0];
   const activeReview = profile.reviews.find((review) => reviewKey(review) === activeReviewKey) || latest;
   const groupedReviews = groupReviewsByPeriod(profile.reviews);
@@ -310,6 +317,12 @@ const TrainerProfileDetail: React.FC<{
   }, [profile.trainer]);
 
   useEffect(() => {
+    setMounted(false);
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [profile.trainer, activeReviewKey]);
+
+  useEffect(() => {
     if (!previewTicket) return;
     previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [previewTicket]);
@@ -320,14 +333,21 @@ const TrainerProfileDetail: React.FC<{
   };
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.07)]">
-        <div className="border-b border-slate-200 bg-white p-5">
+    <div className="mx-auto max-w-[1560px] px-4 py-5 sm:px-5">
+      <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_28px_100px_rgba(15,23,42,0.10)]">
+        <div className="border-b border-slate-200 bg-gradient-to-r from-white via-white to-blue-50/60 p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
-              <TrainerImage name={profile.trainer} size="lg" />
+              <div className="rounded-[24px] border border-blue-100 bg-blue-50/80 p-1.5 shadow-[0_18px_38px_rgba(37,99,235,0.10)]">
+                <TrainerImage name={profile.trainer} size="lg" />
+              </div>
               <div className="min-w-0">
-                <h3 className="text-2xl font-semibold text-slate-950">{profile.trainer}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-2xl font-semibold tracking-tight text-slate-950">{profile.trainer}</h3>
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">
+                    {profile.reviews.length} assessment{profile.reviews.length === 1 ? '' : 's'}
+                  </span>
+                </div>
                 <p className="mt-1 text-xs text-slate-500">Latest review: {formatDate(profile.latestReviewAt)}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <ProfilePill icon={<ClipboardList className="h-3.5 w-3.5" />} label={`${profile.reviews.length} assessment${profile.reviews.length === 1 ? '' : 's'}`} />
@@ -337,9 +357,9 @@ const TrainerProfileDetail: React.FC<{
                 </div>
               </div>
             </div>
-            <div className={`min-w-36 rounded-2xl border px-4 py-3 text-right ${scoreTone(profile.averageScorePercent)}`}>
-              <div className="text-[10px] font-bold uppercase tracking-[0.16em]">Profile average</div>
-              <div className="mt-1 text-3xl font-semibold">{profile.averageScorePercent}%</div>
+            <div className={`min-w-40 rounded-3xl border px-5 py-4 text-right shadow-[0_18px_42px_rgba(37,99,235,0.10)] ${scoreTone(profile.averageScorePercent)}`}>
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em]">Profile average</div>
+              <div className="mt-1 text-4xl font-semibold tracking-tight">{profile.averageScorePercent}%</div>
               <div className="mt-1 text-[11px] font-bold">{scoreBand(profile.averageScorePercent)}</div>
             </div>
           </div>
@@ -347,18 +367,18 @@ const TrainerProfileDetail: React.FC<{
 
         {activeReview && (
           <div className="space-y-5 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <TrendingUp className="h-4 w-4 text-blue-600" />
-                  {activeReviewKey ? 'Selected Assessment Drilldown' : 'Latest Weighted Review'}
-                </div>
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                  <CalendarDays className="h-3.5 w-3.5 text-blue-600" />
-                  {formatReviewPeriod(activeReview.reviewPeriod)}
-                </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <TrendingUp className="h-4 w-4 text-blue-600" />
+                {activeReviewKey ? 'Selected Assessment Drilldown' : 'Latest Weighted Review'}
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                <CalendarDays className="h-3.5 w-3.5 text-blue-600" />
+                {formatReviewPeriod(activeReview.reviewPeriod)}
+              </div>
             </div>
 
-            <DrilldownAnalytics review={activeReview} profile={profile} rows={activeRows} />
+            <DrilldownAnalytics review={activeReview} profile={profile} rows={activeRows} mounted={mounted} />
 
             <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -403,7 +423,7 @@ const TrainerProfileDetail: React.FC<{
               <InsightBlock title="Goals" value={activeReview.goals} />
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.16em] text-slate-500">
                   <tr>
@@ -437,7 +457,7 @@ const TrainerProfileDetail: React.FC<{
             </div>
 
             {trendRows.length > 1 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
                 <div className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Recent Assessment Trend</div>
                 <div className="flex items-end gap-1">
                   {trendRows.map((row) => (
@@ -460,11 +480,19 @@ const TrainerProfileDetail: React.FC<{
         )}
       </div>
 
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.07)]">
-        <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-950">Assessment History</div>
+      <div className="mt-5 overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_28px_100px_rgba(15,23,42,0.08)]">
+        <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-blue-50/50 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-700">Historical Tickets</div>
+              <div className="mt-1 text-sm font-semibold text-slate-950">Assessment History</div>
+            </div>
+            <div className="text-xs text-slate-500">Historic and live tickets stay styled with the same drilldown structure.</div>
+          </div>
+        </div>
         <div className="divide-y divide-slate-100">
           {groupedReviews.map((group) => (
-            <div key={group.period} className="px-4 py-4">
+            <div key={group.period} className="px-4 py-4 sm:px-5">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{group.period}</div>
                 <div className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500">
@@ -477,11 +505,11 @@ const TrainerProfileDetail: React.FC<{
                   const key = reviewKey(review);
                   const selected = activeReview ? reviewKey(activeReview) === key : false;
                   return (
-                    <div key={key} className={`overflow-hidden rounded-xl border ${selected ? 'border-blue-300 bg-blue-50/70 shadow-[0_10px_30px_rgba(37,99,235,0.10)]' : 'border-slate-100 bg-white'}`}>
+                    <div key={key} className={`overflow-hidden rounded-[22px] border transition ${selected ? 'border-blue-300 bg-blue-50/70 shadow-[0_14px_38px_rgba(37,99,235,0.12)]' : 'border-slate-200 bg-white hover:border-blue-200 hover:shadow-[0_12px_34px_rgba(15,23,42,0.06)]'}`}>
                       <button
                         type="button"
                         onClick={() => selectHistoryItem(key, ticket)}
-                        className="grid w-full gap-3 px-3 py-3 text-left transition hover:bg-slate-50 lg:grid-cols-[190px_1fr_125px]"
+                        className="grid w-full gap-3 px-4 py-4 text-left transition hover:bg-slate-50/80 lg:grid-cols-[210px_minmax(0,1fr)_128px]"
                       >
                         <div>
                           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
@@ -535,53 +563,108 @@ const ProfilePill: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon,
   </span>
 );
 
-const TicketPreviewReport: React.FC<{ ticket: Ticket; previewRef: React.RefObject<HTMLDivElement> }> = ({ ticket, previewRef }) => (
-  <div ref={previewRef} className="mt-5 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-[0_18px_54px_rgba(37,99,235,0.10)]">
-    <div className="border-b border-blue-100 bg-blue-50/80 px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-blue-700">
-            <FileText className="h-4 w-4" />
-            Ticket Preview Report
+const TicketPreviewReport: React.FC<{ ticket: Ticket; previewRef: React.RefObject<HTMLDivElement> }> = ({ ticket, previewRef }) => {
+  const sections = parseTrainerReportSections(ticket.description);
+  const narrativeSummary = sections[0]?.body[0] || ticket.description.split('\n').find((line) => line.trim()) || 'No ticket description captured.';
+
+  return (
+    <div ref={previewRef} className="mt-6 overflow-hidden rounded-[28px] border border-blue-200 bg-white shadow-[0_28px_90px_rgba(37,99,235,0.14)]">
+      <div className="border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-slate-50 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-700">
+              <FileText className="h-4 w-4" />
+              Ticket Preview Report
+            </div>
+            <h4 className="mt-1 text-xl font-semibold leading-snug text-slate-950">{ticket.title}</h4>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-bold text-blue-700">Ticket ID: {ticket.id}</span>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.status}</span>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.priority}</span>
+            </div>
           </div>
-          <h4 className="mt-1 text-lg font-semibold leading-snug text-slate-950">{ticket.title}</h4>
+          <div className="grid gap-2 text-right">
+            <div className="rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Created</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{formatDate(ticket.createdAt, 'Not captured')}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Audience</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{ticket.trainer || ticket.memberName || ticket.studio}</div>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-bold text-blue-700">Ticket ID: {ticket.id}</span>
-          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.status}</span>
-          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">{ticket.priority}</span>
+      </div>
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_350px]">
+        <div className="space-y-4">
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Ticket narrative</div>
+                <div className="mt-1 text-sm font-semibold text-slate-950">Structured evaluation brief</div>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                {sections.length} section{sections.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="space-y-4">
+              {sections.map((section) => (
+                <div key={section.title} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-700">{section.title}</div>
+                  <div className="mt-2 space-y-2 text-sm leading-relaxed text-slate-700">
+                    {section.body.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                  {section.bullets.length > 0 && (
+                    <ul className="mt-3 space-y-2 text-xs leading-relaxed text-slate-600">
+                      {section.bullets.map((bullet) => (
+                        <li key={bullet} className="flex gap-2">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                          <span>{bullet}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+              {sections.length === 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-700">
+                  {narrativeSummary}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+            <div className="mb-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Context tags</div>
+            {ticket.tags.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {ticket.tags.map((tag) => (
+                  <span key={tag} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">#{tag}</span>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500">No tags captured.</div>
+            )}
+          </section>
+        </div>
+        <div className="grid content-start gap-2">
+          <TicketPreviewFact icon={<Tag className="h-3.5 w-3.5" />} label="Classification" value={`${ticket.category} / ${ticket.subCategory}`} />
+          <TicketPreviewFact icon={<MapPin className="h-3.5 w-3.5" />} label="Studio" value={ticket.studio} />
+          <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Owner" value={ticket.assignedTo} />
+          <TicketPreviewFact icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Team" value={ticket.team} />
+          {ticket.trainer && <TicketPreviewFact icon={<GraduationCap className="h-3.5 w-3.5" />} label="Instructor" value={ticket.trainer} />}
+          {ticket.classType && <TicketPreviewFact icon={<Activity className="h-3.5 w-3.5" />} label="Session" value={ticket.classType} />}
+          {ticket.classDateTime && <TicketPreviewFact icon={<CalendarDays className="h-3.5 w-3.5" />} label="Session time" value={formatDate(ticket.classDateTime, 'Not captured')} />}
+          {ticket.memberName && <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Member" value={ticket.memberName} />}
+          {ticket.sentiment && <TicketPreviewFact icon={<MessageSquare className="h-3.5 w-3.5" />} label="Sentiment" value={ticket.sentiment} />}
+          <TicketPreviewFact icon={<Clock className="h-3.5 w-3.5" />} label="Created" value={formatDate(ticket.createdAt, 'Not captured')} />
         </div>
       </div>
     </div>
-    <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="space-y-3">
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-          <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Ticket narrative</div>
-          <FormattedTrainerTicketText text={ticket.description} />
-        </div>
-        {ticket.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {ticket.tags.map((tag) => (
-              <span key={tag} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">#{tag}</span>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="grid content-start gap-2">
-        <TicketPreviewFact icon={<Tag className="h-3.5 w-3.5" />} label="Classification" value={`${ticket.category} / ${ticket.subCategory}`} />
-        <TicketPreviewFact icon={<MapPin className="h-3.5 w-3.5" />} label="Studio" value={ticket.studio} />
-        <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Owner" value={ticket.assignedTo} />
-        <TicketPreviewFact icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Team" value={ticket.team} />
-        {ticket.trainer && <TicketPreviewFact icon={<GraduationCap className="h-3.5 w-3.5" />} label="Instructor" value={ticket.trainer} />}
-        {ticket.classType && <TicketPreviewFact icon={<Activity className="h-3.5 w-3.5" />} label="Session" value={ticket.classType} />}
-        {ticket.classDateTime && <TicketPreviewFact icon={<CalendarDays className="h-3.5 w-3.5" />} label="Session time" value={formatDate(ticket.classDateTime, 'Not captured')} />}
-        {ticket.memberName && <TicketPreviewFact icon={<User className="h-3.5 w-3.5" />} label="Member" value={ticket.memberName} />}
-        {ticket.sentiment && <TicketPreviewFact icon={<MessageSquare className="h-3.5 w-3.5" />} label="Sentiment" value={ticket.sentiment} />}
-        <TicketPreviewFact icon={<Clock className="h-3.5 w-3.5" />} label="Created" value={formatDate(ticket.createdAt, 'Not captured')} />
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
 const TicketPreviewFact: React.FC<{ icon: React.ReactNode; label: string; value: string }> = ({ icon, label, value }) => (
   <div className="flex min-w-0 gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
@@ -593,18 +676,60 @@ const TicketPreviewFact: React.FC<{ icon: React.ReactNode; label: string; value:
   </div>
 );
 
-const FormattedTrainerTicketText: React.FC<{ text: string }> = ({ text }) => {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  return (
-    <div className="space-y-2 text-sm leading-relaxed text-slate-700">
-      {(lines.length ? lines : ['No ticket description captured.']).map((line, index) => (
-        <p key={`${line}-${index}`}>{line.replace(/^[-*]\s+/, '')}</p>
-      ))}
-    </div>
-  );
-};
+interface ParsedTrainerReportSection {
+  title: string;
+  body: string[];
+  bullets: string[];
+}
 
-const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: TrainerProfile; rows: CriterionRow[] }> = ({ review, profile, rows }) => {
+const TRAINER_REPORT_SECTION_TITLES = new Set([
+  'evaluation snapshot',
+  'weighted scorecard',
+  'demonstrated strengths',
+  'coaching attention areas',
+  'evaluator / training notes',
+  'coaching plan and follow-up',
+  'routing context',
+]);
+
+function parseTrainerReportSections(text: string): ParsedTrainerReportSection[] {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const sections: ParsedTrainerReportSection[] = [];
+  let current: ParsedTrainerReportSection | null = null;
+
+  const pushCurrent = () => {
+    if (current) sections.push(current);
+  };
+
+  for (const line of lines) {
+    const bulletMatch = line.match(/^[-*•]\s*(.+)$/);
+    if (bulletMatch) {
+      if (!current) {
+        current = { title: 'Narrative', body: [], bullets: [] };
+      }
+      current.bullets.push(bulletMatch[1].trim());
+      continue;
+    }
+
+    const normalized = line.toLowerCase();
+    if (TRAINER_REPORT_SECTION_TITLES.has(normalized)) {
+      pushCurrent();
+      current = { title: line, body: [], bullets: [] };
+      continue;
+    }
+
+    if (!current) {
+      current = { title: 'Narrative', body: [], bullets: [] };
+    }
+    current.body.push(line);
+  }
+
+  pushCurrent();
+  return sections;
+}
+
+const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: TrainerProfile; rows: CriterionRow[]; mounted: boolean }> = ({ review, profile, rows, mounted }) => {
   const sortedRows = [...rows].sort((a, b) => b.percent - a.percent);
   const strengths = sortedRows.filter((item) => item.percent >= 80).slice(0, 4);
   const attention = [...rows].sort((a, b) => a.percent - b.percent).slice(0, 4);
@@ -613,41 +738,146 @@ const DrilldownAnalytics: React.FC<{ review: TrainerReviewRecord; profile: Train
     .filter((item) => item.percent < 70)
     .reduce((sum, item) => sum + item.weightage, 0);
   const scoreDensity = review.totalWeightage ? Math.round((review.totalScore / review.totalWeightage) * 100) : review.scorePercent;
+  const weightedAverage = review.totalWeightage ? review.totalScore / review.totalWeightage : 0;
+  const topCriterion = sortedRows[0];
+  const lowCriterion = [...rows].sort((a, b) => a.percent - b.percent)[0];
+  const trendDirection = delta > 0 ? 'Improving' : delta < 0 ? 'Under mean' : 'At mean';
+
+  const keyMetrics = [
+    {
+      label: 'Selected Score',
+      value: `${review.scorePercent}%`,
+      helper: scoreBand(review.scorePercent),
+      accent: scoreTextColor(review.scorePercent),
+      icon: <Gauge className="h-4 w-4" />,
+      fill: review.scorePercent,
+    },
+    {
+      label: 'Vs Profile Avg',
+      value: `${delta > 0 ? '+' : ''}${delta}%`,
+      helper: `${profile.averageScorePercent}% profile mean`,
+      accent: delta >= 0 ? 'text-emerald-700' : 'text-rose-700',
+      icon: <ArrowUpRight className="h-4 w-4" />,
+      fill: Math.abs(delta) * 4,
+    },
+    {
+      label: 'Weighted Yield',
+      value: `${scoreDensity}%`,
+      helper: `${review.totalScore.toFixed(1)} / ${review.totalWeightage}`,
+      accent: 'text-blue-700',
+      icon: <Layers3 className="h-4 w-4" />,
+      fill: scoreDensity,
+    },
+    {
+      label: 'Risk Weight',
+      value: `${weightedRisk}`,
+      helper: 'points below 70%',
+      accent: weightedRisk ? 'text-amber-700' : 'text-emerald-700',
+      icon: <Flame className="h-4 w-4" />,
+      fill: weightedRisk,
+    },
+    {
+      label: 'Top Criterion',
+      value: topCriterion ? `${topCriterion.percent}%` : '0%',
+      helper: topCriterion ? topCriterion.category : 'No criteria captured',
+      accent: 'text-slate-950',
+      icon: <Sparkles className="h-4 w-4" />,
+      fill: topCriterion?.percent || 0,
+    },
+    {
+      label: 'Lowest Criterion',
+      value: lowCriterion ? `${lowCriterion.percent}%` : '0%',
+      helper: lowCriterion ? lowCriterion.category : 'No criteria captured',
+      accent: 'text-slate-950',
+      icon: <Target className="h-4 w-4" />,
+      fill: lowCriterion?.percent || 0,
+    },
+  ];
 
   return (
     <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="grid items-start gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-        <DrillMetric label="Selected Score" value={`${review.scorePercent}%`} helper={scoreBand(review.scorePercent)} accent={scoreTextColor(review.scorePercent)} />
-        <DrillMetric
-          label="Vs Profile Avg"
-          value={`${delta > 0 ? '+' : ''}${delta}%`}
-          helper={`${profile.averageScorePercent}% profile mean`}
-          accent={delta >= 0 ? 'text-emerald-700' : 'text-rose-700'}
-        />
-        <DrillMetric label="Weighted Yield" value={`${scoreDensity}%`} helper={`${review.totalScore.toFixed(1)} / ${review.totalWeightage}`} accent="text-blue-700" />
-        <DrillMetric label="Risk Weight" value={`${weightedRisk}`} helper="points below 70%" accent={weightedRisk ? 'text-amber-700' : 'text-emerald-700'} />
+      <div className="space-y-3">
+        <div className="grid items-stretch gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {keyMetrics.map((metric, index) => (
+            <DrillMetric
+              key={metric.label}
+              label={metric.label}
+              value={metric.value}
+              helper={metric.helper}
+              accent={metric.accent}
+              icon={metric.icon}
+              delay={index}
+              fill={metric.fill}
+              mounted={mounted}
+            />
+          ))}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <DetailBanner
+            icon={<BarChart3 className="h-4 w-4" />}
+            title="Performance Lens"
+            value={trendDirection}
+            text={`Weighted yield ${weightedAverage.toFixed(1)} and review delta ${delta > 0 ? '+' : ''}${delta}% from profile mean.`}
+          />
+          <DetailBanner
+            icon={<ClipboardList className="h-4 w-4" />}
+            title="Assessment Count"
+            value={`${profile.reviews.length} reviews`}
+            text={`Latest review on ${formatDate(profile.latestReviewAt, 'Not captured')}.`}
+          />
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-        <TechnicalList title="Strongest Signals" items={strengths.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)} fallback="No criterion reached the strength threshold." />
-        <TechnicalList title="Coaching Attention" items={attention.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)} fallback="No attention areas captured." />
+        <TechnicalList
+          title="Strongest Signals"
+          icon={<Sparkles className="h-4 w-4 text-blue-600" />}
+          items={strengths.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)}
+          fallback="No criterion reached the strength threshold."
+        />
+        <TechnicalList
+          title="Coaching Attention"
+          icon={<Target className="h-4 w-4 text-blue-600" />}
+          items={attention.map((item) => `${item.category}: ${item.percent}% (${item.score.toFixed(1)}/${item.weightage})`)}
+          fallback="No attention areas captured."
+        />
       </div>
     </div>
   );
 };
 
-const DrillMetric: React.FC<{ label: string; value: string; helper: string; accent: string }> = ({ label, value, helper, accent }) => (
-  <div className="h-fit rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
-    <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-    <div className={`mt-2 text-2xl font-semibold leading-none ${accent}`}>{value}</div>
+const DrillMetric: React.FC<{ label: string; value: string; helper: string; accent: string; icon: React.ReactNode; delay: number; fill: number; mounted: boolean }> = ({ label, value, helper, accent, icon, delay, fill, mounted }) => (
+  <div
+    className={`group relative h-full overflow-hidden rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_18px_36px_rgba(15,23,42,0.05)] transition-all duration-700 ease-out ${
+      mounted ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
+    }`}
+    style={{ transitionDelay: `${delay * 70}ms` }}
+  >
+    <div className="absolute inset-x-0 bottom-0 h-1 bg-slate-100">
+      <div className="h-full rounded-r-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 transition-all duration-700 ease-out" style={{ width: mounted ? `${Math.max(8, Math.min(100, fill))}%` : '0%' }} />
+    </div>
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-100 bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">
+          <span className="text-blue-600">{icon}</span>
+          {label}
+        </div>
+        <div className={`mt-2 text-2xl font-semibold leading-none ${accent}`}>{value}</div>
+      </div>
+      <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-blue-500" />
+    </div>
     <div className="mt-2 text-[11px] font-semibold text-slate-500">{helper}</div>
   </div>
 );
 
-const TechnicalList: React.FC<{ title: string; items: string[]; fallback: string }> = ({ title, items, fallback }) => (
-  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-    <div className="mb-2 text-xs font-semibold text-slate-900">{title}</div>
-    <ul className="space-y-1 text-xs leading-relaxed text-slate-600">
+const TechnicalList: React.FC<{ title: string; icon?: React.ReactNode; items: string[]; fallback: string }> = ({ title, icon, items, fallback }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_18px_36px_rgba(15,23,42,0.05)]">
+    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-900">
+      {icon}
+      {title}
+    </div>
+    <ul className="space-y-2 text-xs leading-relaxed text-slate-600">
       {(items.length ? items : [fallback]).map((item) => (
         <li key={item} className="flex gap-2">
           <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
@@ -655,6 +885,19 @@ const TechnicalList: React.FC<{ title: string; items: string[]; fallback: string
         </li>
       ))}
     </ul>
+  </div>
+);
+
+const DetailBanner: React.FC<{ icon: React.ReactNode; title: string; value: string; text: string }> = ({ icon, title, value, text }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_18px_36px_rgba(15,23,42,0.05)]">
+    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+      <span className="text-blue-600">{icon}</span>
+      {title}
+    </div>
+    <div className="mt-2 flex items-center gap-2">
+      <div className="text-lg font-semibold text-slate-950">{value}</div>
+    </div>
+    <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{text}</p>
   </div>
 );
 
