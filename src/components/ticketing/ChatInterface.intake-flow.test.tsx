@@ -65,7 +65,7 @@ describe('ChatInterface intake flow', () => {
   });
 
   it('shows the AI draft instead of forcing a local description form when the AI returns a ticket', async () => {
-    hoisted.invokeTicketingFunction.mockResolvedValue({
+    const completeRefundResponse = {
       data: {
         conversationId: 'conversation-1',
         needsMoreInfo: false,
@@ -75,14 +75,7 @@ describe('ChatInterface intake flow', () => {
           intakeRoute: 'Request',
           category: 'Pricing and Memberships',
           subCategory: 'Refund and Cancellation Policy Issue',
-          clientsAffected: 'Yes - directly affected',
-          studio: 'Supreme HQ, Bandra',
-          memberId: '29887042',
-          memberName: 'Smita Modi',
-          memberContact: 'smita.modi@ymail.com',
           membership: 'Studio 3 Month Unlimited Membership',
-          incidentDateTime: '2026-06-07T02:26',
-          momencePurchaseContext: 'Member package is active in Momence.',
           desiredResolution: 'Member requested a refund review and WhatsApp follow-up.',
           memberSentiment: 'Member Expressed Dissatisfaction',
           priority: 'High',
@@ -106,7 +99,10 @@ describe('ChatInterface intake flow', () => {
         publishable: true,
       },
       error: null,
-    });
+    };
+    hoisted.invokeTicketingFunction
+      .mockResolvedValueOnce(completeRefundResponse)
+      .mockResolvedValueOnce(completeRefundResponse);
 
     const user = userEvent.setup();
     const { container } = render(<ChatInterface />);
@@ -119,6 +115,14 @@ describe('ChatInterface intake flow', () => {
 
     await waitFor(() => {
       expect(hoisted.invokeTicketingFunction).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/were any clients affected/i)).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Yes - directly affected' }));
+    await waitFor(() => {
+      expect(hoisted.invokeTicketingFunction).toHaveBeenCalledTimes(2);
     });
 
     await waitFor(
@@ -142,7 +146,6 @@ describe('ChatInterface intake flow', () => {
           intakeRoute: 'Request',
           category: 'Pricing and Memberships',
           subCategory: 'Refund and Cancellation Policy Issue',
-          clientsAffected: 'Yes - directly affected',
           priority: 'High',
           resolutionRequired: 'Yes',
         },
@@ -173,9 +176,9 @@ describe('ChatInterface intake flow', () => {
     await user.click(sendButton as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(screen.getByText(/Just a couple more details and we'll have a clean draft ready/i)).toBeTruthy();
+      expect(screen.getByText(/were any clients affected/i)).toBeTruthy();
     });
     expect(screen.queryByText(/I drafted the ticket below/i)).toBeNull();
-    expect(screen.queryByText(/Ticket draft ready for review/i)).toBeNull();
+    expect(screen.queryByText(/Draft ready/i)).toBeNull();
   });
 });
