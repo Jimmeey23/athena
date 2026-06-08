@@ -3,9 +3,8 @@ import { backendSupabase } from './backend-supabase';
 const MOMENCE_BASE_URL = 'https://api.momence.com/api/v2';
 const DEFAULT_PAGE_SIZE = 20;
 const SESSION_RESULT_LIMIT = 120;
-const SESSION_LOOKAHEAD_DAYS = 45;
-const SESSION_LOOKBACK_DAYS = 180;
-const SESSION_SEARCH_TYPE = 'private';
+const SESSION_LOOKAHEAD_DAYS = 0;
+const SESSION_LOOKBACK_DAYS = 3650;
 const SESSION_PAGE_SIZE = 40;
 const SESSION_MAX_PAGES = 12;
 
@@ -43,6 +42,8 @@ interface MomenceSession {
   isCancelled?: boolean;
   bookingCount?: number;
   capacity?: number | null;
+  waitlistBookingCount?: number | null;
+  waitlistCapacity?: number | null;
 }
 
 interface MomenceHostMembership {
@@ -201,6 +202,10 @@ export interface MomenceSessionOption {
   studio?: string;
   startsAt?: string;
   endsAt?: string;
+  bookingCount?: number;
+  capacity?: number | null;
+  waitlistBookingCount?: number | null;
+  waitlistCapacity?: number | null;
 }
 
 export interface MomenceInsightInput {
@@ -470,6 +475,17 @@ function buildTicketContextLines(summary: Omit<MomenceInsightSummary, 'ticketCon
   if (summary.session) {
     lines.push(`Selected Momence session: ${compact([summary.session.classType, summary.session.startsAt, summary.session.trainer, summary.session.studio])}`);
     if (summary.session.fillRateLabel) lines.push(`Selected session capacity: ${summary.session.fillRateLabel}`);
+    if (summary.session.waitlistLabel) lines.push(`Selected session waitlist: ${summary.session.waitlistLabel}`);
+  }
+  if (summary.bookingOverview.recentBookings.length) {
+    lines.push(`Recent attendance history: ${summary.bookingOverview.recentBookings.map((booking) => compact([
+      booking.classType,
+      booking.startsAt,
+      booking.checkedIn ? 'checked in' : booking.cancelled ? 'cancelled' : 'not checked in',
+    ])).join(' | ')}`);
+  }
+  if (summary.noteOverview.count) {
+    lines.push(`Momence notes loaded: ${summary.noteOverview.count}`);
   }
   if (summary.noteOverview.latestNote) lines.push(`Latest Momence note: ${summary.noteOverview.latestNote}`);
   return lines;
@@ -777,15 +793,27 @@ function momenceSessionOptionsFromResponse(
       const studio = session.inPersonLocation?.name;
       const dateLabel = formatDateTime(session.startsAt);
       const classType = session.name || session.type || `Momence session #${session.id}`;
+      const booked = session.bookingCount ?? 0;
+      const spotsLeft = session.capacity != null ? Math.max(session.capacity - booked, 0) : undefined;
       return {
         id: String(session.id),
         label: compact([classType, dateLabel && `- ${dateLabel}`]),
-        description: compact([trainer, studio, session.capacity != null ? `${session.bookingCount || 0}/${session.capacity} booked` : null]),
+        description: compact([
+          trainer,
+          studio,
+          session.capacity != null ? `${booked} booked` : undefined,
+          spotsLeft != null ? `${spotsLeft} spots left` : undefined,
+          session.waitlistBookingCount != null ? `${session.waitlistBookingCount} waitlisted` : undefined,
+        ]),
         classType,
         trainer,
         studio,
         startsAt: session.startsAt,
         endsAt: session.endsAt,
+        bookingCount: session.bookingCount,
+        capacity: session.capacity,
+        waitlistBookingCount: session.waitlistBookingCount,
+        waitlistCapacity: session.waitlistCapacity,
       };
     });
 }
@@ -804,7 +832,7 @@ async function searchMomenceSessionPage(
   const sessionFunctionAnonKey = resolveSessionFunctionAnonKey();
   const normalizedQuery = normalizeSearchValue(query);
   const sessionTypes = options.types?.map((type) => type.trim()).filter(Boolean);
-  const requestedSessionTypes = sessionTypes?.length ? sessionTypes : [SESSION_SEARCH_TYPE];
+  const requestedSessionTypes = sessionTypes?.length ? sessionTypes : undefined;
 
   let response: MomenceSessionPageResponse;
   if (sessionFunctionUrl) {
@@ -842,9 +870,9 @@ async function searchMomenceSessionPage(
         sortBy: 'startsAt',
         sortOrder: 'DESC',
         includeCancelled: false,
-        types: requestedSessionTypes,
         startAfter: lookback.toISOString(),
         startBefore: lookahead.toISOString(),
+        ...(requestedSessionTypes ? { types: requestedSessionTypes } : {}),
       },
     });
   }

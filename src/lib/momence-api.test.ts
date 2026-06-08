@@ -326,7 +326,7 @@ describe('Momence session search', () => {
       }],
     }), { status: 200 })));
 
-    const sessions = await searchMomenceSessions('');
+    const sessions = await searchMomenceSessions('', { types: ['private'] });
 
     expect(sessions[0]).toMatchObject({
       id: '501',
@@ -338,8 +338,8 @@ describe('Momence session search', () => {
       method: 'POST',
       body: JSON.stringify({
         query: '',
-        pastDays: 180,
-        futureDays: 45,
+        pastDays: 3650,
+        futureDays: 0,
         pageSize: 40,
         includeCancelled: false,
         types: ['private'],
@@ -425,9 +425,11 @@ describe('Momence session search configuration', () => {
         sortBy: 'startsAt',
         sortOrder: 'DESC',
         includeCancelled: false,
-        types: ['private'],
+        startAfter: expect.any(String),
+        startBefore: expect.any(String),
       },
     });
+    expect(body.params.types).toBeUndefined();
     expect(body.body).toBeUndefined();
   });
 });

@@ -429,7 +429,7 @@ export const MomenceAutomationPanel: React.FC<Props> = ({ ticket }) => {
         {data.summary.ticketContextLines.length > 0 && (
           <InfoBlock title="Athena Context Lines" icon={<CheckCircle2 className="w-3.5 h-3.5" />}>
             <div className="space-y-1">
-              {data.summary.ticketContextLines.slice(0, 6).map((line) => (
+              {data.summary.ticketContextLines.slice(0, 10).map((line) => (
                 <div key={line} className="rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:bg-slate-950 dark:text-slate-300">
                   {line}
                 </div>

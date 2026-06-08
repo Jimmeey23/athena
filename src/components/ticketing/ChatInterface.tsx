@@ -10,6 +10,7 @@ import { useTickets } from './useTickets';
 import { useBackendAuth } from '@/contexts/BackendAuthContext';
 import {
   getMomenceMemberMemberships,
+  getMomenceSession,
   getMomenceSessionBookings,
   listMomenceHostMembershipOptions,
   loadMomenceSessionsProgressively,
@@ -2821,6 +2822,7 @@ const HOSTED_AUDIENCE_FIT_OPTIONS = [
   'Good fit with nurturing',
   'Mixed audience fit',
   'Low conversion fit',
+  'Proximity was an issue',
   'Unable to determine',
 ];
 
@@ -2858,12 +2860,11 @@ const HOSTED_SOCIAL_OPTIONS = [
 ];
 
 const HOSTED_FOLLOW_UP_PLAN_OPTIONS = [
-  'No follow-up needed',
-  'WhatsApp interested guests today',
-  'Call high-intent guests',
-  'Email intro package details',
-  'Schedule partner debrief',
-  'Escalate to sales lead',
+  'Definitely collaborate again',
+  'Maybe collaborate again',
+  'Needs further review',
+  'Do not collaborate again',
+  'Unable to determine',
 ];
 
 const HOSTED_CLASS_SESSION_TYPES = ['private'];
@@ -2898,6 +2899,10 @@ function sessionSummaryFromOption(session: MomenceSessionOption): HostedClassSes
     trainer: session.trainer,
     studio: session.studio,
     startsAt: session.startsAt,
+    bookingCount: session.bookingCount,
+    capacity: session.capacity ?? undefined,
+    waitlistBookingCount: session.waitlistBookingCount ?? undefined,
+    waitlistCapacity: session.waitlistCapacity ?? undefined,
   };
 }
 
@@ -2972,7 +2977,7 @@ const HostedClassTemplateForm: React.FC<{
   const hostedTemplateProgress = [
     { label: 'Session', value: selectedSession ? 'Selected' : 'Required', complete: Boolean(selectedSession) },
     { label: 'Member feedback', value: classFeedback.trim() ? 'Captured' : 'Required', complete: Boolean(classFeedback.trim()) },
-    { label: 'Follow-up', value: followUpPlan || 'Pending', complete: Boolean(followUpPlan) },
+    { label: 'Future collab', value: followUpPlan || 'Pending', complete: Boolean(followUpPlan) },
   ];
 
   const selectSession = async (session: MomenceSessionOption) => {
@@ -2988,6 +2993,16 @@ const HostedClassTemplateForm: React.FC<{
     setLoadingBookings(true);
     setBookingError(null);
     try {
+      const detailed = await getMomenceSession(session.id);
+      setSelectedSession({
+        ...summary,
+        bookingCount: detailed.bookingCount ?? session.bookingCount,
+        capacity: detailed.capacity ?? session.capacity,
+        waitlistBookingCount: detailed.waitlistBookingCount,
+        waitlistCapacity: detailed.waitlistCapacity,
+        trainer: detailed.teacher ? `${detailed.teacher.firstName || ''} ${detailed.teacher.lastName || ''}`.trim() || summary.trainer : summary.trainer,
+        studio: detailed.inPersonLocation?.name || summary.studio,
+      });
       const bookings = await getMomenceSessionBookings(session.id);
       setAttendees(bookings.map((booking) => ({
         bookingId: String(booking.id),
@@ -3106,6 +3121,8 @@ const HostedClassTemplateForm: React.FC<{
                   { label: 'Date', value: formatHostedSessionDateTime(selectedSession.startsAt) },
                   { label: 'Studio', value: selectedSession.studio || 'Studio not returned' },
                   { label: 'Instructor', value: selectedSession.trainer || 'Instructor not returned' },
+                  { label: 'Booked', value: selectedSession.capacity != null ? `${selectedSession.bookingCount || 0}/${selectedSession.capacity}` : `${selectedSession.bookingCount || 0} booked` },
+                  { label: 'Waitlist', value: selectedSession.waitlistBookingCount != null ? `${selectedSession.waitlistBookingCount}/${selectedSession.waitlistCapacity ?? 'unlimited'}` : 'Not returned' },
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
                     <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
@@ -3125,7 +3142,7 @@ const HostedClassTemplateForm: React.FC<{
               <ClipboardCheck className="h-4 w-4 text-blue-600" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <TemplateTextInput label="Partner / host" value={partnerName} onChange={setPartnerName} />
+              <TemplateTextInput label="Host name" value={partnerName} onChange={setPartnerName} />
               <TemplateSelect label="Partner type" value={partnerType} options={HOSTED_PARTNER_TYPE_OPTIONS} onChange={setPartnerType} />
               <TemplateSelect label="Attendance source" value={acquisitionSource} options={HOSTED_SOURCE_OPTIONS} onChange={setAcquisitionSource} />
               <TemplateSelect label="Audience fit" value={audienceFit} options={HOSTED_AUDIENCE_FIT_OPTIONS} onChange={setAudienceFit} />
@@ -3220,8 +3237,8 @@ const HostedClassTemplateForm: React.FC<{
               <TemplateSelect label="Conversion signal" value={conversionSummary} options={HOSTED_CONVERSION_OPTIONS} onChange={setConversionSummary} />
               <TemplateSelect label="Social opportunity" value={socialAmplification} options={HOSTED_SOCIAL_OPTIONS} onChange={setSocialAmplification} />
               <TemplateSelect label="Follow-up plan" value={followUpPlan} options={HOSTED_FOLLOW_UP_PLAN_OPTIONS} onChange={setFollowUpPlan} />
-              <TemplateTextarea label="Member feedback highlights" required value={classFeedback} onChange={setClassFeedback} />
-              <TemplateTextarea label="Additional context" value={otherFeedback} onChange={setOtherFeedback} />
+              <TemplateTextarea label="Overall class comments" required value={classFeedback} onChange={setClassFeedback} />
+              <TemplateTextarea label="Additional notes" value={otherFeedback} onChange={setOtherFeedback} />
             </div>
           </section>
         </div>
@@ -3296,6 +3313,27 @@ function suggestionsForTemplateTextField(label: string, value = ''): string[] {
   const current = value.toLowerCase();
   const hasSessionContext = /\b(class|session|trainer|instructor|member|late|start|impact)\b/.test(current);
   const hasLateSignal = /\b(late|delay|delayed|started late|punctual|tardy|behind schedule)\b/.test(current);
+  if (/host name/.test(normalized)) {
+    return [
+      'Partner / host name as listed in the collaboration brief.',
+      'Creator or brand name that introduced the audience.',
+      'Community partner name captured from the booking or invitation.',
+    ];
+  }
+  if (/overall class comments|attendee details|class details/.test(normalized)) {
+    return [
+      'Attendees responded positively and several asked about the next session.',
+      'The room was energetic, with a few guests asking about intro offers.',
+      'Late arrivals and travel distance were mentioned, but the host kept engagement high.',
+    ];
+  }
+  if (/additional notes/.test(normalized)) {
+    return [
+      'Partner asked for a follow-up on future Signature Partnership Experiences.',
+      'Team member noted a possible repeat collaboration if proximity is better.',
+      'No extra notes captured beyond the attendee comments and host feedback.',
+    ];
+  }
   if (/session|class|trainer|instructor/.test(normalized) && hasSessionContext) {
     return [
       'Exact Momence session ID or booking reference if available.',
@@ -3372,6 +3410,13 @@ function suggestionsForDetailField(field: DetailFormField, values: Record<string
       '"I was really happy with the session today — the instructor\'s energy was amazing."',
     ];
   }
+  if (id === 'entryDeniedReason') {
+    return [
+      'Entry was denied because the class had already started and the door policy had been enforced.',
+      'The member arrived after the grace period and was advised that late entry was not permitted.',
+      'Front desk turned the member away due to the late-arrival cutoff and class safety / flow rules.',
+    ];
+  }
   if (id === 'policyExplanation') {
     return [
       'Explained that our policy is to close the studio door 5 minutes after the session starts to protect the member experience.',
@@ -3398,6 +3443,20 @@ function suggestionsForDetailField(field: DetailFormField, values: Record<string
       'Member requested a class credit and a written apology from the studio manager.',
       'Member asked for a callback within 24 hours to confirm the resolution.',
       'Member requested the late-arrival policy be reviewed and communicated more clearly to members.',
+    ];
+  }
+  if (id === 'classCreditedOrRescheduled') {
+    return [
+      'Credited back to the member account.',
+      'Rescheduled to the next available session.',
+      'No credit or reschedule was completed yet.',
+    ];
+  }
+  if (id === 'escalationRequired') {
+    return [
+      'Yes - the member asked for manager review or follow-up.',
+      'No - the issue was handled at the front desk.',
+      'Unable to determine whether escalation is needed.',
     ];
   }
   if (id === 'reportedImpact' || id === 'membersUpset') {

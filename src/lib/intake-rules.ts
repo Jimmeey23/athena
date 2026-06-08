@@ -235,6 +235,7 @@ const FIELD_DEFINITIONS: Record<string, IntakeFieldDefinition> = {
   description: { id: 'description', label: 'Issue summary', type: 'textarea', required: true },
   memberName: { id: 'memberName', label: 'Member', type: 'text', required: true },
   memberContact: { id: 'memberContact', label: 'Member Contact', type: 'text' },
+  sessionId: { id: 'sessionId', label: 'Momence Session', type: 'text' },
   classType: { id: 'classType', label: 'Momence Class / Session', type: 'select', required: true },
   trainer: { id: 'trainer', label: 'Instructor', type: 'select', options: [...TRAINERS] },
   reportedTime: { id: 'reportedTime', label: 'Reported time', type: 'datetime-local', required: true },
@@ -1000,6 +1001,7 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
   if (requireAffectedClientSelection) {
     add('memberName', context.memberId || context.memberName);
     if (hasAffectedClassSignal(context, issueText)) {
+      add('sessionId', context.sessionId);
       add('classType', context.sessionId || context.classType);
       add('classImpactType', context.classImpactType);
       add('classImpactDetails', context.classImpactDetails);
@@ -1011,6 +1013,7 @@ export function getMissingIntakeFields(context: IntakeContext, options: MissingI
     /trainer punctuality issues/i.test(categoryPathText) ||
     hasTrainerLateSignal(issueText);
   if (trainerLateIssue) {
+    add('sessionId', context.sessionId);
     add('classType', context.sessionId || context.classType);
     add('trainer', context.trainer);
     add('classDateTime', context.classDateTime);
